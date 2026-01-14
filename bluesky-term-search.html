@@ -1,0 +1,1145 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bluesky Term Search</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #fff;
+            color: #333;
+            line-height: 1.5;
+        }
+
+        h1 {
+            margin-bottom: 8px;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 24px;
+        }
+
+        .auth-section {
+            background: #f0f7ff;
+            border: 1px solid #cce0ff;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 24px;
+        }
+
+        .auth-section.logged-in {
+            background: #e8f5e9;
+            border-color: #a5d6a7;
+        }
+
+        .auth-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .auth-title {
+            font-weight: 600;
+            font-size: 14px;
+            color: #1565c0;
+        }
+
+        .auth-section.logged-in .auth-title {
+            color: #2e7d32;
+        }
+
+        .auth-form {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .auth-form .form-group {
+            flex: 1;
+            min-width: 150px;
+        }
+
+        .auth-info {
+            font-size: 12px;
+            color: #666;
+            margin-top: 8px;
+        }
+
+        .auth-info a {
+            color: #0085ff;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .user-handle {
+            font-weight: 500;
+        }
+
+        .logout-btn {
+            background: #e57373;
+            padding: 6px 12px;
+            font-size: 14px;
+        }
+
+        .logout-btn:hover {
+            background: #ef5350;
+        }
+
+        .search-form {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-bottom: 24px;
+            padding: 16px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+
+        .form-row {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            flex: 1;
+            min-width: 200px;
+        }
+
+        .form-group.small {
+            flex: 0 0 120px;
+            min-width: 120px;
+        }
+
+        label {
+            font-size: 14px;
+            font-weight: 500;
+            color: #555;
+        }
+
+        input[type="text"],
+        input[type="password"],
+        input[type="number"] {
+            padding: 10px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 16px;
+        }
+
+        input[type="text"]:focus,
+        input[type="password"]:focus,
+        input[type="number"]:focus {
+            outline: none;
+            border-color: #0085ff;
+            box-shadow: 0 0 0 2px rgba(0, 133, 255, 0.1);
+        }
+
+        button {
+            padding: 10px 20px;
+            background: #0085ff;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background: #0066cc;
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .status {
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 16px;
+            display: none;
+        }
+
+        .status.loading {
+            background: #e3f2fd;
+            color: #1565c0;
+        }
+
+        .status.error {
+            background: #ffebee;
+            color: #c62828;
+        }
+
+        .status.info {
+            background: #f5f5f5;
+            color: #666;
+        }
+
+        .results-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .results-count {
+            font-weight: 500;
+        }
+
+        .post {
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 12px;
+            background: #fff;
+            transition: box-shadow 0.2s;
+        }
+
+        .post:hover {
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        }
+
+        .post-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .avatar {
+            width: 42px;
+            height: 42px;
+            border-radius: 50%;
+            object-fit: cover;
+            background: #e0e0e0;
+        }
+
+        .author-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .display-name {
+            font-weight: 600;
+            color: #333;
+            text-decoration: none;
+            display: block;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .display-name:hover {
+            text-decoration: underline;
+        }
+
+        .handle {
+            color: #888;
+            font-size: 14px;
+        }
+
+        .post-time {
+            color: #888;
+            font-size: 13px;
+        }
+
+        .post-text {
+            margin-bottom: 12px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .post-images {
+            display: grid;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .post-images.single {
+            grid-template-columns: 1fr;
+        }
+
+        .post-images.multiple {
+            grid-template-columns: repeat(2, 1fr);
+        }
+
+        .post-image {
+            width: 100%;
+            border-radius: 8px;
+            max-height: 300px;
+            object-fit: cover;
+        }
+
+        .post-stats {
+            display: flex;
+            gap: 20px;
+            color: #666;
+            font-size: 14px;
+        }
+
+        .stat {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .stat.likes {
+            color: #e91e63;
+            font-weight: 500;
+        }
+
+        .post-link {
+            display: inline-block;
+            margin-top: 10px;
+            color: #0085ff;
+            text-decoration: none;
+            font-size: 14px;
+        }
+
+        .post-link:hover {
+            text-decoration: underline;
+        }
+
+        .load-more {
+            display: block;
+            width: 100%;
+            padding: 12px;
+            margin-top: 16px;
+            background: #f5f5f5;
+            color: #333;
+            border: 1px solid #ddd;
+        }
+
+        .load-more:hover {
+            background: #eee;
+        }
+
+        .term-tag {
+            display: inline-block;
+            background: #e3f2fd;
+            color: #1565c0;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            margin-right: 4px;
+        }
+
+        .search-terms {
+            margin-bottom: 8px;
+        }
+
+        .highlight {
+            background: #fff59d;
+            padding: 0 2px;
+            border-radius: 2px;
+        }
+
+        .no-results {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        @media (max-width: 600px) {
+            body {
+                padding: 12px;
+            }
+
+            .form-row,
+            .auth-form {
+                flex-direction: column;
+            }
+
+            .form-group.small {
+                flex: 1;
+                min-width: 100%;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Bluesky Term Search</h1>
+    <p class="subtitle">Search posts from the last 24 hours, filtered by minimum likes</p>
+
+    <!-- Auth Section -->
+    <div id="authSection" class="auth-section">
+        <div class="auth-header">
+            <span class="auth-title">Login Required</span>
+        </div>
+        <div id="loginForm">
+            <div class="auth-form">
+                <div class="form-group">
+                    <label for="handle">Bluesky Handle</label>
+                    <input type="text" id="handle" placeholder="username.bsky.social" />
+                </div>
+                <div class="form-group">
+                    <label for="appPassword">App Password</label>
+                    <input type="password" id="appPassword" placeholder="xxxx-xxxx-xxxx-xxxx" />
+                </div>
+                <div class="form-group" style="justify-content: flex-end;">
+                    <button type="button" id="loginBtn">Login</button>
+                </div>
+            </div>
+            <p class="auth-info">
+                The search API requires authentication. Use an <a href="https://bsky.app/settings/app-passwords"
+                    target="_blank" rel="noopener">App Password</a> (not your main password).
+                Your credentials are only sent to Bluesky and stored locally in your browser.
+            </p>
+        </div>
+        <div id="loggedInView" class="hidden">
+            <div class="user-info">
+                <span>Logged in as <span id="userHandle" class="user-handle"></span></span>
+                <button type="button" id="logoutBtn" class="logout-btn">Logout</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Search Form -->
+    <div class="search-form">
+        <div class="form-row">
+            <div class="form-group">
+                <label for="terms">Search Terms (comma-separated)</label>
+                <input type="text" id="terms" placeholder="AI, machine learning, LLM" />
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group small">
+                <label for="minLikes">Min. Likes</label>
+                <input type="number" id="minLikes" value="10" min="0" />
+            </div>
+            <div class="form-group">
+                <button type="button" id="searchBtn" disabled>Search</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="status" class="status"></div>
+    <div id="results"></div>
+
+    <script>
+        const PUBLIC_API = 'https://public.api.bsky.app/xrpc';
+        const BSKY_SERVICE = 'https://bsky.social/xrpc';
+
+        // State
+        let allPosts = [];
+        let currentCursors = {};
+        let searchTerms = [];
+        let minLikes = 10;
+        let isLoading = false;
+        let session = null;
+
+        // DOM Elements
+        const authSection = document.getElementById('authSection');
+        const loginForm = document.getElementById('loginForm');
+        const loggedInView = document.getElementById('loggedInView');
+        const handleInput = document.getElementById('handle');
+        const appPasswordInput = document.getElementById('appPassword');
+        const loginBtn = document.getElementById('loginBtn');
+        const logoutBtn = document.getElementById('logoutBtn');
+        const userHandleSpan = document.getElementById('userHandle');
+        const termsInput = document.getElementById('terms');
+        const minLikesInput = document.getElementById('minLikes');
+        const searchBtn = document.getElementById('searchBtn');
+        const statusDiv = document.getElementById('status');
+        const resultsDiv = document.getElementById('results');
+
+        // Safe text content setter (prevents XSS)
+        function setText(element, text) {
+            element.textContent = text;
+        }
+
+        // Validate URL is from allowed domains
+        function isValidBskyUrl(url) {
+            if (!url) return false;
+            try {
+                const parsed = new URL(url);
+                return parsed.protocol === 'https:' &&
+                    (parsed.hostname === 'bsky.app' ||
+                        parsed.hostname.endsWith('.bsky.app') ||
+                        parsed.hostname === 'cdn.bsky.app' ||
+                        parsed.hostname.endsWith('.cdn.bsky.app'));
+            } catch {
+                return false;
+            }
+        }
+
+        // Session management
+        function saveSession(sessionData) {
+            session = sessionData;
+            try {
+                localStorage.setItem('bsky_session', JSON.stringify(sessionData));
+            } catch (e) {
+                console.warn('Could not save session to localStorage');
+            }
+            updateAuthUI();
+        }
+
+        function loadSession() {
+            try {
+                const saved = localStorage.getItem('bsky_session');
+                if (saved) {
+                    session = JSON.parse(saved);
+                    updateAuthUI();
+                }
+            } catch (e) {
+                console.warn('Could not load session from localStorage');
+            }
+        }
+
+        function clearSession() {
+            session = null;
+            try {
+                localStorage.removeItem('bsky_session');
+            } catch (e) { }
+            updateAuthUI();
+        }
+
+        function updateAuthUI() {
+            if (session) {
+                authSection.classList.add('logged-in');
+                loginForm.classList.add('hidden');
+                loggedInView.classList.remove('hidden');
+                userHandleSpan.textContent = session.handle;
+                authSection.querySelector('.auth-title').textContent = 'Logged In';
+                searchBtn.disabled = false;
+            } else {
+                authSection.classList.remove('logged-in');
+                loginForm.classList.remove('hidden');
+                loggedInView.classList.add('hidden');
+                authSection.querySelector('.auth-title').textContent = 'Login Required';
+                searchBtn.disabled = true;
+            }
+        }
+
+        // Login function
+        async function login() {
+            let handle = handleInput.value.trim();
+            const password = appPasswordInput.value.trim();
+
+            // Strip @ prefix if user included it
+            if (handle.startsWith('@')) {
+                handle = handle.substring(1);
+            }
+
+            if (!handle || !password) {
+                showStatus('Please enter your handle and app password.', 'error');
+                return;
+            }
+
+            loginBtn.disabled = true;
+            showStatus('Logging in...', 'loading');
+
+            try {
+                const response = await fetch(`${BSKY_SERVICE}/com.atproto.server.createSession`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        identifier: handle,
+                        password: password
+                    })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json().catch(() => ({}));
+                    throw new Error(error.message || `Login failed: ${response.status}`);
+                }
+
+                const sessionData = await response.json();
+                saveSession(sessionData);
+                appPasswordInput.value = ''; // Clear password
+                hideStatus();
+                showStatus('Logged in successfully!', 'info');
+                setTimeout(hideStatus, 2000);
+
+            } catch (error) {
+                console.error('Login error:', error);
+                showStatus(`Login failed: ${error.message}`, 'error');
+            } finally {
+                loginBtn.disabled = false;
+            }
+        }
+
+        // Logout function
+        function logout() {
+            clearSession();
+            allPosts = [];
+            resultsDiv.textContent = '';
+            hideStatus();
+        }
+
+        // Initialize from URL params
+        function initFromURL() {
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('terms')) {
+                termsInput.value = params.get('terms');
+            }
+            if (params.get('minLikes')) {
+                minLikesInput.value = params.get('minLikes');
+            }
+        }
+
+        // Update URL with current search params
+        function updateURL() {
+            const params = new URLSearchParams();
+            if (termsInput.value.trim()) {
+                params.set('terms', termsInput.value.trim());
+            }
+            if (minLikesInput.value) {
+                params.set('minLikes', minLikesInput.value);
+            }
+            const newURL = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
+            window.history.replaceState({}, '', newURL);
+        }
+
+        // Show status message
+        function showStatus(message, type = 'info') {
+            statusDiv.className = 'status ' + type;
+            setText(statusDiv, message);
+            statusDiv.style.display = 'block';
+        }
+
+        function hideStatus() {
+            statusDiv.style.display = 'none';
+        }
+
+        // Search posts for a single term (authenticated)
+        async function searchTerm(term, cursor = null) {
+            if (!session) {
+                throw new Error('Not logged in');
+            }
+
+            const params = new URLSearchParams({
+                q: term,
+                sort: 'top',
+                limit: '100',
+                lang: 'en'
+            });
+
+            if (cursor) {
+                params.set('cursor', cursor);
+            }
+
+            const response = await fetch(`${BSKY_SERVICE}/app.bsky.feed.searchPosts?${params}`, {
+                headers: {
+                    'Authorization': `Bearer ${session.accessJwt}`
+                }
+            });
+
+            if (response.status === 401) {
+                // Token expired, try to refresh
+                const refreshed = await refreshSession();
+                if (refreshed) {
+                    return searchTerm(term, cursor);
+                }
+                throw new Error('Session expired. Please login again.');
+            }
+
+            if (!response.ok) {
+                let errorMsg = `Search failed for "${term}": ${response.status}`;
+                try {
+                    const errorData = await response.json();
+                    if (errorData.message) errorMsg += ` - ${errorData.message}`;
+                } catch (e) { }
+                throw new Error(errorMsg);
+            }
+
+            return response.json();
+        }
+
+        // Refresh session token
+        async function refreshSession() {
+            if (!session?.refreshJwt) return false;
+
+            try {
+                const response = await fetch(`${BSKY_SERVICE}/com.atproto.server.refreshSession`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${session.refreshJwt}`
+                    }
+                });
+
+                if (response.ok) {
+                    const newSession = await response.json();
+                    saveSession(newSession);
+                    return true;
+                }
+            } catch (e) {
+                console.error('Failed to refresh session:', e);
+            }
+
+            clearSession();
+            return false;
+        }
+
+        // Fetch all posts for a term (with pagination)
+        async function fetchAllPostsForTerm(term, maxPages = 5) {
+            let allTermPosts = [];
+            let cursor = null;
+            let pages = 0;
+
+            while (pages < maxPages) {
+                const data = await searchTerm(term, cursor);
+
+                if (data.posts && data.posts.length > 0) {
+                    const taggedPosts = data.posts.map(post => ({
+                        ...post,
+                        matchedTerm: term
+                    }));
+                    allTermPosts = allTermPosts.concat(taggedPosts);
+                }
+
+                if (!data.cursor) break;
+                cursor = data.cursor;
+                pages++;
+            }
+
+            currentCursors[term] = cursor;
+            return allTermPosts;
+        }
+
+        // Deduplicate posts by URI
+        function deduplicatePosts(posts) {
+            const seen = new Map();
+
+            for (const post of posts) {
+                const uri = post.uri;
+                if (!seen.has(uri)) {
+                    seen.set(uri, post);
+                } else {
+                    const existing = seen.get(uri);
+                    if (!existing.matchedTerms) {
+                        existing.matchedTerms = [existing.matchedTerm];
+                    }
+                    if (!existing.matchedTerms.includes(post.matchedTerm)) {
+                        existing.matchedTerms.push(post.matchedTerm);
+                    }
+                }
+            }
+
+            return Array.from(seen.values()).map(post => {
+                if (!post.matchedTerms) {
+                    post.matchedTerms = [post.matchedTerm];
+                }
+                return post;
+            });
+        }
+
+        // Filter posts by minimum likes
+        function filterByLikes(posts, minLikes) {
+            return posts.filter(post => (post.likeCount || 0) >= minLikes);
+        }
+
+        // Filter posts by date (last 24 hours)
+        function filterByDate(posts) {
+            const cutoff = new Date();
+            cutoff.setHours(cutoff.getHours() - 24);
+            return posts.filter(post => {
+                const postDate = new Date(post.indexedAt);
+                return postDate >= cutoff;
+            });
+        }
+
+        // Sort posts by likes (high to low)
+        function sortByLikes(posts) {
+            return posts.sort((a, b) => (b.likeCount || 0) - (a.likeCount || 0));
+        }
+
+        // Format relative time
+        function formatRelativeTime(dateString) {
+            const date = new Date(dateString);
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMs / 3600000);
+
+            if (diffMins < 1) return 'just now';
+            if (diffMins < 60) return `${diffMins}m ago`;
+            if (diffHours < 24) return `${diffHours}h ago`;
+            return date.toLocaleDateString();
+        }
+
+        // Extract post URL from URI
+        function getPostUrl(post) {
+            const parts = post.uri.split('/');
+            const postId = parts[parts.length - 1];
+            const handle = post.author.handle;
+            if (!/^[a-zA-Z0-9._-]+$/.test(handle) || !/^[a-zA-Z0-9]+$/.test(postId)) {
+                return null;
+            }
+            return `https://bsky.app/profile/${encodeURIComponent(handle)}/post/${encodeURIComponent(postId)}`;
+        }
+
+        // Create text with highlighted search terms using DOM methods (safe)
+        function createHighlightedText(text, terms) {
+            const fragment = document.createDocumentFragment();
+            if (!text) return fragment;
+
+            const escapedTerms = terms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+            const regex = new RegExp(`(${escapedTerms.join('|')})`, 'gi');
+
+            const parts = text.split(regex);
+
+            parts.forEach(part => {
+                if (terms.some(term => part.toLowerCase() === term.toLowerCase())) {
+                    const span = document.createElement('span');
+                    span.className = 'highlight';
+                    span.textContent = part;
+                    fragment.appendChild(span);
+                } else {
+                    fragment.appendChild(document.createTextNode(part));
+                }
+            });
+
+            return fragment;
+        }
+
+        // Create a post element using safe DOM methods
+        function createPostElement(post) {
+            const postUrl = getPostUrl(post);
+            const handle = post.author.handle;
+            const displayName = post.author.displayName || handle;
+            const text = post.record?.text || '';
+
+            const postDiv = document.createElement('div');
+            postDiv.className = 'post';
+
+            // Search terms tags
+            const termsDiv = document.createElement('div');
+            termsDiv.className = 'search-terms';
+            post.matchedTerms.forEach(term => {
+                const tag = document.createElement('span');
+                tag.className = 'term-tag';
+                tag.textContent = term;
+                termsDiv.appendChild(tag);
+            });
+            postDiv.appendChild(termsDiv);
+
+            // Header
+            const header = document.createElement('div');
+            header.className = 'post-header';
+
+            // Avatar
+            if (post.author.avatar && isValidBskyUrl(post.author.avatar)) {
+                const avatar = document.createElement('img');
+                avatar.className = 'avatar';
+                avatar.src = post.author.avatar;
+                avatar.alt = '';
+                avatar.loading = 'lazy';
+                header.appendChild(avatar);
+            } else {
+                const avatarPlaceholder = document.createElement('div');
+                avatarPlaceholder.className = 'avatar';
+                header.appendChild(avatarPlaceholder);
+            }
+
+            // Author info
+            const authorInfo = document.createElement('div');
+            authorInfo.className = 'author-info';
+
+            const authorUrl = `https://bsky.app/profile/${encodeURIComponent(handle)}`;
+            const nameLink = document.createElement('a');
+            nameLink.className = 'display-name';
+            nameLink.href = authorUrl;
+            nameLink.target = '_blank';
+            nameLink.rel = 'noopener noreferrer';
+            nameLink.textContent = displayName;
+            authorInfo.appendChild(nameLink);
+
+            const handleSpan = document.createElement('span');
+            handleSpan.className = 'handle';
+            handleSpan.textContent = `@${handle}`;
+            authorInfo.appendChild(handleSpan);
+
+            header.appendChild(authorInfo);
+
+            // Time
+            const timeSpan = document.createElement('span');
+            timeSpan.className = 'post-time';
+            timeSpan.textContent = formatRelativeTime(post.indexedAt);
+            header.appendChild(timeSpan);
+
+            postDiv.appendChild(header);
+
+            // Post text with highlights
+            const textDiv = document.createElement('div');
+            textDiv.className = 'post-text';
+            textDiv.appendChild(createHighlightedText(text, searchTerms));
+            postDiv.appendChild(textDiv);
+
+            // Images
+            if (post.embed?.$type === 'app.bsky.embed.images#view' && post.embed.images) {
+                const imagesDiv = document.createElement('div');
+                imagesDiv.className = 'post-images ' + (post.embed.images.length === 1 ? 'single' : 'multiple');
+
+                post.embed.images.forEach(img => {
+                    if (img.thumb && isValidBskyUrl(img.thumb)) {
+                        const imgEl = document.createElement('img');
+                        imgEl.className = 'post-image';
+                        imgEl.src = img.thumb;
+                        imgEl.alt = img.alt || '';
+                        imgEl.loading = 'lazy';
+                        imagesDiv.appendChild(imgEl);
+                    }
+                });
+
+                if (imagesDiv.children.length > 0) {
+                    postDiv.appendChild(imagesDiv);
+                }
+            }
+
+            // Stats
+            const statsDiv = document.createElement('div');
+            statsDiv.className = 'post-stats';
+
+            const likeStat = document.createElement('span');
+            likeStat.className = 'stat likes';
+            likeStat.textContent = `♥ ${post.likeCount || 0}`;
+            statsDiv.appendChild(likeStat);
+
+            const repostStat = document.createElement('span');
+            repostStat.className = 'stat';
+            repostStat.textContent = `↻ ${post.repostCount || 0}`;
+            statsDiv.appendChild(repostStat);
+
+            const replyStat = document.createElement('span');
+            replyStat.className = 'stat';
+            replyStat.textContent = `💬 ${post.replyCount || 0}`;
+            statsDiv.appendChild(replyStat);
+
+            postDiv.appendChild(statsDiv);
+
+            // Link to post
+            if (postUrl) {
+                const link = document.createElement('a');
+                link.className = 'post-link';
+                link.href = postUrl;
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                link.textContent = 'View on Bluesky →';
+                postDiv.appendChild(link);
+            }
+
+            return postDiv;
+        }
+
+        // Render all results using safe DOM methods
+        function renderResults() {
+            resultsDiv.textContent = '';
+
+            if (allPosts.length === 0) {
+                const noResults = document.createElement('div');
+                noResults.className = 'no-results';
+
+                const p1 = document.createElement('p');
+                p1.textContent = 'No posts found matching your criteria.';
+                noResults.appendChild(p1);
+
+                const p2 = document.createElement('p');
+                p2.textContent = 'Try different search terms or lower the minimum likes.';
+                noResults.appendChild(p2);
+
+                resultsDiv.appendChild(noResults);
+                return;
+            }
+
+            // Header
+            const headerDiv = document.createElement('div');
+            headerDiv.className = 'results-header';
+
+            const countSpan = document.createElement('span');
+            countSpan.className = 'results-count';
+            countSpan.textContent = `${allPosts.length} post${allPosts.length !== 1 ? 's' : ''} found`;
+            headerDiv.appendChild(countSpan);
+
+            const sortSpan = document.createElement('span');
+            sortSpan.textContent = 'Sorted by likes (high to low)';
+            headerDiv.appendChild(sortSpan);
+
+            resultsDiv.appendChild(headerDiv);
+
+            // Posts
+            allPosts.forEach(post => {
+                resultsDiv.appendChild(createPostElement(post));
+            });
+
+            // Load more button
+            const hasMoreResults = Object.values(currentCursors).some(cursor => cursor !== null);
+            if (hasMoreResults) {
+                const loadMoreBtn = document.createElement('button');
+                loadMoreBtn.className = 'load-more';
+                loadMoreBtn.id = 'loadMoreBtn';
+                loadMoreBtn.textContent = 'Load More Results';
+                loadMoreBtn.addEventListener('click', loadMore);
+                resultsDiv.appendChild(loadMoreBtn);
+            }
+        }
+
+        // Main search function
+        async function performSearch() {
+            if (!session) {
+                showStatus('Please login first.', 'error');
+                return;
+            }
+
+            const termsValue = termsInput.value.trim();
+            if (!termsValue) {
+                showStatus('Please enter at least one search term.', 'error');
+                return;
+            }
+
+            searchTerms = termsValue.split(',').map(t => t.trim()).filter(t => t.length > 0);
+            minLikes = parseInt(minLikesInput.value) || 0;
+
+            if (searchTerms.length === 0) {
+                showStatus('Please enter at least one search term.', 'error');
+                return;
+            }
+
+            isLoading = true;
+            searchBtn.disabled = true;
+            allPosts = [];
+            currentCursors = {};
+            resultsDiv.textContent = '';
+
+            updateURL();
+
+            try {
+                showStatus(`Searching for: ${searchTerms.join(', ')}...`, 'loading');
+
+                const promises = searchTerms.map(term => fetchAllPostsForTerm(term));
+                const results = await Promise.all(promises);
+
+                let combinedPosts = results.flat();
+                combinedPosts = deduplicatePosts(combinedPosts);
+                combinedPosts = filterByDate(combinedPosts);
+                combinedPosts = filterByLikes(combinedPosts, minLikes);
+                allPosts = sortByLikes(combinedPosts);
+
+                hideStatus();
+                renderResults();
+
+            } catch (error) {
+                console.error('Search error:', error);
+                showStatus(`Error: ${error.message}`, 'error');
+            } finally {
+                isLoading = false;
+                searchBtn.disabled = !session;
+            }
+        }
+
+        // Load more results
+        async function loadMore() {
+            if (isLoading) return;
+
+            isLoading = true;
+            const loadMoreBtn = document.getElementById('loadMoreBtn');
+            if (loadMoreBtn) {
+                loadMoreBtn.disabled = true;
+                loadMoreBtn.textContent = 'Loading...';
+            }
+
+            try {
+                const promises = searchTerms
+                    .filter(term => currentCursors[term])
+                    .map(async term => {
+                        const data = await searchTerm(term, currentCursors[term]);
+                        currentCursors[term] = data.cursor || null;
+
+                        if (data.posts && data.posts.length > 0) {
+                            return data.posts.map(post => ({
+                                ...post,
+                                matchedTerm: term
+                            }));
+                        }
+                        return [];
+                    });
+
+                const results = await Promise.all(promises);
+                let newPosts = results.flat();
+
+                if (newPosts.length > 0) {
+                    let combined = [...allPosts, ...newPosts];
+                    combined = deduplicatePosts(combined);
+                    combined = filterByDate(combined);
+                    combined = filterByLikes(combined, minLikes);
+                    allPosts = sortByLikes(combined);
+                    renderResults();
+                } else {
+                    if (loadMoreBtn) {
+                        loadMoreBtn.remove();
+                    }
+                }
+
+            } catch (error) {
+                console.error('Load more error:', error);
+                showStatus(`Error loading more: ${error.message}`, 'error');
+            } finally {
+                isLoading = false;
+            }
+        }
+
+        // Event listeners
+        loginBtn.addEventListener('click', login);
+        logoutBtn.addEventListener('click', logout);
+        searchBtn.addEventListener('click', performSearch);
+
+        handleInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                appPasswordInput.focus();
+            }
+        });
+
+        appPasswordInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                login();
+            }
+        });
+
+        termsInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                performSearch();
+            }
+        });
+
+        minLikesInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                performSearch();
+            }
+        });
+
+        // Initialize
+        loadSession();
+        initFromURL();
+    </script>
+</body>
+
+</html>
