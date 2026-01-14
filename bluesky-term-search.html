@@ -10,6 +10,17 @@
             box-sizing: border-box;
         }
 
+        :root {
+            --quote-depth-1: hsl(200, 70%, 45%);
+            --quote-depth-2: hsl(30, 80%, 50%);
+            --quote-depth-3: hsl(120, 60%, 40%);
+            --quote-depth-4: hsl(0, 70%, 50%);
+            --quote-depth-5: hsl(280, 60%, 50%);
+            --quote-depth-6: hsl(20, 60%, 40%);
+            --quote-depth-7: hsl(330, 60%, 50%);
+            --quote-depth-8: hsl(0, 0%, 40%);
+        }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             max-width: 800px;
@@ -362,6 +373,194 @@
             color: #666;
         }
 
+        .quote-section {
+            margin-top: 32px;
+            padding-top: 8px;
+            border-top: 1px solid #eee;
+        }
+
+        .quote-section h2 {
+            margin-bottom: 6px;
+        }
+
+        .quote-subtitle {
+            margin-bottom: 16px;
+        }
+
+        .quote-form {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-bottom: 16px;
+            padding: 16px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+
+        .quote-tabs {
+            display: none;
+            gap: 8px;
+            margin-bottom: 16px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .quote-tab {
+            background: none;
+            border: none;
+            padding: 8px 12px;
+            font-size: 14px;
+            cursor: pointer;
+            color: #666;
+            border-bottom: 2px solid transparent;
+        }
+
+        .quote-tab:hover {
+            color: #333;
+            background: none;
+        }
+
+        .quote-tab.active {
+            color: #0085ff;
+            border-bottom-color: #0085ff;
+            font-weight: 600;
+        }
+
+        .quote-original {
+            border: 1px solid #cce0ff;
+            background: #f0f7ff;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+
+        .quote-original .label {
+            font-size: 12px;
+            text-transform: uppercase;
+            color: #666;
+            margin-bottom: 6px;
+        }
+
+        .quote-count {
+            margin-bottom: 12px;
+            color: #666;
+            font-size: 14px;
+        }
+
+        .quote-post {
+            position: relative;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 14px 16px;
+            margin-bottom: 12px;
+            background: #fff;
+        }
+
+        .quote-post::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 0;
+            width: 4px;
+            background-color: var(--quote-stripe, transparent);
+            border-top-left-radius: 8px;
+            border-bottom-left-radius: 8px;
+        }
+
+        .quote-post.depth-1 {
+            --quote-stripe: var(--quote-depth-1);
+        }
+
+        .quote-post.depth-2 {
+            --quote-stripe: var(--quote-depth-2);
+        }
+
+        .quote-post.depth-3 {
+            --quote-stripe: var(--quote-depth-3);
+        }
+
+        .quote-post.depth-4 {
+            --quote-stripe: var(--quote-depth-4);
+        }
+
+        .quote-post.depth-5 {
+            --quote-stripe: var(--quote-depth-5);
+        }
+
+        .quote-post.depth-6 {
+            --quote-stripe: var(--quote-depth-6);
+        }
+
+        .quote-post.depth-7 {
+            --quote-stripe: var(--quote-depth-7);
+        }
+
+        .quote-post.depth-8 {
+            --quote-stripe: var(--quote-depth-8);
+        }
+
+        .quote-author {
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .quote-meta {
+            color: #666;
+            font-size: 13px;
+            margin-bottom: 8px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .quote-meta a {
+            color: #0085ff;
+            text-decoration: none;
+            font-size: 13px;
+        }
+
+        .quote-meta a:hover {
+            text-decoration: underline;
+        }
+
+        .quote-text {
+            white-space: pre-wrap;
+            margin-bottom: 10px;
+        }
+
+        .quote-stats {
+            display: flex;
+            gap: 16px;
+            color: #666;
+            font-size: 13px;
+        }
+
+        .quote-stat {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .quote-stat.likes {
+            color: #e91e63;
+            font-weight: 500;
+        }
+
+        .quote-stat.reposts {
+            color: #17bf63;
+        }
+
+        .quote-stat.replies {
+            color: #1da1f2;
+        }
+
+        .no-quotes {
+            text-align: center;
+            padding: 24px;
+            color: #666;
+        }
+
         .hidden {
             display: none !important;
         }
@@ -379,6 +578,10 @@
             .form-group.small {
                 flex: 1;
                 min-width: 100%;
+            }
+
+            .quote-tabs {
+                flex-wrap: wrap;
             }
         }
     </style>
@@ -426,7 +629,7 @@
         <div class="form-row">
             <div class="form-group">
                 <label for="terms">Search Terms (comma-separated)</label>
-                <input type="text" id="terms" placeholder="AI, machine learning, LLM" />
+                <input type="text" id="terms" placeholder="Enter search terms" />
             </div>
         </div>
         <div class="form-row">
@@ -443,6 +646,34 @@
     <div id="status" class="status"></div>
     <div id="results"></div>
 
+    <section class="quote-section" id="quoteSection">
+        <h2>Quote Finder</h2>
+        <p class="subtitle quote-subtitle">Find all quotes of a Bluesky post</p>
+
+        <form id="quoteForm" class="quote-form">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="postUrl">Bluesky Post URL</label>
+                    <input type="text" id="postUrl" placeholder="https://bsky.app/profile/handle/post/..." required />
+                </div>
+                <div class="form-group small">
+                    <label>&nbsp;</label>
+                    <button type="submit" id="quoteSearchBtn">Find Quotes</button>
+                </div>
+            </div>
+        </form>
+
+        <div id="quoteStatus" class="status"></div>
+        <div id="quoteTabs" class="quote-tabs">
+            <button type="button" class="quote-tab active" data-sort="likes">Most Likes</button>
+            <button type="button" class="quote-tab" data-sort="recent">Most Recent</button>
+            <button type="button" class="quote-tab" data-sort="oldest">Oldest First</button>
+        </div>
+        <div id="quoteOriginal"></div>
+        <div id="quoteCount" class="quote-count"></div>
+        <div id="quoteResults"></div>
+    </section>
+
     <script>
         const PUBLIC_API = 'https://public.api.bsky.app/xrpc';
         const BSKY_SERVICE = 'https://bsky.social/xrpc';
@@ -454,6 +685,9 @@
         let minLikes = 10;
         let isLoading = false;
         let session = null;
+        let allQuotes = [];
+        let quoteSort = 'likes';
+        let isQuoteLoading = false;
 
         // DOM Elements
         const authSection = document.getElementById('authSection');
@@ -469,6 +703,14 @@
         const searchBtn = document.getElementById('searchBtn');
         const statusDiv = document.getElementById('status');
         const resultsDiv = document.getElementById('results');
+        const quoteForm = document.getElementById('quoteForm');
+        const postUrlInput = document.getElementById('postUrl');
+        const quoteSearchBtn = document.getElementById('quoteSearchBtn');
+        const quoteStatusDiv = document.getElementById('quoteStatus');
+        const quoteTabs = document.getElementById('quoteTabs');
+        const quoteOriginalDiv = document.getElementById('quoteOriginal');
+        const quoteCountDiv = document.getElementById('quoteCount');
+        const quoteResultsDiv = document.getElementById('quoteResults');
 
         // Safe text content setter (prevents XSS)
         function setText(element, text) {
@@ -596,6 +838,44 @@
             hideStatus();
         }
 
+        function updateURLWithParams(params) {
+            const newURL = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
+            window.history.replaceState({}, '', newURL);
+        }
+
+        function setQueryParam(params, key, value) {
+            if (value) {
+                params.set(key, value);
+            } else {
+                params.delete(key);
+            }
+        }
+
+        function updateSearchURL() {
+            const params = new URLSearchParams(window.location.search);
+            setQueryParam(params, 'terms', termsInput.value.trim());
+            setQueryParam(params, 'minLikes', minLikesInput.value);
+            updateURLWithParams(params);
+        }
+
+        function updateQuoteURL() {
+            const params = new URLSearchParams(window.location.search);
+            const postValue = postUrlInput.value.trim();
+            setQueryParam(params, 'post', postValue);
+            if (postValue && quoteSort !== 'likes') {
+                params.set('sort', quoteSort);
+            } else {
+                params.delete('sort');
+            }
+            updateURLWithParams(params);
+        }
+
+        function updateQuoteTabs() {
+            quoteTabs.querySelectorAll('.quote-tab').forEach(tab => {
+                tab.classList.toggle('active', tab.dataset.sort === quoteSort);
+            });
+        }
+
         // Initialize from URL params
         function initFromURL() {
             const params = new URLSearchParams(window.location.search);
@@ -605,19 +885,17 @@
             if (params.get('minLikes')) {
                 minLikesInput.value = params.get('minLikes');
             }
-        }
 
-        // Update URL with current search params
-        function updateURL() {
-            const params = new URLSearchParams();
-            if (termsInput.value.trim()) {
-                params.set('terms', termsInput.value.trim());
+            const postParam = params.get('post');
+            const sortParam = params.get('sort');
+            if (sortParam && ['likes', 'recent', 'oldest'].includes(sortParam)) {
+                quoteSort = sortParam;
+                updateQuoteTabs();
             }
-            if (minLikesInput.value) {
-                params.set('minLikes', minLikesInput.value);
+            if (postParam) {
+                postUrlInput.value = postParam;
+                performQuoteSearch();
             }
-            const newURL = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
-            window.history.replaceState({}, '', newURL);
         }
 
         // Show status message
@@ -629,6 +907,16 @@
 
         function hideStatus() {
             statusDiv.style.display = 'none';
+        }
+
+        function showQuoteStatus(message, type = 'info') {
+            quoteStatusDiv.className = 'status ' + type;
+            setText(quoteStatusDiv, message);
+            quoteStatusDiv.style.display = 'block';
+        }
+
+        function hideQuoteStatus() {
+            quoteStatusDiv.style.display = 'none';
         }
 
         // Search posts for a single term (authenticated)
@@ -796,6 +1084,308 @@
                 return null;
             }
             return `https://bsky.app/profile/${encodeURIComponent(handle)}/post/${encodeURIComponent(postId)}`;
+        }
+
+        function formatDateTime(dateString) {
+            if (!dateString) return '';
+            const date = new Date(dateString);
+            if (Number.isNaN(date.getTime())) return '';
+            return date.toLocaleString();
+        }
+
+        function getPostTimestamp(post) {
+            const candidate = post.record?.createdAt || post.indexedAt;
+            const time = new Date(candidate).getTime();
+            return Number.isNaN(time) ? 0 : time;
+        }
+
+        function parseBlueskyPostUrl(urlString) {
+            let parsedUrl;
+            try {
+                parsedUrl = new URL(urlString);
+            } catch (e) {
+                throw new Error('Please enter a valid URL.');
+            }
+
+            if (parsedUrl.protocol !== 'https:' || parsedUrl.hostname !== 'bsky.app') {
+                throw new Error('URL must be from https://bsky.app');
+            }
+
+            const parts = parsedUrl.pathname.split('/').filter(Boolean);
+            if (parts.length < 4 || parts[0] !== 'profile' || parts[2] !== 'post') {
+                throw new Error('Use https://bsky.app/profile/{handle}/post/{postId}');
+            }
+
+            const rawHandle = parts[1];
+            const postId = parts[3];
+            if (!rawHandle || !postId) {
+                throw new Error('URL is missing a handle or post ID.');
+            }
+
+            const actor = rawHandle.startsWith('did:')
+                ? rawHandle
+                : (rawHandle.includes('.') ? rawHandle : `${rawHandle}.bsky.social`);
+            return { actor, postId, rawHandle };
+        }
+
+        async function fetchDid(actor) {
+            const response = await fetch(
+                `${PUBLIC_API}/app.bsky.actor.getProfile?actor=${encodeURIComponent(actor)}`
+            );
+            if (!response.ok) {
+                throw new Error(`Profile fetch failed: ${response.status}`);
+            }
+            const data = await response.json();
+            const did = data.did || data.profile?.did;
+            if (!did) {
+                throw new Error('Could not resolve DID for that handle.');
+            }
+            return did;
+        }
+
+        async function fetchOriginalPost(atUri) {
+            const response = await fetch(
+                `${PUBLIC_API}/app.bsky.feed.getPosts?uris=${encodeURIComponent(atUri)}`
+            );
+            if (!response.ok) {
+                throw new Error(`Original post fetch failed: ${response.status}`);
+            }
+            const data = await response.json();
+            if (!data.posts || data.posts.length === 0) {
+                throw new Error('Post not found.');
+            }
+            return data.posts[0];
+        }
+
+        async function fetchQuotes(atUri) {
+            const quotes = [];
+            let cursor = null;
+            const seenCursors = new Set();
+
+            do {
+                let url = `${PUBLIC_API}/app.bsky.feed.getQuotes?uri=${encodeURIComponent(atUri)}&limit=100`;
+                if (cursor) {
+                    url += `&cursor=${encodeURIComponent(cursor)}`;
+                }
+
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`Quotes fetch failed: ${response.status}`);
+                }
+                const data = await response.json();
+                if (Array.isArray(data.posts)) {
+                    quotes.push(...data.posts);
+                }
+
+                cursor = data.cursor || null;
+                if (cursor) {
+                    if (seenCursors.has(cursor)) {
+                        cursor = null;
+                    } else {
+                        seenCursors.add(cursor);
+                    }
+                }
+            } while (cursor);
+
+            return quotes;
+        }
+
+        function sortQuotes(quotes, sortMode) {
+            const sorted = [...quotes];
+            switch (sortMode) {
+                case 'likes':
+                    sorted.sort((a, b) => (b.likeCount || 0) - (a.likeCount || 0));
+                    break;
+                case 'recent':
+                    sorted.sort((a, b) => getPostTimestamp(b) - getPostTimestamp(a));
+                    break;
+                case 'oldest':
+                    sorted.sort((a, b) => getPostTimestamp(a) - getPostTimestamp(b));
+                    break;
+                default:
+                    break;
+            }
+            return sorted;
+        }
+
+        function createQuoteOriginalElement(post) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'quote-original';
+
+            const label = document.createElement('div');
+            label.className = 'label';
+            label.textContent = 'Original Post';
+            wrapper.appendChild(label);
+
+            const author = document.createElement('div');
+            author.className = 'quote-author';
+            const authorName = post.author.displayName || post.author.handle;
+            author.textContent = `${authorName} (@${post.author.handle})`;
+            wrapper.appendChild(author);
+
+            const meta = document.createElement('div');
+            meta.className = 'quote-meta';
+            const time = document.createElement('span');
+            time.textContent = formatDateTime(post.record?.createdAt || post.indexedAt);
+            meta.appendChild(time);
+
+            const postUrl = getPostUrl(post);
+            if (postUrl) {
+                const link = document.createElement('a');
+                link.href = postUrl;
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                link.textContent = 'View on Bluesky';
+                meta.appendChild(link);
+            }
+            wrapper.appendChild(meta);
+
+            const text = document.createElement('div');
+            text.className = 'quote-text';
+            text.textContent = post.record?.text || '';
+            wrapper.appendChild(text);
+
+            const stats = document.createElement('div');
+            stats.className = 'quote-stats';
+
+            const likeStat = document.createElement('span');
+            likeStat.className = 'quote-stat likes';
+            likeStat.textContent = `♥ ${post.likeCount || 0}`;
+            stats.appendChild(likeStat);
+
+            const repostStat = document.createElement('span');
+            repostStat.className = 'quote-stat reposts';
+            repostStat.textContent = `↻ ${post.repostCount || 0}`;
+            stats.appendChild(repostStat);
+
+            const replyStat = document.createElement('span');
+            replyStat.className = 'quote-stat replies';
+            replyStat.textContent = `💬 ${post.replyCount || 0}`;
+            stats.appendChild(replyStat);
+
+            const quoteStat = document.createElement('span');
+            quoteStat.className = 'quote-stat';
+            quoteStat.textContent = `Quotes ${post.quoteCount || 0}`;
+            stats.appendChild(quoteStat);
+
+            wrapper.appendChild(stats);
+            return wrapper;
+        }
+
+        function createQuotePostElement(post, index) {
+            const wrapper = document.createElement('div');
+            wrapper.className = `quote-post depth-${(index % 8) + 1}`;
+
+            const author = document.createElement('div');
+            author.className = 'quote-author';
+            const authorName = post.author.displayName || post.author.handle;
+            author.textContent = `${authorName} (@${post.author.handle})`;
+            wrapper.appendChild(author);
+
+            const meta = document.createElement('div');
+            meta.className = 'quote-meta';
+            const time = document.createElement('span');
+            time.textContent = formatDateTime(post.record?.createdAt || post.indexedAt);
+            meta.appendChild(time);
+
+            const postUrl = getPostUrl(post);
+            if (postUrl) {
+                const link = document.createElement('a');
+                link.href = postUrl;
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                link.textContent = 'View on Bluesky';
+                meta.appendChild(link);
+            }
+            wrapper.appendChild(meta);
+
+            const text = document.createElement('div');
+            text.className = 'quote-text';
+            text.textContent = post.record?.text || '';
+            wrapper.appendChild(text);
+
+            const stats = document.createElement('div');
+            stats.className = 'quote-stats';
+
+            const likeStat = document.createElement('span');
+            likeStat.className = 'quote-stat likes';
+            likeStat.textContent = `♥ ${post.likeCount || 0}`;
+            stats.appendChild(likeStat);
+
+            const repostStat = document.createElement('span');
+            repostStat.className = 'quote-stat reposts';
+            repostStat.textContent = `↻ ${post.repostCount || 0}`;
+            stats.appendChild(repostStat);
+
+            const replyStat = document.createElement('span');
+            replyStat.className = 'quote-stat replies';
+            replyStat.textContent = `💬 ${post.replyCount || 0}`;
+            stats.appendChild(replyStat);
+
+            wrapper.appendChild(stats);
+            return wrapper;
+        }
+
+        function renderQuoteResults() {
+            quoteResultsDiv.textContent = '';
+            if (allQuotes.length === 0) {
+                const empty = document.createElement('div');
+                empty.className = 'no-quotes';
+                empty.textContent = 'No quotes found for this post.';
+                quoteResultsDiv.appendChild(empty);
+                return;
+            }
+
+            const sorted = sortQuotes(allQuotes, quoteSort);
+            sorted.forEach((quote, index) => {
+                quoteResultsDiv.appendChild(createQuotePostElement(quote, index));
+            });
+        }
+
+        async function performQuoteSearch() {
+            if (isQuoteLoading) return;
+
+            const urlValue = postUrlInput.value.trim();
+            if (!urlValue) {
+                showQuoteStatus('Please enter a Bluesky post URL.', 'error');
+                return;
+            }
+
+            isQuoteLoading = true;
+            quoteSearchBtn.disabled = true;
+            showQuoteStatus('Loading quotes...', 'loading');
+            quoteTabs.style.display = 'none';
+            quoteResultsDiv.textContent = '';
+            quoteOriginalDiv.textContent = '';
+            quoteCountDiv.textContent = '';
+            allQuotes = [];
+
+            updateQuoteURL();
+
+            try {
+                const { actor, postId } = parseBlueskyPostUrl(urlValue);
+                const did = await fetchDid(actor);
+                const atUri = `at://${did}/app.bsky.feed.post/${postId}`;
+
+                const [post, quotes] = await Promise.all([
+                    fetchOriginalPost(atUri),
+                    fetchQuotes(atUri)
+                ]);
+
+                allQuotes = quotes;
+
+                quoteOriginalDiv.appendChild(createQuoteOriginalElement(post));
+                quoteCountDiv.textContent = `Found ${quotes.length} quote${quotes.length !== 1 ? 's' : ''}`;
+                quoteTabs.style.display = 'flex';
+                hideQuoteStatus();
+                renderQuoteResults();
+            } catch (error) {
+                console.error('Quote search error:', error);
+                showQuoteStatus(`Error: ${error.message}`, 'error');
+            } finally {
+                isQuoteLoading = false;
+                quoteSearchBtn.disabled = false;
+            }
         }
 
         // Create text with highlighted search terms using DOM methods (safe)
@@ -1030,7 +1620,7 @@
             currentCursors = {};
             resultsDiv.textContent = '';
 
-            updateURL();
+            updateSearchURL();
 
             try {
                 showStatus(`Searching for: ${searchTerms.join(', ')}...`, 'loading');
@@ -1111,6 +1701,20 @@
         loginBtn.addEventListener('click', login);
         logoutBtn.addEventListener('click', logout);
         searchBtn.addEventListener('click', performSearch);
+        quoteForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            performQuoteSearch();
+        });
+        quoteTabs.addEventListener('click', (e) => {
+            if (!e.target.classList.contains('quote-tab')) return;
+            const nextSort = e.target.dataset.sort;
+            if (nextSort && nextSort !== quoteSort) {
+                quoteSort = nextSort;
+                updateQuoteTabs();
+                updateQuoteURL();
+                renderQuoteResults();
+            }
+        });
 
         handleInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
