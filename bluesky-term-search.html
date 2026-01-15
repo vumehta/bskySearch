@@ -637,8 +637,6 @@
             </select>
         </div>
     </div>
-    <div class="shared-info">Search uses a shared service account via the server proxy. No login required.</div>
-
     <!-- Search Form -->
     <div class="search-form">
         <div class="form-row">
@@ -647,14 +645,12 @@
                 <input type="text" id="terms" placeholder="Enter search terms" />
             </div>
         </div>
-        <div class="form-row">
+        <div class="form-row" style="align-items: flex-end;">
             <div class="form-group small">
                 <label for="minLikes">Min. Likes</label>
                 <input type="number" id="minLikes" value="10" min="0" />
             </div>
-            <div class="form-group">
-                <button type="button" id="searchBtn">Search</button>
-            </div>
+            <button type="button" id="searchBtn">Search</button>
         </div>
     </div>
 
@@ -666,15 +662,12 @@
         <p class="subtitle quote-subtitle">Find all quotes of a Bluesky post</p>
 
         <form id="quoteForm" class="quote-form">
-            <div class="form-row">
+            <div class="form-row" style="align-items: flex-end;">
                 <div class="form-group">
                     <label for="postUrl">Bluesky Post URL</label>
                     <input type="text" id="postUrl" placeholder="https://bsky.app/profile/handle/post/..." required />
                 </div>
-                <div class="form-group small">
-                    <label>&nbsp;</label>
-                    <button type="submit" id="quoteSearchBtn">Find Quotes</button>
-                </div>
+                <button type="submit" id="quoteSearchBtn">Find Quotes</button>
             </div>
         </form>
 
