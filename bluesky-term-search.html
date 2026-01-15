@@ -626,7 +626,7 @@
     <div class="page-header">
         <div class="title-block">
             <h1>Bluesky Term Search</h1>
-            <p class="subtitle">Search posts from the last 24 hours, filtered by minimum likes</p>
+            <p class="subtitle">Search posts filtered by time and engagement</p>
         </div>
         <div class="theme-control">
             <label for="themeSelect">Theme</label>
@@ -649,6 +649,17 @@
             <div class="form-group small">
                 <label for="minLikes">Min. Likes</label>
                 <input type="number" id="minLikes" value="10" min="0" />
+            </div>
+            <div class="form-group small">
+                <label for="timeFilter">Time Range</label>
+                <select id="timeFilter">
+                    <option value="1">1 hour</option>
+                    <option value="6">6 hours</option>
+                    <option value="12">12 hours</option>
+                    <option value="24" selected>24 hours</option>
+                    <option value="48">48 hours</option>
+                    <option value="168">7 days</option>
+                </select>
             </div>
             <button type="button" id="searchBtn">Search</button>
         </div>
@@ -691,6 +702,7 @@
         let currentCursors = {};
         let searchTerms = [];
         let minLikes = 10;
+        let timeFilterHours = 24;
         let isLoading = false;
         let allQuotes = [];
         let quoteSort = 'likes';
@@ -699,6 +711,7 @@
         // DOM Elements
         const termsInput = document.getElementById('terms');
         const minLikesInput = document.getElementById('minLikes');
+        const timeFilterSelect = document.getElementById('timeFilter');
         const searchBtn = document.getElementById('searchBtn');
         const statusDiv = document.getElementById('status');
         const resultsDiv = document.getElementById('results');
@@ -768,6 +781,7 @@
             const params = new URLSearchParams(window.location.search);
             setQueryParam(params, 'terms', termsInput.value.trim());
             setQueryParam(params, 'minLikes', minLikesInput.value);
+            setQueryParam(params, 'time', timeFilterSelect.value !== '24' ? timeFilterSelect.value : '');
             updateURLWithParams(params);
         }
 
@@ -797,6 +811,12 @@
             }
             if (params.get('minLikes')) {
                 minLikesInput.value = params.get('minLikes');
+            }
+            if (params.get('time')) {
+                const timeValue = params.get('time');
+                if (['1', '6', '12', '24', '48', '168'].includes(timeValue)) {
+                    timeFilterSelect.value = timeValue;
+                }
             }
 
             const postParam = params.get('post');
@@ -912,10 +932,10 @@
             return posts.filter(post => (post.likeCount || 0) >= minLikes);
         }
 
-        // Filter posts by date (last 24 hours)
-        function filterByDate(posts) {
+        // Filter posts by date (configurable hours)
+        function filterByDate(posts, hours) {
             const cutoff = new Date();
-            cutoff.setHours(cutoff.getHours() - 24);
+            cutoff.setHours(cutoff.getHours() - hours);
             return posts.filter(post => {
                 const postDate = new Date(post.indexedAt);
                 return postDate >= cutoff;
@@ -1469,6 +1489,7 @@
 
             searchTerms = termsValue.split(',').map(t => t.trim()).filter(t => t.length > 0);
             minLikes = parseInt(minLikesInput.value) || 0;
+            timeFilterHours = parseInt(timeFilterSelect.value) || 24;
 
             if (searchTerms.length === 0) {
                 showStatus('Please enter at least one search term.', 'error');
@@ -1491,7 +1512,7 @@
 
                 let combinedPosts = results.flat();
                 combinedPosts = deduplicatePosts(combinedPosts);
-                combinedPosts = filterByDate(combinedPosts);
+                combinedPosts = filterByDate(combinedPosts, timeFilterHours);
                 combinedPosts = filterByLikes(combinedPosts, minLikes);
                 allPosts = sortByLikes(combinedPosts);
 
@@ -1540,7 +1561,7 @@
                 if (newPosts.length > 0) {
                     let combined = [...allPosts, ...newPosts];
                     combined = deduplicatePosts(combined);
-                    combined = filterByDate(combined);
+                    combined = filterByDate(combined, timeFilterHours);
                     combined = filterByLikes(combined, minLikes);
                     allPosts = sortByLikes(combined);
                     renderResults();
