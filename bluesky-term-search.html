@@ -747,6 +747,13 @@
                     <option value="168">7 days</option>
                 </select>
             </div>
+            <div class="form-group small">
+                <label for="sortSelect">Sort</label>
+                <select id="sortSelect">
+                    <option value="top" selected>Top</option>
+                    <option value="latest">Latest</option>
+                </select>
+            </div>
             <button type="button" id="searchBtn">Search</button>
         </div>
         <div class="form-row refresh-row">
@@ -815,6 +822,7 @@
         let allPosts = [];
         let currentCursors = {};
         let searchTerms = [];
+        let searchSort = 'top';
         let minLikes = 10;
         let timeFilterHours = 24;
         let isLoading = false;
@@ -842,6 +850,7 @@
         const termsInput = document.getElementById('terms');
         const minLikesInput = document.getElementById('minLikes');
         const timeFilterSelect = document.getElementById('timeFilter');
+        const sortSelect = document.getElementById('sortSelect');
         const searchBtn = document.getElementById('searchBtn');
         const statusDiv = document.getElementById('status');
         const newPostsDiv = document.getElementById('newPosts');
@@ -919,6 +928,7 @@
             setQueryParam(params, 'terms', termsInput.value.trim());
             setQueryParam(params, 'minLikes', minLikesInput.value);
             setQueryParam(params, 'time', timeFilterSelect.value !== '24' ? timeFilterSelect.value : '');
+            setQueryParam(params, 'sort', searchSort !== 'top' ? searchSort : '');
             updateURLWithParams(params);
         }
 
@@ -955,6 +965,13 @@
                     timeFilterSelect.value = timeValue;
                 }
             }
+            if (params.get('sort')) {
+                const sortValue = params.get('sort');
+                if (['top', 'latest'].includes(sortValue)) {
+                    sortSelect.value = sortValue;
+                }
+            }
+            searchSort = sortSelect.value === 'latest' ? 'latest' : 'top';
 
             const postParam = params.get('post');
             const sortParam = params.get('sort');
@@ -990,8 +1007,9 @@
         }
 
         // Search posts for a single term (server-side proxy)
-        async function searchTerm(term, cursor = null) {
-            const params = new URLSearchParams({ term });
+        async function searchTerm(term, cursor = null, sort = searchSort) {
+            const sortValue = sort === 'latest' ? 'latest' : 'top';
+            const params = new URLSearchParams({ term, sort: sortValue });
             if (cursor) {
                 params.set('cursor', cursor);
             }
@@ -1012,13 +1030,13 @@
         }
 
         // Fetch all posts for a term (with pagination)
-        async function fetchAllPostsForTerm(term, maxPages = 5) {
+        async function fetchAllPostsForTerm(term, maxPages = 5, sort = searchSort) {
             let allTermPosts = [];
             let cursor = null;
             let pages = 0;
 
             while (pages < maxPages) {
-                const data = await searchTerm(term, cursor);
+                const data = await searchTerm(term, cursor, sort);
 
                 if (data.posts && data.posts.length > 0) {
                     const taggedPosts = data.posts.map(post => ({
@@ -1037,8 +1055,8 @@
             return allTermPosts;
         }
 
-        async function fetchLatestPostsForTerm(term) {
-            const data = await searchTerm(term);
+        async function fetchLatestPostsForTerm(term, sort = searchSort) {
+            const data = await searchTerm(term, null, sort);
             if (data.posts && data.posts.length > 0) {
                 return data.posts.map(post => ({
                     ...post,
@@ -1090,9 +1108,15 @@
             });
         }
 
-        // Sort posts by likes (high to low)
-        function sortByLikes(posts) {
-            return posts.sort((a, b) => (b.likeCount || 0) - (a.likeCount || 0));
+        // Sort posts by selected mode
+        function sortPosts(posts, sortMode = searchSort) {
+            const sorted = [...posts];
+            if (sortMode === 'latest') {
+                sorted.sort((a, b) => getPostTimestamp(b) - getPostTimestamp(a));
+                return sorted;
+            }
+            sorted.sort((a, b) => (b.likeCount || 0) - (a.likeCount || 0));
+            return sorted;
         }
 
         // Format relative time
@@ -1765,7 +1789,9 @@
             headerDiv.appendChild(countSpan);
 
             const sortSpan = document.createElement('span');
-            sortSpan.textContent = 'Sorted by likes (high to low)';
+            sortSpan.textContent = searchSort === 'latest'
+                ? 'Sorted by time (newest first)'
+                : 'Sorted by likes (high to low)';
             headerDiv.appendChild(sortSpan);
 
             resultsDiv.appendChild(headerDiv);
@@ -1841,7 +1867,7 @@
             let combined = deduplicatePosts([...pendingPosts, ...allPosts]);
             combined = filterByDate(combined, timeFilterHours);
             combined = filterByLikes(combined, minLikes);
-            allPosts = sortByLikes(combined);
+            allPosts = sortPosts(combined);
 
             clearNewPostHighlights();
             newPostUris = new Set(pendingPosts.map(post => post.uri));
@@ -1868,13 +1894,13 @@
 
             let trimmed = filterByDate(allPosts, timeFilterHours);
             trimmed = filterByLikes(trimmed, minLikes);
-            allPosts = sortByLikes(trimmed);
+            allPosts = sortPosts(trimmed);
 
             pendingPosts = filterByDate(pendingPosts, timeFilterHours);
             pendingPosts = filterByLikes(pendingPosts, minLikes);
 
             const existingUris = new Set([...allPosts, ...pendingPosts].map(post => post.uri));
-            const results = await Promise.all(searchTerms.map(term => fetchLatestPostsForTerm(term)));
+            const results = await Promise.all(searchTerms.map(term => fetchLatestPostsForTerm(term, searchSort)));
             let latestPosts = deduplicatePosts(results.flat());
             latestPosts = filterByDate(latestPosts, timeFilterHours);
             latestPosts = filterByLikes(latestPosts, minLikes);
@@ -1964,6 +1990,7 @@
             searchTerms = termsValue.split(',').map(t => t.trim()).filter(t => t.length > 0);
             minLikes = parseInt(minLikesInput.value) || 0;
             timeFilterHours = parseInt(timeFilterSelect.value) || 24;
+            searchSort = sortSelect.value === 'latest' ? 'latest' : 'top';
 
             if (searchTerms.length === 0) {
                 showStatus('Please enter at least one search term.', 'error');
@@ -1985,14 +2012,14 @@
             try {
                 showStatus(`Searching for: ${searchTerms.join(', ')}...`, 'loading');
 
-                const promises = searchTerms.map(term => fetchAllPostsForTerm(term));
+                const promises = searchTerms.map(term => fetchAllPostsForTerm(term, 5, searchSort));
                 const results = await Promise.all(promises);
 
                 let combinedPosts = results.flat();
                 combinedPosts = deduplicatePosts(combinedPosts);
                 combinedPosts = filterByDate(combinedPosts, timeFilterHours);
                 combinedPosts = filterByLikes(combinedPosts, minLikes);
-                allPosts = sortByLikes(combinedPosts);
+                allPosts = sortPosts(combinedPosts);
 
                 lastRefreshAt = new Date();
                 lastRefreshNewCount = null;
@@ -2030,7 +2057,7 @@
                 const promises = searchTerms
                     .filter(term => currentCursors[term])
                     .map(async term => {
-                        const data = await searchTerm(term, currentCursors[term]);
+                        const data = await searchTerm(term, currentCursors[term], searchSort);
                         currentCursors[term] = data.cursor || null;
 
                         if (data.posts && data.posts.length > 0) {
@@ -2050,7 +2077,7 @@
                     combined = deduplicatePosts(combined);
                     combined = filterByDate(combined, timeFilterHours);
                     combined = filterByLikes(combined, minLikes);
-                    allPosts = sortByLikes(combined);
+                    allPosts = sortPosts(combined);
                     renderResults();
                 } else {
                     if (loadMoreBtn) {
@@ -2095,6 +2122,12 @@
                 scheduleNextRefresh();
             } else {
                 updateRefreshMeta();
+            }
+        });
+        sortSelect.addEventListener('change', () => {
+            searchSort = sortSelect.value === 'latest' ? 'latest' : 'top';
+            if (autoRefreshEnabled) {
+                scheduleNextRefresh();
             }
         });
         quoteTabs.addEventListener('click', (e) => {

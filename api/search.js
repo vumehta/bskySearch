@@ -100,10 +100,11 @@ async function refreshOrCreateSession() {
   return sessionPromise;
 }
 
-async function searchPosts(term, cursor, accessJwt) {
+async function searchPosts(term, cursor, accessJwt, sort) {
+  const sortValue = sort === 'latest' ? 'latest' : 'top';
   const params = new URLSearchParams({
     q: term,
-    sort: 'top',
+    sort: sortValue,
     limit: '100',
     lang: 'en',
   });
@@ -135,6 +136,7 @@ module.exports = async (req, res) => {
 
   const term = getQueryString(req.query.term).trim();
   const cursor = getQueryString(req.query.cursor);
+  const sort = getQueryString(req.query.sort).trim().toLowerCase();
 
   if (!term) {
     return res.status(400).json({ error: 'Missing term parameter.' });
@@ -148,13 +150,19 @@ module.exports = async (req, res) => {
     return res.status(400).json({ error: 'Cursor is too long.' });
   }
 
+  if (sort && !['top', 'latest'].includes(sort)) {
+    return res.status(400).json({ error: 'Invalid sort parameter.' });
+  }
+
+  const sortValue = sort || 'top';
+
   try {
     let session = await ensureSession();
-    let response = await searchPosts(term, cursor, session.accessJwt);
+    let response = await searchPosts(term, cursor, session.accessJwt, sortValue);
 
     if (response.status === 401) {
       session = await refreshOrCreateSession();
-      response = await searchPosts(term, cursor, session.accessJwt);
+      response = await searchPosts(term, cursor, session.accessJwt, sortValue);
     }
 
     const payload = await response.json().catch(() => null);
