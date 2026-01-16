@@ -154,6 +154,41 @@
             min-width: 120px;
         }
 
+        .form-group.refresh-status {
+            flex: 2;
+            min-width: 220px;
+        }
+
+        .refresh-row {
+            align-items: flex-end;
+        }
+
+        .checkbox-inline {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            color: var(--muted);
+        }
+
+        .checkbox-inline input {
+            width: 16px;
+            height: 16px;
+        }
+
+        .refresh-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            font-size: 13px;
+            color: var(--muted-2);
+        }
+
+        .refresh-meta .refresh-state {
+            font-weight: 600;
+            color: var(--text);
+        }
+
         label {
             font-size: 14px;
             font-weight: 500;
@@ -261,6 +296,11 @@
 
         .post:hover {
             box-shadow: 0 2px 8px var(--shadow);
+        }
+
+        .post.new-post {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px var(--focus-ring);
         }
 
         .post-header {
@@ -663,6 +703,32 @@
             </div>
             <button type="button" id="searchBtn">Search</button>
         </div>
+        <div class="form-row refresh-row">
+            <div class="form-group small">
+                <label for="autoRefreshToggle">Auto-refresh</label>
+                <div class="checkbox-inline">
+                    <input type="checkbox" id="autoRefreshToggle" />
+                    <span>Enable</span>
+                </div>
+            </div>
+            <div class="form-group small">
+                <label for="refreshInterval">Interval</label>
+                <select id="refreshInterval">
+                    <option value="2">2 min</option>
+                    <option value="5" selected>5 min</option>
+                    <option value="10">10 min</option>
+                    <option value="30">30 min</option>
+                </select>
+            </div>
+            <div class="form-group refresh-status">
+                <label>Refresh Status</label>
+                <div class="refresh-meta">
+                    <div id="refreshState" class="refresh-state">Auto-refresh off</div>
+                    <div id="refreshLast">Last updated: --</div>
+                    <div id="refreshNext"></div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <div id="status" class="status"></div>
@@ -705,6 +771,17 @@
         let minLikes = 10;
         let timeFilterHours = 24;
         let isLoading = false;
+        let isRefreshing = false;
+        let autoRefreshEnabled = false;
+        let refreshIntervalMs = 5 * 60 * 1000;
+        let refreshTimerId = null;
+        let refreshCountdownId = null;
+        let nextRefreshAt = null;
+        let lastRefreshAt = null;
+        let lastRefreshNewCount = null;
+        let lastRefreshError = null;
+        let newPostUris = new Set();
+        let clearHighlightsTimeout = null;
         let allQuotes = [];
         let quoteSort = 'likes';
         let isQuoteLoading = false;
@@ -720,6 +797,11 @@
         const searchBtn = document.getElementById('searchBtn');
         const statusDiv = document.getElementById('status');
         const resultsDiv = document.getElementById('results');
+        const autoRefreshToggle = document.getElementById('autoRefreshToggle');
+        const refreshIntervalSelect = document.getElementById('refreshInterval');
+        const refreshStateDiv = document.getElementById('refreshState');
+        const refreshLastDiv = document.getElementById('refreshLast');
+        const refreshNextDiv = document.getElementById('refreshNext');
         const themeSelect = document.getElementById('themeSelect');
         const quoteForm = document.getElementById('quoteForm');
         const postUrlInput = document.getElementById('postUrl');
@@ -906,6 +988,17 @@
             return allTermPosts;
         }
 
+        async function fetchLatestPostsForTerm(term) {
+            const data = await searchTerm(term);
+            if (data.posts && data.posts.length > 0) {
+                return data.posts.map(post => ({
+                    ...post,
+                    matchedTerm: term
+                }));
+            }
+            return [];
+        }
+
         // Deduplicate posts by URI
         function deduplicatePosts(posts) {
             const seen = new Map();
@@ -989,6 +1082,97 @@
             const candidate = post.record?.createdAt || post.indexedAt;
             const time = new Date(candidate).getTime();
             return Number.isNaN(time) ? 0 : time;
+        }
+
+        function formatTime(value) {
+            const date = value instanceof Date ? value : new Date(value);
+            if (Number.isNaN(date.getTime())) return '';
+            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+
+        function formatDuration(ms) {
+            const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+            const minutes = Math.floor(totalSeconds / 60);
+            const seconds = totalSeconds % 60;
+            if (minutes >= 60) {
+                const hours = Math.floor(minutes / 60);
+                const mins = minutes % 60;
+                return `${hours}h ${mins}m`;
+            }
+            return `${minutes}:${String(seconds).padStart(2, '0')}`;
+        }
+
+        function updateRefreshInterval() {
+            const minutes = parseInt(refreshIntervalSelect.value, 10);
+            refreshIntervalMs = Number.isFinite(minutes) && minutes > 0 ? minutes * 60000 : 5 * 60000;
+        }
+
+        function clearRefreshTimers() {
+            if (refreshTimerId) {
+                clearTimeout(refreshTimerId);
+                refreshTimerId = null;
+            }
+            if (refreshCountdownId) {
+                clearInterval(refreshCountdownId);
+                refreshCountdownId = null;
+            }
+        }
+
+        function updateRefreshMeta() {
+            if (autoRefreshEnabled) {
+                refreshStateDiv.textContent = isRefreshing ? 'Refreshing...' : 'Auto-refresh on';
+            } else {
+                refreshStateDiv.textContent = 'Auto-refresh off';
+            }
+
+            if (lastRefreshError) {
+                refreshLastDiv.textContent = `Last update failed: ${lastRefreshError}`;
+            } else if (lastRefreshAt) {
+                const suffix = Number.isFinite(lastRefreshNewCount)
+                    ? ` (+${lastRefreshNewCount} new)`
+                    : '';
+                refreshLastDiv.textContent = `Last updated: ${formatTime(lastRefreshAt)}${suffix}`;
+            } else {
+                refreshLastDiv.textContent = 'Last updated: --';
+            }
+
+            if (autoRefreshEnabled && nextRefreshAt) {
+                refreshNextDiv.textContent = `Next refresh in ${formatDuration(nextRefreshAt - Date.now())}`;
+            } else {
+                refreshNextDiv.textContent = '';
+            }
+        }
+
+        function scheduleNextRefresh() {
+            clearRefreshTimers();
+            if (!autoRefreshEnabled) {
+                nextRefreshAt = null;
+                updateRefreshMeta();
+                return;
+            }
+            nextRefreshAt = Date.now() + refreshIntervalMs;
+            refreshTimerId = setTimeout(runAutoRefresh, refreshIntervalMs);
+            refreshCountdownId = setInterval(updateRefreshMeta, 1000);
+            updateRefreshMeta();
+        }
+
+        function clearNewPostHighlights() {
+            newPostUris.clear();
+            if (clearHighlightsTimeout) {
+                clearTimeout(clearHighlightsTimeout);
+                clearHighlightsTimeout = null;
+            }
+        }
+
+        function scheduleNewPostHighlightClear() {
+            if (clearHighlightsTimeout) {
+                clearTimeout(clearHighlightsTimeout);
+            }
+            clearHighlightsTimeout = setTimeout(() => {
+                newPostUris.clear();
+                clearHighlightsTimeout = null;
+                renderResults();
+            }, 8000);
         }
 
         function updateQuoteCount() {
@@ -1375,6 +1559,9 @@
 
             const postDiv = document.createElement('div');
             postDiv.className = 'post';
+            if (newPostUris.has(post.uri)) {
+                postDiv.classList.add('new-post');
+            }
 
             // Search terms tags
             const termsDiv = document.createElement('div');
@@ -1547,6 +1734,87 @@
             }
         }
 
+        async function refreshSearch() {
+            if (searchTerms.length === 0) {
+                return 0;
+            }
+
+            const existingUris = new Set(allPosts.map(post => post.uri));
+            const results = await Promise.all(searchTerms.map(term => fetchLatestPostsForTerm(term)));
+            const latestPosts = deduplicatePosts(results.flat());
+            const newPosts = latestPosts.filter(post => !existingUris.has(post.uri));
+
+            let combined = deduplicatePosts([...latestPosts, ...allPosts]);
+            combined = filterByDate(combined, timeFilterHours);
+            combined = filterByLikes(combined, minLikes);
+            allPosts = sortByLikes(combined);
+
+            clearNewPostHighlights();
+            if (newPosts.length > 0) {
+                newPostUris = new Set(newPosts.map(post => post.uri));
+                scheduleNewPostHighlightClear();
+            }
+
+            renderResults();
+            return newPosts.length;
+        }
+
+        async function runAutoRefresh() {
+            if (!autoRefreshEnabled) {
+                return;
+            }
+            if (isLoading || isRefreshing) {
+                scheduleNextRefresh();
+                return;
+            }
+            if (searchTerms.length === 0) {
+                autoRefreshEnabled = false;
+                autoRefreshToggle.checked = false;
+                nextRefreshAt = null;
+                lastRefreshError = 'Run a search first.';
+                updateRefreshMeta();
+                clearRefreshTimers();
+                return;
+            }
+
+            isRefreshing = true;
+            lastRefreshError = null;
+            lastRefreshNewCount = null;
+            updateRefreshMeta();
+
+            try {
+                const newCount = await refreshSearch();
+                lastRefreshAt = new Date();
+                lastRefreshNewCount = newCount;
+            } catch (error) {
+                console.error('Auto-refresh error:', error);
+                lastRefreshError = error.message || 'Refresh failed.';
+            } finally {
+                isRefreshing = false;
+                scheduleNextRefresh();
+            }
+        }
+
+        function enableAutoRefresh() {
+            if (searchTerms.length === 0) {
+                autoRefreshToggle.checked = false;
+                lastRefreshError = 'Run a search first.';
+                updateRefreshMeta();
+                return;
+            }
+            autoRefreshEnabled = true;
+            lastRefreshError = null;
+            updateRefreshInterval();
+            scheduleNextRefresh();
+        }
+
+        function disableAutoRefresh() {
+            autoRefreshEnabled = false;
+            clearRefreshTimers();
+            nextRefreshAt = null;
+            updateRefreshMeta();
+        }
+
         // Main search function
         async function performSearch() {
             if (isLoading) return;
@@ -1567,9 +1835,11 @@
 
             isLoading = true;
             searchBtn.disabled = true;
+            let searchCompleted = false;
             allPosts = [];
             currentCursors = {};
             resultsDiv.textContent = '';
+            clearNewPostHighlights();
 
             updateSearchURL();
 
@@ -1585,6 +1855,12 @@
                 combinedPosts = filterByLikes(combinedPosts, minLikes);
                 allPosts = sortByLikes(combinedPosts);
 
+                lastRefreshAt = new Date();
+                lastRefreshNewCount = null;
+                lastRefreshError = null;
+                searchCompleted = true;
+                updateRefreshMeta();
+
                 hideStatus();
                 renderResults();
 
@@ -1594,6 +1870,9 @@
             } finally {
                 isLoading = false;
                 searchBtn.disabled = false;
+                if (autoRefreshEnabled && searchCompleted) {
+                    scheduleNextRefresh();
+                }
             }
         }
 
@@ -1664,6 +1943,21 @@
                 applyThemePreference('system');
             }
         });
+        autoRefreshToggle.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                enableAutoRefresh();
+            } else {
+                disableAutoRefresh();
+            }
+        });
+        refreshIntervalSelect.addEventListener('change', () => {
+            updateRefreshInterval();
+            if (autoRefreshEnabled) {
+                scheduleNextRefresh();
+            } else {
+                updateRefreshMeta();
+            }
+        });
         quoteTabs.addEventListener('click', (e) => {
             if (!e.target.classList.contains('quote-tab')) return;
             const nextSort = e.target.dataset.sort;
@@ -1690,6 +1984,8 @@
         // Initialize
         initTheme();
         initFromURL();
+        updateRefreshInterval();
+        updateRefreshMeta();
     </script>
 </body>
 
