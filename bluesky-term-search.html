@@ -817,6 +817,8 @@
     <script>
         const PUBLIC_API = 'https://public.api.bsky.app/xrpc';
         const SEARCH_API = '/api/search';
+        const INITIAL_RENDER_LIMIT = 200;
+        const RENDER_STEP = 100;
 
         // State
         let allPosts = [];
@@ -827,6 +829,7 @@
         let timeFilterHours = 24;
         let isLoading = false;
         let isRefreshing = false;
+        let renderLimit = INITIAL_RENDER_LIMIT;
         let autoRefreshEnabled = false;
         let refreshIntervalMs = 5 * 60 * 1000;
         let refreshTimerId = null;
@@ -1178,6 +1181,14 @@
         function updateRefreshInterval() {
             const minutes = parseInt(refreshIntervalSelect.value, 10);
             refreshIntervalMs = Number.isFinite(minutes) && minutes > 0 ? minutes * 60000 : 5 * 60000;
+        }
+
+        function resetRenderLimit() {
+            renderLimit = INITIAL_RENDER_LIMIT;
+        }
+
+        function increaseRenderLimit(step = RENDER_STEP) {
+            renderLimit = Math.min(allPosts.length, renderLimit + step);
         }
 
         function clearRefreshTimers() {
@@ -1785,7 +1796,14 @@
 
             const countSpan = document.createElement('span');
             countSpan.className = 'results-count';
-            countSpan.textContent = `${allPosts.length} post${allPosts.length !== 1 ? 's' : ''} found`;
+            const totalCount = allPosts.length;
+            const visibleCount = Math.min(renderLimit, totalCount);
+            const totalLabel = totalCount === 1 ? 'post' : 'posts';
+            if (visibleCount < totalCount) {
+                countSpan.textContent = `Showing ${visibleCount} of ${totalCount} ${totalLabel}`;
+            } else {
+                countSpan.textContent = `${totalCount} ${totalLabel} found`;
+            }
             headerDiv.appendChild(countSpan);
 
             const sortSpan = document.createElement('span');
@@ -1797,9 +1815,29 @@
             resultsDiv.appendChild(headerDiv);
 
             // Posts
-            allPosts.forEach(post => {
+            const visiblePosts = allPosts.slice(0, visibleCount);
+            visiblePosts.forEach(post => {
                 resultsDiv.appendChild(createPostElement(post));
             });
+
+            if (visibleCount < totalCount) {
+                const showMoreBtn = document.createElement('button');
+                showMoreBtn.className = 'load-more';
+                showMoreBtn.id = 'showMoreBtn';
+                const remaining = totalCount - visibleCount;
+                if (remaining <= RENDER_STEP) {
+                    showMoreBtn.textContent = remaining === 1
+                        ? 'Show 1 more loaded result'
+                        : `Show ${remaining} more loaded results`;
+                } else {
+                    showMoreBtn.textContent = `Show ${RENDER_STEP} more loaded results`;
+                }
+                showMoreBtn.addEventListener('click', () => {
+                    increaseRenderLimit();
+                    renderResults();
+                });
+                resultsDiv.appendChild(showMoreBtn);
+            }
 
             // Load more button
             const hasMoreResults = Object.values(currentCursors).some(cursor => cursor !== null);
@@ -2006,6 +2044,7 @@
             clearNewPostHighlights();
             pendingPosts = [];
             renderNewPosts();
+            resetRenderLimit();
 
             updateSearchURL();
 
@@ -2046,6 +2085,7 @@
         async function loadMore() {
             if (isLoading) return;
 
+            const prevCount = allPosts.length;
             isLoading = true;
             const loadMoreBtn = document.getElementById('loadMoreBtn');
             if (loadMoreBtn) {
@@ -2078,6 +2118,9 @@
                     combined = filterByDate(combined, timeFilterHours);
                     combined = filterByLikes(combined, minLikes);
                     allPosts = sortPosts(combined);
+                    if (allPosts.length > prevCount) {
+                        renderLimit = Math.min(allPosts.length, renderLimit + RENDER_STEP);
+                    }
                     renderResults();
                 } else {
                     if (loadMoreBtn) {
