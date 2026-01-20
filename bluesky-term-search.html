@@ -631,15 +631,6 @@
             align-items: center;
         }
 
-        .quote-meta a {
-            color: var(--accent);
-            text-decoration: none;
-            font-size: 13px;
-        }
-
-        .quote-meta a:hover {
-            text-decoration: underline;
-        }
 
         .quote-text {
             white-space: pre-wrap;
@@ -676,6 +667,126 @@
             text-align: center;
             padding: 24px;
             color: var(--muted);
+        }
+
+        .thread-context {
+            background: var(--accent-soft);
+            border: 1px solid var(--accent-soft-border);
+            border-bottom: none;
+            border-radius: 8px 8px 0 0;
+            padding: 12px;
+            margin-bottom: 0;
+        }
+
+        .thread-context + .post {
+            border-top-left-radius: 0;
+            border-top-right-radius: 0;
+            margin-top: 0;
+        }
+
+        .thread-parent {
+            position: relative;
+            padding: 12px;
+            padding-left: 20px;
+            border-left: 3px solid var(--accent);
+            margin-left: 8px;
+            margin-bottom: 8px;
+            background: var(--card-bg);
+            border-radius: 0 6px 6px 0;
+        }
+
+        .thread-parent:last-child {
+            margin-bottom: 0;
+        }
+
+        .thread-parent-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+        }
+
+        .thread-parent-avatar {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            object-fit: cover;
+            background: var(--avatar-bg);
+        }
+
+        .thread-parent-author {
+            font-weight: 600;
+            font-size: 14px;
+            color: var(--text);
+        }
+
+        .thread-parent-handle {
+            color: var(--muted-2);
+            font-size: 13px;
+        }
+
+        .thread-parent-time {
+            color: var(--muted-2);
+            font-size: 12px;
+            margin-left: auto;
+        }
+
+        .thread-parent-text {
+            font-size: 14px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            color: var(--text);
+        }
+
+        .thread-label {
+            font-size: 12px;
+            color: var(--muted);
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .thread-link {
+            color: var(--accent);
+            text-decoration: none;
+            font-size: 14px;
+            cursor: pointer;
+            background: none;
+            background-color: transparent;
+            border: none;
+            padding: 0;
+            font-family: inherit;
+            appearance: none;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+        }
+
+        .thread-link:hover,
+        .thread-link:active,
+        .thread-link:focus {
+            text-decoration: underline;
+            background-color: transparent;
+            box-shadow: none;
+        }
+
+        .thread-link:disabled {
+            color: var(--muted);
+            cursor: not-allowed;
+            text-decoration: none;
+        }
+
+        .link-actions {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+            margin-top: 10px;
+            flex-wrap: wrap;
+        }
+
+        .thread-loading {
+            color: var(--muted);
+            font-size: 14px;
+            padding: 8px 0;
         }
 
         .hidden {
@@ -1392,17 +1503,23 @@
             const time = document.createElement('span');
             time.textContent = formatDateTime(post.record?.createdAt || post.indexedAt);
             meta.appendChild(time);
+            wrapper.appendChild(meta);
 
             const postUrl = getPostUrl(post);
             if (postUrl) {
+                const actions = document.createElement('div');
+                actions.className = 'link-actions';
+
                 const link = document.createElement('a');
+                link.className = 'thread-link';
                 link.href = postUrl;
                 link.target = '_blank';
                 link.rel = 'noopener noreferrer';
                 link.textContent = 'View on Bluesky';
-                meta.appendChild(link);
+                actions.appendChild(link);
+
+                wrapper.appendChild(actions);
             }
-            wrapper.appendChild(meta);
 
             const text = document.createElement('div');
             text.className = 'quote-text';
@@ -1451,17 +1568,23 @@
             const time = document.createElement('span');
             time.textContent = formatDateTime(post.record?.createdAt || post.indexedAt);
             meta.appendChild(time);
+            wrapper.appendChild(meta);
 
             const postUrl = getPostUrl(post);
             if (postUrl) {
+                const actions = document.createElement('div');
+                actions.className = 'link-actions';
+
                 const link = document.createElement('a');
+                link.className = 'thread-link';
                 link.href = postUrl;
                 link.target = '_blank';
                 link.rel = 'noopener noreferrer';
                 link.textContent = 'View on Bluesky';
-                meta.appendChild(link);
+                actions.appendChild(link);
+
+                wrapper.appendChild(actions);
             }
-            wrapper.appendChild(meta);
 
             const text = document.createElement('div');
             text.className = 'quote-text';
@@ -1610,6 +1733,153 @@
             }
         }
 
+        // Thread Explorer functions
+        function isReplyPost(post) {
+            return !!(post.record?.reply);
+        }
+
+        async function fetchPostThread(atUri) {
+            const params = new URLSearchParams({
+                uri: atUri,
+                depth: '0',
+                parentHeight: '100'
+            });
+            const response = await fetch(`${PUBLIC_API}/app.bsky.feed.getPostThread?${params}`);
+            if (!response.ok) {
+                throw new Error(`Failed to fetch thread: ${response.status}`);
+            }
+            return response.json();
+        }
+
+        function extractParentChain(thread) {
+            const parents = [];
+            let current = thread.thread?.parent;
+            while (current?.post) {
+                parents.unshift(current.post);
+                current = current.parent;
+            }
+            return parents;
+        }
+
+        function createThreadParentElement(post) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'thread-parent';
+
+            const header = document.createElement('div');
+            header.className = 'thread-parent-header';
+
+            if (post.author.avatar && isValidBskyUrl(post.author.avatar)) {
+                const avatar = document.createElement('img');
+                avatar.className = 'thread-parent-avatar';
+                avatar.src = post.author.avatar;
+                avatar.alt = '';
+                avatar.loading = 'lazy';
+                header.appendChild(avatar);
+            } else {
+                const avatarPlaceholder = document.createElement('div');
+                avatarPlaceholder.className = 'thread-parent-avatar';
+                header.appendChild(avatarPlaceholder);
+            }
+
+            const authorSpan = document.createElement('span');
+            authorSpan.className = 'thread-parent-author';
+            authorSpan.textContent = post.author.displayName || post.author.handle;
+            header.appendChild(authorSpan);
+
+            const handleSpan = document.createElement('span');
+            handleSpan.className = 'thread-parent-handle';
+            handleSpan.textContent = `@${post.author.handle}`;
+            header.appendChild(handleSpan);
+
+            const timeSpan = document.createElement('span');
+            timeSpan.className = 'thread-parent-time';
+            timeSpan.textContent = formatRelativeTime(post.indexedAt);
+            header.appendChild(timeSpan);
+
+            wrapper.appendChild(header);
+
+            const textDiv = document.createElement('div');
+            textDiv.className = 'thread-parent-text';
+            textDiv.textContent = post.record?.text || '';
+            wrapper.appendChild(textDiv);
+
+            return wrapper;
+        }
+
+        function createThreadContextElement(parents) {
+            const container = document.createElement('div');
+            container.className = 'thread-context';
+
+            const label = document.createElement('div');
+            label.className = 'thread-label';
+            label.textContent = 'Thread context';
+            container.appendChild(label);
+
+            parents.forEach(parent => {
+                container.appendChild(createThreadParentElement(parent));
+            });
+
+            return container;
+        }
+
+        function removeThreadContexts(postElement) {
+            let previous = postElement.previousElementSibling;
+            let removed = false;
+
+            while (previous?.classList.contains('thread-context')) {
+                const toRemove = previous;
+                previous = previous.previousElementSibling;
+                toRemove.remove();
+                removed = true;
+            }
+
+            return removed;
+        }
+
+        async function toggleThread(post, postElement) {
+            const link = postElement.querySelector('.thread-link');
+            if (!link) return;
+
+            if (link.dataset.loading === 'true') {
+                return;
+            }
+
+            if (removeThreadContexts(postElement)) {
+                link.textContent = 'View Thread';
+                return;
+            }
+
+            link.dataset.loading = 'true';
+            link.disabled = true;
+            link.textContent = 'Loading...';
+
+            try {
+                const threadData = await fetchPostThread(post.uri);
+                const parents = extractParentChain(threadData);
+
+                if (parents.length === 0) {
+                    if (link) link.textContent = 'No parent posts found';
+                    setTimeout(() => {
+                        if (link) link.textContent = 'View Thread';
+                    }, 2000);
+                    return;
+                }
+
+                const contextElement = createThreadContextElement(parents);
+                postElement.parentNode.insertBefore(contextElement, postElement);
+                link.textContent = 'Hide Thread';
+            } catch (error) {
+                console.error('Thread fetch error:', error);
+                link.textContent = 'Failed to load thread';
+                setTimeout(() => {
+                    link.textContent = 'View Thread';
+                }, 2000);
+            } finally {
+                link.dataset.loading = 'false';
+                link.disabled = false;
+            }
+        }
+
         // Create text with highlighted search terms using DOM methods (safe)
         function createHighlightedText(text, terms) {
             const fragment = document.createDocumentFragment();
@@ -1752,16 +2022,38 @@
 
             postDiv.appendChild(statsDiv);
 
-            // Link to post
+            // Links container
+            const linksDiv = document.createElement('div');
+            linksDiv.className = 'link-actions';
+
+            // Thread link (View Thread for replies, View Replies for standalone posts)
             if (postUrl) {
-                const link = document.createElement('a');
-                link.className = 'post-link';
-                link.href = postUrl;
-                link.target = '_blank';
-                link.rel = 'noopener noreferrer';
-                link.textContent = 'View on Bluesky →';
-                postDiv.appendChild(link);
+                if (isReplyPost(post)) {
+                    const threadLink = document.createElement('button');
+                    threadLink.className = 'thread-link';
+                    threadLink.textContent = 'View Thread';
+                    threadLink.addEventListener('click', () => toggleThread(post, postDiv));
+                    linksDiv.appendChild(threadLink);
+
+                    const blueskyLink = document.createElement('a');
+                    blueskyLink.className = 'thread-link';
+                    blueskyLink.href = postUrl;
+                    blueskyLink.target = '_blank';
+                    blueskyLink.rel = 'noopener noreferrer';
+                    blueskyLink.textContent = 'View on Bluesky';
+                    linksDiv.appendChild(blueskyLink);
+                } else {
+                    const repliesLink = document.createElement('a');
+                    repliesLink.className = 'thread-link';
+                    repliesLink.href = postUrl;
+                    repliesLink.target = '_blank';
+                    repliesLink.rel = 'noopener noreferrer';
+                    repliesLink.textContent = 'View Replies →';
+                    linksDiv.appendChild(repliesLink);
+                }
             }
+
+            postDiv.appendChild(linksDiv);
 
             return postDiv;
         }
