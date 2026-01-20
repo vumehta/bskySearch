@@ -176,6 +176,67 @@
             height: 16px;
         }
 
+        .label-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .info-trigger {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+        }
+
+        .info-button {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            border: 1px solid var(--input-border);
+            background: var(--surface);
+            color: var(--muted);
+            font-size: 12px;
+            font-weight: 600;
+            line-height: 1;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            cursor: help;
+        }
+
+        .info-button:hover,
+        .info-button:focus {
+            color: var(--text);
+            border-color: var(--accent);
+        }
+
+        .info-tooltip {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            margin-top: 6px;
+            padding: 8px 10px;
+            width: 240px;
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            box-shadow: 0 6px 18px var(--shadow);
+            font-size: 12px;
+            color: var(--text);
+            opacity: 0;
+            transform: translateY(4px);
+            transition: opacity 0.15s ease, transform 0.15s ease;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .info-trigger:hover .info-tooltip,
+        .info-trigger:focus-within .info-tooltip {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
         .refresh-meta {
             display: flex;
             flex-direction: column;
@@ -850,6 +911,21 @@
                 <input type="text" id="terms" placeholder="Enter search terms" />
             </div>
         </div>
+        <div class="form-row">
+            <div class="form-group">
+                <div class="label-row">
+                    <label for="expandTermsToggle">Phrase Expansion</label>
+                    <span class="info-trigger">
+                        <button type="button" class="info-button" aria-label="Phrase expansion summary">i</button>
+                        <span id="expandSummary" class="info-tooltip"></span>
+                    </span>
+                </div>
+                <div class="checkbox-inline">
+                    <input type="checkbox" id="expandTermsToggle" />
+                    <span>Also search each word in multi-word phrases</span>
+                </div>
+            </div>
+        </div>
         <div class="form-row" style="align-items: flex-end;">
             <div class="form-group small">
                 <label for="minLikes">Min. Likes</label>
@@ -945,6 +1021,7 @@
         // State
         let allPosts = [];
         let currentCursors = {};
+        let rawSearchTerms = [];
         let searchTerms = [];
         let searchSort = 'top';
         let minLikes = 10;
@@ -986,6 +1063,8 @@
         const refreshLastDiv = document.getElementById('refreshLast');
         const refreshNextDiv = document.getElementById('refreshNext');
         const themeSelect = document.getElementById('themeSelect');
+        const expandTermsToggle = document.getElementById('expandTermsToggle');
+        const expandSummary = document.getElementById('expandSummary');
         const quoteForm = document.getElementById('quoteForm');
         const postUrlInput = document.getElementById('postUrl');
         const quoteSearchBtn = document.getElementById('quoteSearchBtn');
@@ -1054,6 +1133,7 @@
             setQueryParam(params, 'minLikes', minLikesInput.value);
             setQueryParam(params, 'time', timeFilterSelect.value !== '24' ? timeFilterSelect.value : '');
             setQueryParam(params, 'sort', searchSort !== 'top' ? searchSort : '');
+            setQueryParam(params, 'expand', expandTermsToggle.checked ? '1' : '');
             updateURLWithParams(params);
         }
 
@@ -1097,6 +1177,9 @@
                 }
             }
             searchSort = sortSelect.value === 'latest' ? 'latest' : 'top';
+            if (params.get('expand') === '1') {
+                expandTermsToggle.checked = true;
+            }
 
             const postParam = params.get('post');
             const sortParam = params.get('sort');
@@ -1108,6 +1191,8 @@
                 postUrlInput.value = postParam;
                 performQuoteSearch();
             }
+
+            updateExpansionSummary();
         }
 
         // Show status message
@@ -1129,6 +1214,72 @@
 
         function hideQuoteStatus() {
             quoteStatusDiv.style.display = 'none';
+        }
+
+        function normalizeTerm(raw) {
+            let term = raw.trim();
+            if ((term.startsWith('"') && term.endsWith('"')) || (term.startsWith("'") && term.endsWith("'"))) {
+                term = term.slice(1, -1).trim();
+            }
+            return term;
+        }
+
+        function expandSearchTerms(terms, shouldExpandWords) {
+            const expanded = [];
+            const seen = new Set();
+
+            const addTerm = (value) => {
+                const cleaned = value.trim();
+                if (!cleaned) return;
+                const key = cleaned.toLowerCase();
+                if (seen.has(key)) return;
+                seen.add(key);
+                expanded.push(cleaned);
+            };
+
+            terms.forEach((raw) => {
+                const term = normalizeTerm(raw);
+                if (!term) return;
+                addTerm(term);
+                if (shouldExpandWords) {
+                    const parts = term.split(/\s+/).filter(Boolean);
+                    if (parts.length > 1) {
+                        parts.forEach(addTerm);
+                    }
+                }
+            });
+
+            return expanded;
+        }
+
+        function updateExpansionSummary() {
+            const inputValue = termsInput.value.trim();
+            if (!inputValue) {
+                expandSummary.textContent = 'Enter terms to preview expansion.';
+                return;
+            }
+
+            const rawTerms = inputValue.split(',').map(normalizeTerm).filter(Boolean);
+            if (rawTerms.length === 0) {
+                expandSummary.textContent = 'Enter terms to preview expansion.';
+                return;
+            }
+
+            if (!expandTermsToggle.checked) {
+                expandSummary.textContent = `Expansion is off. Searching only: ${rawTerms.join(', ')}`;
+                return;
+            }
+
+            const expanded = expandSearchTerms(rawTerms, true);
+            const rawSet = new Set(rawTerms.map(term => term.toLowerCase()));
+            const extras = expanded.filter(term => !rawSet.has(term.toLowerCase()));
+
+            if (extras.length === 0) {
+                expandSummary.textContent = `No multi-word phrases detected. Searching: ${rawTerms.join(', ')}`;
+                return;
+            }
+
+            expandSummary.textContent = `Typed: ${rawTerms.join(', ')}. Expanded: ${expanded.join(', ')}`;
         }
 
         // Search posts for a single term (server-side proxy)
@@ -2328,12 +2479,13 @@
                 return;
             }
 
-            searchTerms = termsValue.split(',').map(t => t.trim()).filter(t => t.length > 0);
+            rawSearchTerms = termsValue.split(',').map(normalizeTerm).filter(t => t.length > 0);
+            searchTerms = expandSearchTerms(rawSearchTerms, expandTermsToggle.checked);
             minLikes = parseInt(minLikesInput.value) || 0;
             timeFilterHours = parseInt(timeFilterSelect.value) || 24;
             searchSort = sortSelect.value === 'latest' ? 'latest' : 'top';
 
-            if (searchTerms.length === 0) {
+            if (rawSearchTerms.length === 0) {
                 showStatus('Please enter at least one search term.', 'error');
                 return;
             }
@@ -2352,7 +2504,7 @@
             updateSearchURL();
 
             try {
-                showStatus(`Searching for: ${searchTerms.join(', ')}...`, 'loading');
+                showStatus(`Searching for: ${rawSearchTerms.join(', ')}...`, 'loading');
 
                 const promises = searchTerms.map(term => fetchAllPostsForTerm(term, 5, searchSort));
                 const results = await Promise.all(promises);
@@ -2492,11 +2644,18 @@
                 performSearch();
             }
         });
+        termsInput.addEventListener('input', () => {
+            updateExpansionSummary();
+        });
 
         minLikesInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
                 performSearch();
             }
+        });
+        expandTermsToggle.addEventListener('change', () => {
+            updateSearchURL();
+            updateExpansionSummary();
         });
 
         // Initialize
@@ -2504,6 +2663,7 @@
         initFromURL();
         updateRefreshInterval();
         updateRefreshMeta();
+        updateExpansionSummary();
     </script>
 </body>
 
