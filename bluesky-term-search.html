@@ -189,6 +189,14 @@
             color: var(--text);
         }
 
+        .refresh-link {
+            align-self: flex-end;
+        }
+
+        .refresh-link .thread-link {
+            font-size: 13px;
+        }
+
         label {
             font-size: 14px;
             font-weight: 500;
@@ -891,6 +899,9 @@
                     <div id="refreshLast">Last updated: --</div>
                     <div id="refreshNext"></div>
                 </div>
+            </div>
+            <div class="form-group small refresh-link">
+                <a class="thread-link" href="https://bskyfeed-watch.fly.dev/" target="_blank" rel="noopener noreferrer">Custom keyword feed</a>
             </div>
         </div>
     </div>
