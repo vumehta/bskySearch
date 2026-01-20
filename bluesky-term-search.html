@@ -631,15 +631,6 @@
             align-items: center;
         }
 
-        .quote-meta a {
-            color: var(--accent);
-            text-decoration: none;
-            font-size: 13px;
-        }
-
-        .quote-meta a:hover {
-            text-decoration: underline;
-        }
 
         .quote-text {
             white-space: pre-wrap;
@@ -782,6 +773,14 @@
             color: var(--muted);
             cursor: not-allowed;
             text-decoration: none;
+        }
+
+        .link-actions {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+            margin-top: 10px;
+            flex-wrap: wrap;
         }
 
         .thread-loading {
@@ -1504,17 +1503,23 @@
             const time = document.createElement('span');
             time.textContent = formatDateTime(post.record?.createdAt || post.indexedAt);
             meta.appendChild(time);
+            wrapper.appendChild(meta);
 
             const postUrl = getPostUrl(post);
             if (postUrl) {
+                const actions = document.createElement('div');
+                actions.className = 'link-actions';
+
                 const link = document.createElement('a');
+                link.className = 'thread-link';
                 link.href = postUrl;
                 link.target = '_blank';
                 link.rel = 'noopener noreferrer';
                 link.textContent = 'View on Bluesky';
-                meta.appendChild(link);
+                actions.appendChild(link);
+
+                wrapper.appendChild(actions);
             }
-            wrapper.appendChild(meta);
 
             const text = document.createElement('div');
             text.className = 'quote-text';
@@ -1563,17 +1568,23 @@
             const time = document.createElement('span');
             time.textContent = formatDateTime(post.record?.createdAt || post.indexedAt);
             meta.appendChild(time);
+            wrapper.appendChild(meta);
 
             const postUrl = getPostUrl(post);
             if (postUrl) {
+                const actions = document.createElement('div');
+                actions.className = 'link-actions';
+
                 const link = document.createElement('a');
+                link.className = 'thread-link';
                 link.href = postUrl;
                 link.target = '_blank';
                 link.rel = 'noopener noreferrer';
                 link.textContent = 'View on Bluesky';
-                meta.appendChild(link);
+                actions.appendChild(link);
+
+                wrapper.appendChild(actions);
             }
-            wrapper.appendChild(meta);
 
             const text = document.createElement('div');
             text.className = 'quote-text';
@@ -2013,7 +2024,7 @@
 
             // Links container
             const linksDiv = document.createElement('div');
-            linksDiv.style.cssText = 'display: flex; gap: 16px; align-items: center; margin-top: 10px;';
+            linksDiv.className = 'link-actions';
 
             // Thread link (View Thread for replies, View Replies for standalone posts)
             if (postUrl) {
