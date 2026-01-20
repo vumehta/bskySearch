@@ -2023,6 +2023,14 @@
                     threadLink.textContent = 'View Thread';
                     threadLink.addEventListener('click', () => toggleThread(post, postDiv));
                     linksDiv.appendChild(threadLink);
+
+                    const blueskyLink = document.createElement('a');
+                    blueskyLink.className = 'thread-link';
+                    blueskyLink.href = postUrl;
+                    blueskyLink.target = '_blank';
+                    blueskyLink.rel = 'noopener noreferrer';
+                    blueskyLink.textContent = 'View on Bluesky';
+                    linksDiv.appendChild(blueskyLink);
                 } else {
                     const repliesLink = document.createElement('a');
                     repliesLink.className = 'thread-link';
