@@ -1018,9 +1018,13 @@
         const INITIAL_RENDER_LIMIT = 200;
         const RENDER_STEP = 100;
         const SEARCH_DEBOUNCE_MS = 300;
+        const INITIAL_MAX_PAGES = 2;
+        const SEARCH_CACHE_TTL_MS = 30000;
 
         // DID cache to avoid duplicate lookups
         const didCache = new Map();
+        // Search results cache: key -> { data, timestamp }
+        const searchCache = new Map();
         let searchDebounceTimer = null;
 
         // State
@@ -1287,9 +1291,33 @@
             expandSummary.textContent = `Typed: ${rawTerms.join(', ')}. Expanded: ${expanded.join(', ')}`;
         }
 
+        // Generate cache key for search requests
+        function getSearchCacheKey(term, cursor, sort) {
+            return `${term}|${cursor || ''}|${sort}`;
+        }
+
+        // Check if cached result is still valid
+        function getCachedSearch(cacheKey) {
+            const cached = searchCache.get(cacheKey);
+            if (!cached) return null;
+            if (Date.now() - cached.timestamp > SEARCH_CACHE_TTL_MS) {
+                searchCache.delete(cacheKey);
+                return null;
+            }
+            return cached.data;
+        }
+
         // Search posts for a single term (server-side proxy)
         async function searchTerm(term, cursor = null, sort = searchSort) {
             const sortValue = sort === 'latest' ? 'latest' : 'top';
+            const cacheKey = getSearchCacheKey(term, cursor, sortValue);
+
+            // Check cache first
+            const cached = getCachedSearch(cacheKey);
+            if (cached) {
+                return cached;
+            }
+
             const params = new URLSearchParams({ term, sort: sortValue });
             if (cursor) {
                 params.set('cursor', cursor);
@@ -1307,11 +1335,16 @@
                 throw new Error(errorMsg);
             }
 
-            return response.json();
+            const data = await response.json();
+
+            // Cache the result
+            searchCache.set(cacheKey, { data, timestamp: Date.now() });
+
+            return data;
         }
 
         // Fetch all posts for a term (with pagination)
-        async function fetchAllPostsForTerm(term, maxPages = 5, sort = searchSort) {
+        async function fetchAllPostsForTerm(term, maxPages = INITIAL_MAX_PAGES, sort = searchSort) {
             let allTermPosts = [];
             let cursor = null;
             let pages = 0;
@@ -2520,10 +2553,11 @@
             try {
                 showStatus(`Searching for: ${rawSearchTerms.join(', ')}...`, 'loading');
 
-                const promises = searchTerms.map(term => fetchAllPostsForTerm(term, 5, searchSort));
+                // Fetch all terms in parallel (Bluesky API doesn't support OR queries)
+                const promises = searchTerms.map(term => fetchAllPostsForTerm(term, INITIAL_MAX_PAGES, searchSort));
                 const results = await Promise.all(promises);
-
                 let combinedPosts = results.flat();
+
                 combinedPosts = deduplicatePosts(combinedPosts);
                 combinedPosts = filterByDate(combinedPosts, timeFilterHours);
                 combinedPosts = filterByLikes(combinedPosts, minLikes);
