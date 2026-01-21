@@ -1017,6 +1017,11 @@
         const SEARCH_API = '/api/search';
         const INITIAL_RENDER_LIMIT = 200;
         const RENDER_STEP = 100;
+        const SEARCH_DEBOUNCE_MS = 300;
+
+        // DID cache to avoid duplicate lookups
+        const didCache = new Map();
+        let searchDebounceTimer = null;
 
         // State
         let allPosts = [];
@@ -1582,6 +1587,12 @@
         }
 
         async function fetchDid(actor) {
+            // Check cache first
+            const cacheKey = actor.toLowerCase();
+            if (didCache.has(cacheKey)) {
+                return didCache.get(cacheKey);
+            }
+
             const response = await fetch(
                 `${PUBLIC_API}/app.bsky.actor.getProfile?actor=${encodeURIComponent(actor)}`
             );
@@ -1593,6 +1604,9 @@
             if (!did) {
                 throw new Error('Could not resolve DID for that handle.');
             }
+
+            // Cache the result
+            didCache.set(cacheKey, did);
             return did;
         }
 
@@ -2592,7 +2606,10 @@
         }
 
         // Event listeners
-        searchBtn.addEventListener('click', performSearch);
+        searchBtn.addEventListener('click', () => {
+            cancelDebouncedSearch();
+            performSearch();
+        });
         quoteForm.addEventListener('submit', (e) => {
             e.preventDefault();
             performQuoteSearch();
@@ -2639,20 +2656,41 @@
             }
         });
 
+        function debouncedSearch() {
+            if (searchDebounceTimer) {
+                clearTimeout(searchDebounceTimer);
+            }
+            searchDebounceTimer = setTimeout(() => {
+                searchDebounceTimer = null;
+                performSearch();
+            }, SEARCH_DEBOUNCE_MS);
+        }
+
+        function cancelDebouncedSearch() {
+            if (searchDebounceTimer) {
+                clearTimeout(searchDebounceTimer);
+                searchDebounceTimer = null;
+            }
+        }
+
         termsInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
+                cancelDebouncedSearch();
                 performSearch();
             }
         });
         termsInput.addEventListener('input', () => {
             updateExpansionSummary();
+            debouncedSearch();
         });
 
         minLikesInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
+                cancelDebouncedSearch();
                 performSearch();
             }
         });
+        minLikesInput.addEventListener('input', debouncedSearch);
         expandTermsToggle.addEventListener('change', () => {
             updateSearchURL();
             updateExpansionSummary();
