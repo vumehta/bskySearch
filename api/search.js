@@ -11,7 +11,9 @@ let sessionPromise = null;
 
 // Search results cache with 30s TTL
 const SEARCH_CACHE_TTL_MS = 30000;
+const SEARCH_CACHE_CLEANUP_INTERVAL_MS = 5000;
 const searchResultsCache = new Map();
+let lastSearchCacheCleanupAt = 0;
 
 function getQueryString(value) {
   if (Array.isArray(value)) {
@@ -206,8 +208,13 @@ module.exports = async (req, res) => {
   }
 
   // Periodically clean up expired cache entries
-  if (searchResultsCache.size > 100) {
+  const now = Date.now();
+  if (
+    searchResultsCache.size > 100 ||
+    now - lastSearchCacheCleanupAt > SEARCH_CACHE_CLEANUP_INTERVAL_MS
+  ) {
     cleanupSearchCache();
+    lastSearchCacheCleanupAt = now;
   }
 
   try {

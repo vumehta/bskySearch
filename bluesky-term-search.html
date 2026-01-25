@@ -1037,6 +1037,7 @@
         let timeFilterHours = 24;
         let isLoading = false;
         let isRefreshing = false;
+        let pendingSearch = false;
         let renderLimit = INITIAL_RENDER_LIMIT;
         let autoRefreshEnabled = false;
         let refreshIntervalMs = 5 * 60 * 1000;
@@ -2519,7 +2520,11 @@
 
         // Main search function
         async function performSearch() {
-            if (isLoading) return;
+            if (isLoading) {
+                pendingSearch = true;
+                return;
+            }
+            pendingSearch = false;
             const termsValue = termsInput.value.trim();
             if (!termsValue) {
                 showStatus('Please enter at least one search term.', 'error');
@@ -2580,6 +2585,10 @@
                 searchBtn.disabled = false;
                 if (autoRefreshEnabled && searchCompleted) {
                     scheduleNextRefresh();
+                }
+                if (pendingSearch) {
+                    pendingSearch = false;
+                    performSearch();
                 }
             }
         }
@@ -2715,6 +2724,11 @@
         });
         termsInput.addEventListener('input', () => {
             updateExpansionSummary();
+            if (!termsInput.value.trim()) {
+                cancelDebouncedSearch();
+                pendingSearch = false;
+                return;
+            }
             debouncedSearch();
         });
 
