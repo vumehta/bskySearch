@@ -101,10 +101,15 @@ async function refreshOrCreateSession() {
         cachedSession = refreshed;
         sessionCreatedAt = Date.now();
         return refreshed;
-      } catch (error) {
+      } catch (refreshError) {
+        console.error('Session refresh failed:', refreshError.message || refreshError);
         cachedSession = null;
         sessionCreatedAt = null;
       }
+    }
+
+    if (!BSKY_HANDLE || !BSKY_APP_PASSWORD) {
+      throw new Error('Cannot create session: missing credentials');
     }
 
     const created = await createSession();
