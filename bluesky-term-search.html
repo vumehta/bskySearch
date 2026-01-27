@@ -1403,6 +1403,7 @@
                 deleteBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
                     removeFromSearchHistory(entry.id);
+                    historySelectedIndex = -1;
                     renderSearchHistoryDropdown();
                 });
                 termsRow.appendChild(deleteBtn);
@@ -1516,7 +1517,13 @@
                 updateHistorySelection(historySelectedIndex);
             } else if (e.key === 'Enter' && historySelectedIndex >= 0) {
                 e.preventDefault();
-                applyHistoryEntry(history[historySelectedIndex]);
+                const selected = history[historySelectedIndex];
+                if (!selected) {
+                    historySelectedIndex = -1;
+                    updateHistorySelection(historySelectedIndex);
+                    return;
+                }
+                applyHistoryEntry(selected);
                 hideSearchHistoryDropdown();
             } else if (e.key === 'Escape') {
                 hideSearchHistoryDropdown();
@@ -3125,7 +3132,7 @@
             }
             searchDebounceTimer = setTimeout(() => {
                 searchDebounceTimer = null;
-                performSearch();
+                performSearch(false);
             }, SEARCH_DEBOUNCE_MS);
         }
 
