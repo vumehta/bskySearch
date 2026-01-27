@@ -1281,6 +1281,10 @@
             };
         }
 
+        function getHistoryKey(entry) {
+            return `${entry.terms.toLowerCase()}|${entry.minLikes}|${entry.timeFilter}|${entry.sort}|${entry.expand ? '1' : '0'}`;
+        }
+
         function loadSearchHistory() {
             try {
                 const stored = localStorage.getItem(HISTORY_STORAGE_KEY);
@@ -1316,10 +1320,10 @@
             if (!validated) return;
 
             const history = loadSearchHistory();
-            const normalizedTerms = validated.terms.toLowerCase();
+            const historyKey = getHistoryKey(validated);
 
-            // Remove existing entry with same terms (we'll add updated one at top)
-            const filtered = history.filter(h => h.terms.toLowerCase() !== normalizedTerms);
+            // Remove existing entry with same query config (we'll add updated one at top)
+            const filtered = history.filter(h => getHistoryKey(h) !== historyKey);
 
             // Add new entry at the beginning
             filtered.unshift(validated);
