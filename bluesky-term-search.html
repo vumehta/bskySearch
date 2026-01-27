@@ -747,7 +747,7 @@
             margin-bottom: 0;
         }
 
-        .thread-context + .post {
+        .thread-context+.post {
             border-top-left-radius: 0;
             border-top-right-radius: 0;
             margin-top: 0;
@@ -1109,7 +1109,8 @@
                 </div>
             </div>
             <div class="form-group small refresh-link">
-                <a class="thread-link" href="https://bskyfeed-watch.fly.dev/" target="_blank" rel="noopener noreferrer">Custom keyword feed</a>
+                <a class="thread-link" href="https://bskyfeed-watch.fly.dev/" target="_blank"
+                    rel="noopener noreferrer">Custom keyword feed</a>
             </div>
         </div>
     </div>
@@ -1174,7 +1175,7 @@
         let timeFilterHours = 24;
         let isLoading = false;
         let isRefreshing = false;
-        let pendingSearch = false;
+        let pendingSearch = null;  // null = no pending search, boolean = saveToHistory value for pending search
         let renderLimit = INITIAL_RENDER_LIMIT;
         let autoRefreshEnabled = false;
         let refreshIntervalMs = 5 * 60 * 1000;
@@ -1445,7 +1446,6 @@
 
                 div.addEventListener('click', () => {
                     applyHistoryEntry(entry);
-                    hideSearchHistoryDropdown();
                 });
 
                 dropdown.appendChild(div);
@@ -1508,6 +1508,12 @@
         function handleHistoryKeydown(e) {
             if (!historyDropdownVisible) return;
 
+            // Always allow Escape to close the dropdown, even when history is empty
+            if (e.key === 'Escape') {
+                hideSearchHistoryDropdown();
+                return;
+            }
+
             const history = loadSearchHistory();
             if (history.length === 0) return;
 
@@ -1528,9 +1534,6 @@
                     return;
                 }
                 applyHistoryEntry(selected);
-                hideSearchHistoryDropdown();
-            } else if (e.key === 'Escape') {
-                hideSearchHistoryDropdown();
             } else if (e.key === 'Delete' && historySelectedIndex >= 0) {
                 e.preventDefault();
                 removeFromSearchHistory(history[historySelectedIndex].id);
@@ -2939,10 +2942,10 @@
             hideSearchHistoryDropdown();
 
             if (isLoading) {
-                pendingSearch = true;
+                pendingSearch = saveToHistory;
                 return;
             }
-            pendingSearch = false;
+            pendingSearch = null;
             const termsValue = termsInput.value.trim();
             if (!termsValue) {
                 showStatus('Please enter at least one search term.', 'error');
@@ -3017,9 +3020,10 @@
                 if (autoRefreshEnabled && searchCompleted) {
                     scheduleNextRefresh();
                 }
-                if (pendingSearch) {
-                    pendingSearch = false;
-                    performSearch();
+                if (pendingSearch !== null) {
+                    const pendingSaveToHistory = pendingSearch;
+                    pendingSearch = null;
+                    performSearch(pendingSaveToHistory);
                 }
             }
         }
@@ -3157,7 +3161,7 @@
             updateExpansionSummary();
             if (!termsInput.value.trim()) {
                 cancelDebouncedSearch();
-                pendingSearch = false;
+                pendingSearch = null;
                 return;
             }
             debouncedSearch();
