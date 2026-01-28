@@ -102,7 +102,11 @@ async function refreshOrCreateSession() {
         sessionCreatedAt = Date.now();
         return refreshed;
       } catch (refreshError) {
-        console.error('Session refresh failed:', refreshError.message || refreshError);
+        const refreshMessage =
+          refreshError && typeof refreshError.message === 'string'
+            ? refreshError.message
+            : 'Unknown refresh error';
+        console.error('Session refresh failed:', refreshMessage);
         cachedSession = null;
         sessionCreatedAt = null;
       }
