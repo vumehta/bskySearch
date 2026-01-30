@@ -1085,11 +1085,6 @@
         const quoteResultsDiv = document.getElementById('quoteResults');
         const quoteLoadMoreDiv = document.getElementById('quoteLoadMore');
 
-        // Safe text content setter (prevents XSS)
-        function setText(element, text) {
-            element.textContent = text;
-        }
-
         // Validate URL is from allowed domains
         function isValidBskyUrl(url) {
             if (!url) return false;
@@ -1205,26 +1200,18 @@
             updateExpansionSummary();
         }
 
-        // Show status message
-        function showStatus(message, type = 'info') {
-            statusDiv.className = 'status ' + type;
-            setText(statusDiv, message);
-            statusDiv.style.display = 'block';
+        // Status message helpers
+        function showStatusOn(el, message, type = 'info') {
+            el.className = 'status ' + type;
+            el.textContent = message;
+            el.style.display = 'block';
         }
+        const hideStatusOn = el => el.style.display = 'none';
 
-        function hideStatus() {
-            statusDiv.style.display = 'none';
-        }
-
-        function showQuoteStatus(message, type = 'info') {
-            quoteStatusDiv.className = 'status ' + type;
-            setText(quoteStatusDiv, message);
-            quoteStatusDiv.style.display = 'block';
-        }
-
-        function hideQuoteStatus() {
-            quoteStatusDiv.style.display = 'none';
-        }
+        const showStatus = (msg, type) => showStatusOn(statusDiv, msg, type);
+        const hideStatus = () => hideStatusOn(statusDiv);
+        const showQuoteStatus = (msg, type) => showStatusOn(quoteStatusDiv, msg, type);
+        const hideQuoteStatus = () => hideStatusOn(quoteStatusDiv);
 
         function normalizeTerm(raw) {
             let term = raw.trim();
@@ -1451,7 +1438,7 @@
         // Extract post URL from URI
         function getPostUrl(post) {
             const parts = post.uri.split('/');
-            const postId = parts[parts.length - 1];
+            const postId = parts.at(-1);
             const handle = post.author.handle;
             if (!/^[a-zA-Z0-9._-]+$/.test(handle) || !/^[a-zA-Z0-9]+$/.test(postId)) {
                 return null;
@@ -1571,13 +1558,15 @@
             }, 8000);
         }
 
+        const pluralize = (n, singular, plural = singular + 's') => n === 1 ? singular : plural;
+
         function updateQuoteCount() {
             if (Number.isFinite(quoteTotalCount)) {
                 const total = quoteTotalCount;
-                quoteCountDiv.textContent = `Loaded ${allQuotes.length} of ${total} quote${total !== 1 ? 's' : ''}`;
+                quoteCountDiv.textContent = `Loaded ${allQuotes.length} of ${total} ${pluralize(total, 'quote')}`;
                 return;
             }
-            quoteCountDiv.textContent = `Loaded ${allQuotes.length} quote${allQuotes.length !== 1 ? 's' : ''}`;
+            quoteCountDiv.textContent = `Loaded ${allQuotes.length} ${pluralize(allQuotes.length, 'quote')}`;
         }
 
         function trackQuoteCursor(nextCursor) {
@@ -1693,84 +1682,55 @@
             return sorted;
         }
 
-        function createQuoteOriginalElement(post) {
-            const wrapper = document.createElement('div');
-            wrapper.className = 'quote-original';
-
-            const label = document.createElement('div');
-            label.className = 'label';
-            label.textContent = 'Original Post';
-            wrapper.appendChild(label);
-
-            const author = document.createElement('div');
-            author.className = 'quote-author';
-            const authorName = post.author.displayName || post.author.handle;
-            author.textContent = `${authorName} (@${post.author.handle})`;
-            wrapper.appendChild(author);
-
-            const meta = document.createElement('div');
-            meta.className = 'quote-meta';
-            const time = document.createElement('span');
-            time.textContent = formatDateTime(post.record?.createdAt || post.indexedAt);
-            meta.appendChild(time);
-            wrapper.appendChild(meta);
-
-            const postUrl = getPostUrl(post);
-            if (postUrl) {
-                const actions = document.createElement('div');
-                actions.className = 'link-actions';
-
-                const link = document.createElement('a');
-                link.className = 'thread-link';
-                link.href = postUrl;
-                link.target = '_blank';
-                link.rel = 'noopener noreferrer';
-                link.textContent = 'View on Bluesky';
-                actions.appendChild(link);
-
-                wrapper.appendChild(actions);
-            }
-
-            const text = document.createElement('div');
-            text.className = 'quote-text';
-            text.textContent = post.record?.text || '';
-            wrapper.appendChild(text);
-
-            const stats = document.createElement('div');
-            stats.className = 'quote-stats';
-
-            const likeStat = document.createElement('span');
-            likeStat.className = 'quote-stat likes';
-            likeStat.textContent = `♥ ${post.likeCount || 0}`;
-            stats.appendChild(likeStat);
-
-            const repostStat = document.createElement('span');
-            repostStat.className = 'quote-stat reposts';
-            repostStat.textContent = `↻ ${post.repostCount || 0}`;
-            stats.appendChild(repostStat);
-
-            const replyStat = document.createElement('span');
-            replyStat.className = 'quote-stat replies';
-            replyStat.textContent = `💬 ${post.replyCount || 0}`;
-            stats.appendChild(replyStat);
-
-            const quoteStat = document.createElement('span');
-            quoteStat.className = 'quote-stat';
-            quoteStat.textContent = `Quotes ${post.quoteCount || 0}`;
-            stats.appendChild(quoteStat);
-
-            wrapper.appendChild(stats);
-            return wrapper;
+        function createExternalLink(href, text, className = 'thread-link') {
+            const link = document.createElement('a');
+            link.className = className;
+            link.href = href;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            link.textContent = text;
+            return link;
         }
 
-        function createQuotePostElement(post, index) {
+        function createQuoteStats(post, includeQuotes = false) {
+            const stats = document.createElement('div');
+            stats.className = 'quote-stats';
+
+            const addStat = (icon, count, cls) => {
+                const span = document.createElement('span');
+                span.className = `quote-stat ${cls}`;
+                span.textContent = `${icon} ${count || 0}`;
+                stats.appendChild(span);
+            };
+
+            addStat('♥', post.likeCount, 'likes');
+            addStat('↻', post.repostCount, 'reposts');
+            addStat('💬', post.replyCount, 'replies');
+
+            if (includeQuotes) {
+                addStat('Quotes', post.quoteCount, '');
+            }
+            return stats;
+        }
+
+        function createQuoteElement(post, options = {}) {
+            const { isOriginal = false, depthIndex = 0 } = options;
+
             const wrapper = document.createElement('div');
-            wrapper.className = `quote-post depth-${(index % 8) + 1}`;
+            wrapper.className = isOriginal
+                ? 'quote-original'
+                : `quote-post depth-${(depthIndex % 8) + 1}`;
+
+            if (isOriginal) {
+                const label = document.createElement('div');
+                label.className = 'label';
+                label.textContent = 'Original Post';
+                wrapper.appendChild(label);
+            }
 
             const author = document.createElement('div');
             author.className = 'quote-author';
-            const authorName = post.author.displayName || post.author.handle;
-            author.textContent = `${authorName} (@${post.author.handle})`;
+            author.textContent = `${post.author.displayName || post.author.handle} (@${post.author.handle})`;
             wrapper.appendChild(author);
 
             const meta = document.createElement('div');
@@ -1784,15 +1744,7 @@
             if (postUrl) {
                 const actions = document.createElement('div');
                 actions.className = 'link-actions';
-
-                const link = document.createElement('a');
-                link.className = 'thread-link';
-                link.href = postUrl;
-                link.target = '_blank';
-                link.rel = 'noopener noreferrer';
-                link.textContent = 'View on Bluesky';
-                actions.appendChild(link);
-
+                actions.appendChild(createExternalLink(postUrl, 'View on Bluesky'));
                 wrapper.appendChild(actions);
             }
 
@@ -1801,25 +1753,7 @@
             text.textContent = post.record?.text || '';
             wrapper.appendChild(text);
 
-            const stats = document.createElement('div');
-            stats.className = 'quote-stats';
-
-            const likeStat = document.createElement('span');
-            likeStat.className = 'quote-stat likes';
-            likeStat.textContent = `♥ ${post.likeCount || 0}`;
-            stats.appendChild(likeStat);
-
-            const repostStat = document.createElement('span');
-            repostStat.className = 'quote-stat reposts';
-            repostStat.textContent = `↻ ${post.repostCount || 0}`;
-            stats.appendChild(repostStat);
-
-            const replyStat = document.createElement('span');
-            replyStat.className = 'quote-stat replies';
-            replyStat.textContent = `💬 ${post.replyCount || 0}`;
-            stats.appendChild(replyStat);
-
-            wrapper.appendChild(stats);
+            wrapper.appendChild(createQuoteStats(post, isOriginal));
             return wrapper;
         }
 
@@ -1851,7 +1785,7 @@
 
             const sorted = sortQuotes(allQuotes, quoteSort);
             sorted.forEach((quote, index) => {
-                quoteResultsDiv.appendChild(createQuotePostElement(quote, index));
+                quoteResultsDiv.appendChild(createQuoteElement(quote, { depthIndex: index }));
             });
         }
 
@@ -1928,7 +1862,7 @@
                     quoteTotalCount = post.quoteCount;
                 }
 
-                quoteOriginalDiv.appendChild(createQuoteOriginalElement(post));
+                quoteOriginalDiv.appendChild(createQuoteElement(post, { isOriginal: true }));
                 updateQuoteCount();
                 quoteTabs.style.display = 'flex';
                 hideQuoteStatus();
@@ -2161,13 +2095,7 @@
             authorInfo.className = 'author-info';
 
             const authorUrl = `https://bsky.app/profile/${encodeURIComponent(handle)}`;
-            const nameLink = document.createElement('a');
-            nameLink.className = 'display-name';
-            nameLink.href = authorUrl;
-            nameLink.target = '_blank';
-            nameLink.rel = 'noopener noreferrer';
-            nameLink.textContent = displayName;
-            authorInfo.appendChild(nameLink);
+            authorInfo.appendChild(createExternalLink(authorUrl, displayName, 'display-name'));
 
             const handleSpan = document.createElement('span');
             handleSpan.className = 'handle';
@@ -2244,22 +2172,9 @@
                     threadLink.textContent = 'View Thread';
                     threadLink.addEventListener('click', () => toggleThread(post, postDiv));
                     linksDiv.appendChild(threadLink);
-
-                    const blueskyLink = document.createElement('a');
-                    blueskyLink.className = 'thread-link';
-                    blueskyLink.href = postUrl;
-                    blueskyLink.target = '_blank';
-                    blueskyLink.rel = 'noopener noreferrer';
-                    blueskyLink.textContent = 'View on Bluesky';
-                    linksDiv.appendChild(blueskyLink);
+                    linksDiv.appendChild(createExternalLink(postUrl, 'View on Bluesky'));
                 } else {
-                    const repliesLink = document.createElement('a');
-                    repliesLink.className = 'thread-link';
-                    repliesLink.href = postUrl;
-                    repliesLink.target = '_blank';
-                    repliesLink.rel = 'noopener noreferrer';
-                    repliesLink.textContent = 'View Replies →';
-                    linksDiv.appendChild(repliesLink);
+                    linksDiv.appendChild(createExternalLink(postUrl, 'View Replies →'));
                 }
             }
 
@@ -2367,7 +2282,7 @@
 
             const title = document.createElement('div');
             title.className = 'new-posts-title';
-            title.textContent = `${pendingPosts.length} new post${pendingPosts.length !== 1 ? 's' : ''} from auto-refresh`;
+            title.textContent = `${pendingPosts.length} new ${pluralize(pendingPosts.length, 'post')} from auto-refresh`;
             header.appendChild(title);
 
             const actions = document.createElement('div');

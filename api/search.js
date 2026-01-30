@@ -15,13 +15,6 @@ const SEARCH_CACHE_CLEANUP_INTERVAL_MS = 5000;
 const searchResultsCache = new Map();
 let lastSearchCacheCleanupAt = 0;
 
-function getQueryString(value) {
-  if (Array.isArray(value)) {
-    return value[0];
-  }
-  return typeof value === 'string' ? value : '';
-}
-
 async function createSession() {
   const response = await fetch(`${BSKY_SERVICE}/com.atproto.server.createSession`, {
     method: 'POST',
@@ -35,9 +28,8 @@ async function createSession() {
   });
 
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    const message = errorData.message || `Create session failed: ${response.status}`;
-    throw new Error(message);
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.message || `Create session failed: ${response.status}`);
   }
 
   return response.json();
@@ -56,9 +48,8 @@ async function refreshSession() {
   });
 
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    const message = errorData.message || `Refresh session failed: ${response.status}`;
-    throw new Error(message);
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.message || `Refresh session failed: ${response.status}`);
   }
 
   return response.json();
@@ -110,10 +101,6 @@ async function refreshOrCreateSession() {
         cachedSession = null;
         sessionCreatedAt = null;
       }
-    }
-
-    if (!BSKY_HANDLE || !BSKY_APP_PASSWORD) {
-      throw new Error('Cannot create session: missing credentials');
     }
 
     const created = await createSession();
@@ -187,9 +174,10 @@ module.exports = async (req, res) => {
     });
   }
 
-  const term = getQueryString(req.query.term).trim();
-  const cursor = getQueryString(req.query.cursor);
-  const sort = getQueryString(req.query.sort).trim().toLowerCase();
+  const getStr = v => Array.isArray(v) ? v[0] : (v || '');
+  const term = getStr(req.query.term).trim();
+  const cursor = getStr(req.query.cursor);
+  const sort = getStr(req.query.sort).trim().toLowerCase();
 
   if (!term) {
     return res.status(400).json({ error: 'Missing term parameter.' });
