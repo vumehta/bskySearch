@@ -15,6 +15,8 @@ Deployed via Vercel—`vercel.json` controls routing and security headers. Minif
 
 ## Code Style
 
+**Always prioritize long-term cleanliness over short-term convenience.** Avoid quick hacks, tech debt, and band-aid fixes. Write code that future maintainers will thank you for.
+
 ### JavaScript
 - Use vanilla JavaScript (ES6+), no frameworks
 - NEVER use innerHTML—use safe DOM methods (createElement, textContent) to prevent XSS
