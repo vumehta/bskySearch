@@ -6,7 +6,7 @@
   "scripts": {
     "minify:js": "terser app.js -o app.min.js --compress --mangle",
     "minify:css": "postcss styles.css --use cssnano --no-map -o styles.min.css",
-    "build": "npm run minify:js && npm run minify:css",
+    "build": "npm run minify:js && npm run minify:css && node scripts/prepare-dist.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
