@@ -6,12 +6,11 @@ bskySearch is a full-stack web application for searching Bluesky posts with adva
 
 ## Build & Run
 
-```bash
-npm install                    # Install dev dependencies
-npm run build                  # Minify JS and CSS for production
-```
+Deployed via Vercel—push to `main` and Vercel handles everything:
+- Runs `npm run build` to minify JS/CSS
+- Serves from `vercel.json` (routing, security headers)
 
-Deployed via Vercel—`vercel.json` controls routing and security headers. Minified files (app.min.js, styles.min.css) are built during Vercel deploy, not committed.
+**Local development:** Run `npm install && npm run build` once to generate minified files, then open `bluesky-term-search.html` in browser. Re-run build after editing source files.
 
 ## Code Style
 
@@ -112,8 +111,14 @@ No test framework configured yet. Verify changes manually:
 - Keep commits focused on single changes
 - Minified files are gitignored—Vercel builds them
 
+## Claude Code
+
+Custom agents in `.claude/agents/`:
+- `security-reviewer.md` — XSS and security audit for code changes
+
 ## Gotchas
 
+- Strict CSP in vercel.json—no inline scripts/styles, limited connect-src (self + public.api.bsky.app only)
 - The HTML references minified files, but dev changes go in source files (app.js, styles.css)
 - Session refresh has race condition protection via `sessionPromise`—don't bypass this pattern
 - Auto-refresh timer uses setInterval; remember to clear on search changes
