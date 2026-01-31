@@ -2,3 +2,6 @@
 .DS_Store
 .vercel
 .env
+node_modules/
+app.min.js
+styles.min.css
