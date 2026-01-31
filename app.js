@@ -1177,24 +1177,42 @@ function createPostElement(post) {
     textDiv.appendChild(createHighlightedText(text, searchTerms));
     postDiv.appendChild(textDiv);
 
-    // Images
+    // Images (hidden by default)
     if (post.embed?.$type === 'app.bsky.embed.images#view' && post.embed.images) {
-        const imagesDiv = document.createElement('div');
-        imagesDiv.className = 'post-images ' + (post.embed.images.length === 1 ? 'single' : 'multiple');
+        const validImages = post.embed.images.filter(img => img.thumb && isValidBskyUrl(img.thumb));
 
-        post.embed.images.forEach(img => {
-            if (img.thumb && isValidBskyUrl(img.thumb)) {
-                const imgEl = document.createElement('img');
-                imgEl.className = 'post-image';
-                imgEl.src = img.thumb;
-                imgEl.alt = img.alt || '';
-                imgEl.loading = 'lazy';
-                imagesDiv.appendChild(imgEl);
-            }
-        });
+        if (validImages.length > 0) {
+            const imagesContainer = document.createElement('div');
+            imagesContainer.className = 'post-images-container';
 
-        if (imagesDiv.children.length > 0) {
-            postDiv.appendChild(imagesDiv);
+            // Create placeholder
+            const placeholder = document.createElement('div');
+            placeholder.className = 'image-placeholder';
+
+            const showBtn = document.createElement('button');
+            showBtn.type = 'button';
+            const count = validImages.length;
+            showBtn.textContent = `Show ${count} image${count !== 1 ? 's' : ''}`;
+            showBtn.addEventListener('click', () => {
+                // Replace placeholder with actual images
+                const imagesDiv = document.createElement('div');
+                imagesDiv.className = 'post-images ' + (validImages.length === 1 ? 'single' : 'multiple');
+
+                validImages.forEach(img => {
+                    const imgEl = document.createElement('img');
+                    imgEl.className = 'post-image';
+                    imgEl.src = img.thumb;
+                    imgEl.alt = img.alt || '';
+                    imgEl.loading = 'lazy';
+                    imagesDiv.appendChild(imgEl);
+                });
+
+                imagesContainer.replaceChild(imagesDiv, placeholder);
+            });
+
+            placeholder.appendChild(showBtn);
+            imagesContainer.appendChild(placeholder);
+            postDiv.appendChild(imagesContainer);
         }
     }
 
