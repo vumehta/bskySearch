@@ -267,3 +267,10 @@ module.exports = async (req, res) => {
     return res.status(500).json({ error: 'Search proxy failed.' });
   }
 };
+
+// Test utilities export (must be after module.exports assignment)
+module.exports.testUtils = {
+  getQueryString,
+  getSearchCacheKey,
+  isSessionExpired,
+};
