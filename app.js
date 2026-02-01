@@ -281,7 +281,7 @@ function updateExpansionSummary() {
 
 // Generate cache key for search requests
 function getSearchCacheKey(term, cursor, sort) {
-    return `${term}|${cursor || ''}|${sort}`;
+    return JSON.stringify([term, cursor || '', sort]);
 }
 
 // Check if cached result is still valid

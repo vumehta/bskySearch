@@ -130,7 +130,7 @@ async function refreshOrCreateSession() {
 
 // Generate cache key for search results
 function getSearchCacheKey(term, cursor, sort) {
-  return `${term}|${cursor || ''}|${sort}`;
+  return JSON.stringify([term, cursor || '', sort]);
 }
 
 // Get cached search result if valid
