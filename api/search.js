@@ -188,13 +188,6 @@ async function searchPosts(term, cursor, accessJwt, sort) {
   });
 }
 
-// Test utilities export
-module.exports.testUtils = {
-  getQueryString,
-  getSearchCacheKey,
-  isSessionExpired,
-};
-
 module.exports = async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
 
@@ -273,4 +266,11 @@ module.exports = async (req, res) => {
     console.error('Search proxy error:', error);
     return res.status(500).json({ error: 'Search proxy failed.' });
   }
+};
+
+// Test utilities export (must be after module.exports assignment)
+module.exports.testUtils = {
+  getQueryString,
+  getSearchCacheKey,
+  isSessionExpired,
 };
