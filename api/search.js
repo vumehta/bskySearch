@@ -9,9 +9,10 @@ let cachedSession = null;
 let sessionCreatedAt = null;
 let sessionPromise = null;
 
-// Search results cache with 30s TTL
+// Search results cache with 30s TTL and size cap
 const SEARCH_CACHE_TTL_MS = 30000;
 const SEARCH_CACHE_CLEANUP_INTERVAL_MS = 5000;
+const MAX_SEARCH_CACHE_SIZE = 500;
 const searchResultsCache = new Map();
 let lastSearchCacheCleanupAt = 0;
 
@@ -140,7 +141,20 @@ function getCachedSearchResult(cacheKey) {
     searchResultsCache.delete(cacheKey);
     return null;
   }
+  // Refresh order for LRU-style eviction without extending TTL.
+  searchResultsCache.delete(cacheKey);
+  searchResultsCache.set(cacheKey, cached);
   return cached.data;
+}
+
+function enforceSearchCacheLimit() {
+  while (searchResultsCache.size > MAX_SEARCH_CACHE_SIZE) {
+    const oldestKey = searchResultsCache.keys().next().value;
+    if (oldestKey === undefined) {
+      break;
+    }
+    searchResultsCache.delete(oldestKey);
+  }
 }
 
 // Clean up expired cache entries periodically
@@ -151,6 +165,7 @@ function cleanupSearchCache() {
       searchResultsCache.delete(key);
     }
   }
+  enforceSearchCacheLimit();
 }
 
 async function searchPosts(term, cursor, accessJwt, sort) {
@@ -244,6 +259,7 @@ module.exports = async (req, res) => {
 
     // Cache the successful result
     searchResultsCache.set(cacheKey, { data: payload, timestamp: Date.now() });
+    enforceSearchCacheLimit();
 
     return res.status(200).json(payload);
   } catch (error) {
