@@ -188,6 +188,13 @@ async function searchPosts(term, cursor, accessJwt, sort) {
   });
 }
 
+// Test utilities export
+module.exports.testUtils = {
+  getQueryString,
+  getSearchCacheKey,
+  isSessionExpired,
+};
+
 module.exports = async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
 

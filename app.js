@@ -1755,3 +1755,19 @@ initFromURL();
 updateRefreshInterval();
 updateRefreshMeta();
 updateExpansionSummary();
+
+// Export for testing (no-op in browser)
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+        isValidBskyUrl,
+        parseBlueskyPostUrl,
+        deduplicatePosts,
+        trackQuoteCursor,
+        getSearchCacheKey,
+        filterByLikes,
+        sortPosts,
+        normalizeTerm,
+        expandSearchTerms,
+        formatDuration,
+    };
+}
