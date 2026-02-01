@@ -485,6 +485,35 @@ button:disabled {
     object-fit: cover;
 }
 
+.post-images-container {
+    margin-bottom: 12px;
+}
+
+.image-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: var(--surface);
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+}
+
+.image-placeholder button {
+    background: none;
+    border: none;
+    color: var(--accent);
+    cursor: pointer;
+    font-size: 14px;
+    font-family: inherit;
+    padding: 0;
+}
+
+.image-placeholder button:hover {
+    text-decoration: underline;
+    background: none;
+}
+
 .post-stats {
     display: flex;
     gap: 20px;
