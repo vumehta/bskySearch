@@ -5,7 +5,7 @@
  * We mock the browser globals minimally to allow the module to load.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
 // Mock browser globals before importing app.js
 globalThis.document = {

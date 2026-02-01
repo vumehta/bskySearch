@@ -4,7 +4,7 @@
  * Tests pure utility functions from the search API module.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
 // Import test utilities from the search module
 const { testUtils } = await import('../api/search.js');
@@ -22,7 +22,7 @@ describe('getQueryString', () => {
     expect(getQueryString(['first', 'second'])).toBe('first');
   });
 
-  it('returns empty string for empty array', () => {
+  it('returns undefined for empty array', () => {
     expect(getQueryString([])).toBe(undefined);
   });
 
