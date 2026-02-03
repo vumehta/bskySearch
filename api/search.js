@@ -273,4 +273,10 @@ module.exports.testUtils = {
   getQueryString,
   getSearchCacheKey,
   isSessionExpired,
+  getCachedSearchResult,
+  cleanupSearchCache,
+  enforceSearchCacheLimit,
+  searchResultsCache,
+  SEARCH_CACHE_TTL_MS,
+  MAX_SEARCH_CACHE_SIZE,
 };
