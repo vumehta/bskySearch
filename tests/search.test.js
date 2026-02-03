@@ -154,4 +154,25 @@ describe('searchResultsCache helpers', () => {
     expect(getCachedSearchResult('stale')).toBeNull();
     expect(searchResultsCache.has('stale')).toBe(false);
   });
+
+  it('returns fresh entries and refreshes LRU order on read', () => {
+    const now = 3_000_000;
+    vi.spyOn(Date, 'now').mockReturnValue(now);
+
+    searchResultsCache.set('first', {
+      data: { ok: 1 },
+      timestamp: now,
+    });
+    searchResultsCache.set('second', {
+      data: { ok: 2 },
+      timestamp: now,
+    });
+    searchResultsCache.set('third', {
+      data: { ok: 3 },
+      timestamp: now,
+    });
+
+    expect(getCachedSearchResult('first')).toEqual({ ok: 1 });
+    expect([...searchResultsCache.keys()]).toEqual(['second', 'third', 'first']);
+  });
 });
