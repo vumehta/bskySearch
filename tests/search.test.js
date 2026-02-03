@@ -4,11 +4,29 @@
  * Tests pure utility functions from the search API module.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // Import test utilities from the search module
 const { testUtils } = await import('../api/search.js');
-const { getQueryString, getSearchCacheKey, isSessionExpired } = testUtils;
+const {
+  getQueryString,
+  getSearchCacheKey,
+  isSessionExpired,
+  getCachedSearchResult,
+  cleanupSearchCache,
+  enforceSearchCacheLimit,
+  searchResultsCache,
+  SEARCH_CACHE_TTL_MS,
+  MAX_SEARCH_CACHE_SIZE,
+} = testUtils;
+
+beforeEach(() => {
+  searchResultsCache.clear();
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 // ============================================================================
 // getQueryString
@@ -85,5 +103,55 @@ describe('isSessionExpired', () => {
   it('returns true when no session exists', () => {
     // The module starts with no session
     expect(isSessionExpired()).toBe(true);
+  });
+});
+
+// ============================================================================
+// searchResultsCache helpers
+// ============================================================================
+describe('searchResultsCache helpers', () => {
+  it('evicts oldest entries when cache exceeds max size', () => {
+    for (let i = 0; i < MAX_SEARCH_CACHE_SIZE + 2; i += 1) {
+      searchResultsCache.set(`key-${i}`, { data: { id: i }, timestamp: 0 });
+    }
+
+    enforceSearchCacheLimit();
+
+    expect(searchResultsCache.size).toBe(MAX_SEARCH_CACHE_SIZE);
+    expect(searchResultsCache.has('key-0')).toBe(false);
+    expect(searchResultsCache.has('key-1')).toBe(false);
+    expect(searchResultsCache.has(`key-${MAX_SEARCH_CACHE_SIZE + 1}`)).toBe(true);
+  });
+
+  it('removes expired entries during cleanup', () => {
+    const now = 1_000_000;
+    vi.spyOn(Date, 'now').mockReturnValue(now);
+
+    searchResultsCache.set('fresh', {
+      data: { ok: true },
+      timestamp: now - SEARCH_CACHE_TTL_MS + 1000,
+    });
+    searchResultsCache.set('stale', {
+      data: { ok: false },
+      timestamp: now - SEARCH_CACHE_TTL_MS - 1,
+    });
+
+    cleanupSearchCache();
+
+    expect(searchResultsCache.has('fresh')).toBe(true);
+    expect(searchResultsCache.has('stale')).toBe(false);
+  });
+
+  it('drops stale entries when reading cached results', () => {
+    const now = 2_000_000;
+    vi.spyOn(Date, 'now').mockReturnValue(now);
+
+    searchResultsCache.set('stale', {
+      data: { ok: false },
+      timestamp: now - SEARCH_CACHE_TTL_MS - 1,
+    });
+
+    expect(getCachedSearchResult('stale')).toBeNull();
+    expect(searchResultsCache.has('stale')).toBe(false);
   });
 });
