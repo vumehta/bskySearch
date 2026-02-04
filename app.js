@@ -152,6 +152,12 @@ function updateQuoteTabs() {
     });
 }
 
+function focusSearchInput() {
+    if (!termsInput) return;
+    termsInput.focus();
+    termsInput.select();
+}
+
 // Initialize from URL params
 function initFromURL() {
     const params = new URLSearchParams(window.location.search);
@@ -1755,6 +1761,7 @@ initFromURL();
 updateRefreshInterval();
 updateRefreshMeta();
 updateExpansionSummary();
+focusSearchInput();
 
 // Export for testing (no-op in browser)
 if (typeof module !== 'undefined' && module.exports) {
