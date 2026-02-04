@@ -5,7 +5,7 @@
  * We mock the browser globals minimally to allow the module to load.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 
 // Mock browser globals before importing app.js
 globalThis.document = {
@@ -38,11 +38,14 @@ const {
   deduplicatePosts,
   trackQuoteCursor,
   getSearchCacheKey,
+  getCachedDid,
   filterByLikes,
   sortPosts,
   normalizeTerm,
   expandSearchTerms,
   formatDuration,
+  didCache,
+  DID_CACHE_TTL_MS,
 } = app;
 
 // ============================================================================
@@ -246,6 +249,39 @@ describe('getSearchCacheKey', () => {
     const key1 = getSearchCacheKey('term', null, 'top');
     const key2 = getSearchCacheKey('term', '', 'top');
     expect(key1).toBe(key2);
+  });
+});
+
+// ============================================================================
+// getCachedDid
+// ============================================================================
+describe('getCachedDid', () => {
+  beforeEach(() => {
+    didCache.clear();
+  });
+
+  it('returns null for missing key', () => {
+    expect(getCachedDid('nonexistent')).toBe(null);
+  });
+
+  it('returns null for expired entry', () => {
+    const expiredTimestamp = Date.now() - DID_CACHE_TTL_MS - 1000;
+    didCache.set('alice', { did: 'did:plc:abc', timestamp: expiredTimestamp });
+    expect(getCachedDid('alice')).toBe(null);
+    // Should also delete the expired entry
+    expect(didCache.has('alice')).toBe(false);
+  });
+
+  it('returns did for fresh entry', () => {
+    const freshTimestamp = Date.now() - 1000; // 1 second ago
+    didCache.set('bob', { did: 'did:plc:xyz', timestamp: freshTimestamp });
+    expect(getCachedDid('bob')).toBe('did:plc:xyz');
+  });
+
+  it('returns did for entry at TTL boundary', () => {
+    const boundaryTimestamp = Date.now() - DID_CACHE_TTL_MS + 1000; // Just under TTL
+    didCache.set('carol', { did: 'did:plc:boundary', timestamp: boundaryTimestamp });
+    expect(getCachedDid('carol')).toBe('did:plc:boundary');
   });
 });
 
