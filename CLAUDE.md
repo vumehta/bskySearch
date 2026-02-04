@@ -33,9 +33,10 @@ Deployed via Vercel—push to `main` and Vercel handles everything:
 
 ## Architecture Decisions
 
-### Frontend (app.js)
-- Single-file architecture—all UI logic lives in app.js
-- Global state variables at module top (allPosts, currentCursors, etc.)
+### Frontend (src/ entry)
+- ESM modules under src/ bundled via esbuild into app.min.js
+- Build entry is src/app.mjs
+- Central state object lives in src/state.mjs
 - Map/Set for caches and tracking (didCache, searchCache, newPostUris)
 - URL params encode search state for shareable links
 
@@ -45,7 +46,7 @@ Deployed via Vercel—push to `main` and Vercel handles everything:
 - Session creation uses promise deduplication (`sessionPromise`) to prevent race conditions
 - Response caching with 30s TTL
 
-### Quote Finder (app.js)
+### Quote Finder (src/quotes.mjs)
 - Separate state from main search: allQuotes, quoteCursor, quoteSeenCursors, activeQuoteUri
 - Uses cursor deduplication via `trackQuoteCursor()` to prevent infinite loops
 - Converts post URLs to AT URIs via `parseBlueskyPostUrl()` + `fetchDid()`
@@ -79,8 +80,8 @@ Backend requires (set in Vercel dashboard):
 
 ### Adding a new search filter
 1. Add UI control in bluesky-term-search.html
-2. Add state variable in app.js
-3. Update `runSearch()` to include new parameter
+2. Add state variable in src/state.mjs
+3. Update search flow in src/search.mjs
 4. If backend needs it, update api/search.js validation
 
 ### Adding a new theme color
@@ -90,7 +91,7 @@ Backend requires (set in Vercel dashboard):
 
 ## Testing
 
-No test framework configured yet. Verify changes manually:
+Run `npm test` for the Vitest suite, then verify manually:
 1. Search with various terms
 2. Test filters (likes, time range)
 3. Test auto-refresh feature
@@ -119,7 +120,7 @@ Custom agents in `.claude/agents/`:
 ## Gotchas
 
 - Strict CSP in vercel.json—no inline scripts/styles, limited connect-src (self + public.api.bsky.app only)
-- The HTML references minified files, but dev changes go in source files (app.js, styles.css)
+- The HTML references minified files, but dev changes go in source files (src/, styles.css)
 - Session refresh has race condition protection via `sessionPromise`—don't bypass this pattern
 - Auto-refresh timer uses setInterval; remember to clear on search changes
 - Quote finder needs post URI, not post URL—conversion happens in `performQuoteSearch()`

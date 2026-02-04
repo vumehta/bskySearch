@@ -4,7 +4,7 @@
   "description": "",
   "main": "app.js",
   "scripts": {
-    "minify:js": "terser app.js -o app.min.js --compress --mangle",
+    "minify:js": "esbuild src/app.mjs --bundle --minify --platform=browser --format=iife --target=es2019 --outfile=app.min.js",
     "minify:css": "postcss styles.css --use cssnano --no-map -o styles.min.css",
     "build": "npm run minify:js && npm run minify:css && node scripts/prepare-dist.js",
     "test": "vitest run",
@@ -24,6 +24,7 @@
   "homepage": "https://github.com/vumehta/bskySearch#readme",
   "devDependencies": {
     "cssnano": "^7.1.2",
+    "esbuild": "^0.27.2",
     "postcss": "^8.5.6",
     "postcss-cli": "^11.0.1",
     "terser": "^5.46.0",
