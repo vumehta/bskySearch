@@ -154,8 +154,12 @@ function updateQuoteTabs() {
 
 function focusSearchInput() {
     if (!termsInput) return;
-    termsInput.focus();
-    termsInput.select();
+    if (typeof termsInput.focus === 'function') {
+        termsInput.focus();
+    }
+    if (typeof termsInput.select === 'function') {
+        termsInput.select();
+    }
 }
 
 // Initialize from URL params
