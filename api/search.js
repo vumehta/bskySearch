@@ -174,7 +174,7 @@ async function searchPosts(term, cursor, accessJwt, sort) {
     q: term,
     sort: sortValue,
     limit: '100',
-    lang: 'en',
+    lang: 'en', // Intentionally English-only; do not make configurable
   });
 
   if (cursor) {

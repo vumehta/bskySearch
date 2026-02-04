@@ -7,8 +7,9 @@ const RENDER_STEP = 100;
 const SEARCH_DEBOUNCE_MS = 300;
 const INITIAL_MAX_PAGES = 2;
 const SEARCH_CACHE_TTL_MS = 30000;
+const DID_CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 
-// DID cache to avoid duplicate lookups
+// DID cache to avoid duplicate lookups: key -> { did, timestamp }
 const didCache = new Map();
 // Search results cache: key -> { data, timestamp }
 const searchCache = new Map();
@@ -303,6 +304,17 @@ function getCachedSearch(cacheKey) {
         return null;
     }
     return cached.data;
+}
+
+// Check if cached DID is still valid
+function getCachedDid(cacheKey) {
+    const cached = didCache.get(cacheKey);
+    if (!cached) return null;
+    if (Date.now() - cached.timestamp > DID_CACHE_TTL_MS) {
+        didCache.delete(cacheKey);
+        return null;
+    }
+    return cached.did;
 }
 
 // Search posts for a single term (server-side proxy)
@@ -618,10 +630,10 @@ function parseBlueskyPostUrl(urlString) {
 }
 
 async function fetchDid(actor) {
-    // Check cache first
     const cacheKey = actor.toLowerCase();
-    if (didCache.has(cacheKey)) {
-        return didCache.get(cacheKey);
+    const cached = getCachedDid(cacheKey);
+    if (cached) {
+        return cached;
     }
 
     const response = await fetch(
@@ -636,8 +648,7 @@ async function fetchDid(actor) {
         throw new Error('Could not resolve DID for that handle.');
     }
 
-    // Cache the result
-    didCache.set(cacheKey, did);
+    didCache.set(cacheKey, { did, timestamp: Date.now() });
     return did;
 }
 
@@ -1775,10 +1786,13 @@ if (typeof module !== 'undefined' && module.exports) {
         deduplicatePosts,
         trackQuoteCursor,
         getSearchCacheKey,
+        getCachedDid,
         filterByLikes,
         sortPosts,
         normalizeTerm,
         expandSearchTerms,
         formatDuration,
+        didCache,
+        DID_CACHE_TTL_MS,
     };
 }
