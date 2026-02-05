@@ -193,7 +193,7 @@ export function updateRefreshInterval() {
 
 export function updateRefreshMeta() {
   if (state.autoRefreshEnabled) {
-    refreshStateDiv.textContent = state.isRefreshing ? 'Refreshing...' : 'Auto-refresh on';
+    refreshStateDiv.textContent = state.isRefreshing ? 'Refreshing…' : 'Auto-refresh on';
   } else {
     refreshStateDiv.textContent = 'Auto-refresh off';
   }
@@ -393,17 +393,32 @@ function createPostElement(post) {
 
   const likeStat = document.createElement('span');
   likeStat.className = 'stat likes';
-  likeStat.textContent = `\u2665 ${post.likeCount || 0}`;
+  likeStat.setAttribute('aria-label', `${post.likeCount || 0} likes`);
+  const likeIcon = document.createElement('span');
+  likeIcon.setAttribute('aria-hidden', 'true');
+  likeIcon.textContent = '\u2665 ';
+  likeStat.appendChild(likeIcon);
+  likeStat.appendChild(document.createTextNode(post.likeCount || 0));
   statsDiv.appendChild(likeStat);
 
   const repostStat = document.createElement('span');
   repostStat.className = 'stat';
-  repostStat.textContent = `\u21bb ${post.repostCount || 0}`;
+  repostStat.setAttribute('aria-label', `${post.repostCount || 0} reposts`);
+  const repostIcon = document.createElement('span');
+  repostIcon.setAttribute('aria-hidden', 'true');
+  repostIcon.textContent = '\u21bb ';
+  repostStat.appendChild(repostIcon);
+  repostStat.appendChild(document.createTextNode(post.repostCount || 0));
   statsDiv.appendChild(repostStat);
 
   const replyStat = document.createElement('span');
   replyStat.className = 'stat';
-  replyStat.textContent = `\ud83d\udcac ${post.replyCount || 0}`;
+  replyStat.setAttribute('aria-label', `${post.replyCount || 0} replies`);
+  const replyIcon = document.createElement('span');
+  replyIcon.setAttribute('aria-hidden', 'true');
+  replyIcon.textContent = '\ud83d\udcac ';
+  replyStat.appendChild(replyIcon);
+  replyStat.appendChild(document.createTextNode(post.replyCount || 0));
   statsDiv.appendChild(replyStat);
 
   postDiv.appendChild(statsDiv);
@@ -736,7 +751,7 @@ export async function performSearch() {
   updateSearchURL();
 
   try {
-    showStatus(`Searching for: ${state.rawSearchTerms.join(', ')}...`, 'loading');
+    showStatus(`Searching for: ${state.rawSearchTerms.join(', ')}…`, 'loading');
 
     // Fetch all terms in parallel (Bluesky API doesn't support OR queries)
     const promises = state.searchTerms.map((term) =>
@@ -783,7 +798,7 @@ export async function loadMore() {
   const loadMoreBtn = document.getElementById('loadMoreBtn');
   if (loadMoreBtn) {
     loadMoreBtn.disabled = true;
-    loadMoreBtn.textContent = 'Loading...';
+    loadMoreBtn.textContent = 'Loading…';
   }
 
   try {

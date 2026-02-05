@@ -124,17 +124,32 @@ function createQuoteOriginalElement(post) {
 
   const likeStat = document.createElement('span');
   likeStat.className = 'quote-stat likes';
-  likeStat.textContent = `\u2665 ${post.likeCount || 0}`;
+  likeStat.setAttribute('aria-label', `${post.likeCount || 0} likes`);
+  const likeIcon = document.createElement('span');
+  likeIcon.setAttribute('aria-hidden', 'true');
+  likeIcon.textContent = '\u2665 ';
+  likeStat.appendChild(likeIcon);
+  likeStat.appendChild(document.createTextNode(post.likeCount || 0));
   stats.appendChild(likeStat);
 
   const repostStat = document.createElement('span');
   repostStat.className = 'quote-stat reposts';
-  repostStat.textContent = `\u21bb ${post.repostCount || 0}`;
+  repostStat.setAttribute('aria-label', `${post.repostCount || 0} reposts`);
+  const repostIcon = document.createElement('span');
+  repostIcon.setAttribute('aria-hidden', 'true');
+  repostIcon.textContent = '\u21bb ';
+  repostStat.appendChild(repostIcon);
+  repostStat.appendChild(document.createTextNode(post.repostCount || 0));
   stats.appendChild(repostStat);
 
   const replyStat = document.createElement('span');
   replyStat.className = 'quote-stat replies';
-  replyStat.textContent = `\ud83d\udcac ${post.replyCount || 0}`;
+  replyStat.setAttribute('aria-label', `${post.replyCount || 0} replies`);
+  const replyIcon = document.createElement('span');
+  replyIcon.setAttribute('aria-hidden', 'true');
+  replyIcon.textContent = '\ud83d\udcac ';
+  replyStat.appendChild(replyIcon);
+  replyStat.appendChild(document.createTextNode(post.replyCount || 0));
   stats.appendChild(replyStat);
 
   const quoteStat = document.createElement('span');
@@ -189,17 +204,32 @@ function createQuotePostElement(post, index) {
 
   const likeStat = document.createElement('span');
   likeStat.className = 'quote-stat likes';
-  likeStat.textContent = `\u2665 ${post.likeCount || 0}`;
+  likeStat.setAttribute('aria-label', `${post.likeCount || 0} likes`);
+  const likeIcon = document.createElement('span');
+  likeIcon.setAttribute('aria-hidden', 'true');
+  likeIcon.textContent = '\u2665 ';
+  likeStat.appendChild(likeIcon);
+  likeStat.appendChild(document.createTextNode(post.likeCount || 0));
   stats.appendChild(likeStat);
 
   const repostStat = document.createElement('span');
   repostStat.className = 'quote-stat reposts';
-  repostStat.textContent = `\u21bb ${post.repostCount || 0}`;
+  repostStat.setAttribute('aria-label', `${post.repostCount || 0} reposts`);
+  const repostIcon = document.createElement('span');
+  repostIcon.setAttribute('aria-hidden', 'true');
+  repostIcon.textContent = '\u21bb ';
+  repostStat.appendChild(repostIcon);
+  repostStat.appendChild(document.createTextNode(post.repostCount || 0));
   stats.appendChild(repostStat);
 
   const replyStat = document.createElement('span');
   replyStat.className = 'quote-stat replies';
-  replyStat.textContent = `\ud83d\udcac ${post.replyCount || 0}`;
+  replyStat.setAttribute('aria-label', `${post.replyCount || 0} replies`);
+  const replyIcon = document.createElement('span');
+  replyIcon.setAttribute('aria-hidden', 'true');
+  replyIcon.textContent = '\ud83d\udcac ';
+  replyStat.appendChild(replyIcon);
+  replyStat.appendChild(document.createTextNode(post.replyCount || 0));
   stats.appendChild(replyStat);
 
   wrapper.appendChild(stats);
@@ -301,7 +331,7 @@ async function loadMoreQuotes() {
   const loadMoreBtn = document.getElementById('quoteLoadMoreBtn');
   if (loadMoreBtn) {
     loadMoreBtn.disabled = true;
-    loadMoreBtn.textContent = 'Loading...';
+    loadMoreBtn.textContent = 'Loading…';
   }
 
   try {
@@ -333,7 +363,7 @@ export async function performQuoteSearch() {
 
   state.isQuoteLoading = true;
   quoteSearchBtn.disabled = true;
-  showQuoteStatus('Loading quotes...', 'loading');
+  showQuoteStatus('Loading quotes…', 'loading');
   quoteTabs.style.display = 'none';
   quoteResultsDiv.textContent = '';
   quoteOriginalDiv.textContent = '';

@@ -119,7 +119,7 @@ export async function toggleThread(post, postElement) {
 
   link.dataset.loading = 'true';
   link.disabled = true;
-  link.textContent = 'Loading...';
+  link.textContent = 'Loading…';
 
   try {
     const threadData = await fetchPostThread(post.uri);

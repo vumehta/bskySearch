@@ -192,7 +192,7 @@ body {
 }
 
 .info-button:hover,
-.info-button:focus {
+.info-button:focus-visible {
     color: var(--text);
     border-color: var(--accent);
 }
@@ -252,7 +252,8 @@ label {
 
 input[type="text"],
 input[type="password"],
-input[type="number"] {
+input[type="number"],
+input[type="url"] {
     padding: 10px 12px;
     border: 1px solid var(--input-border);
     border-radius: 6px;
@@ -261,9 +262,10 @@ input[type="number"] {
     color: var(--text);
 }
 
-input[type="text"]:focus,
-input[type="password"]:focus,
-input[type="number"]:focus {
+input[type="text"]:focus-visible,
+input[type="password"]:focus-visible,
+input[type="number"]:focus-visible,
+input[type="url"]:focus-visible {
     outline: none;
     border-color: var(--accent);
     box-shadow: 0 0 0 2px var(--focus-ring);
@@ -278,7 +280,7 @@ select {
     color: var(--text);
 }
 
-select:focus {
+select:focus-visible {
     outline: none;
     border-color: var(--accent);
     box-shadow: 0 0 0 2px var(--focus-ring);
@@ -298,6 +300,11 @@ button {
 
 button:hover {
     background: var(--accent-strong);
+}
+
+button:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--focus-ring), 0 0 0 4px var(--accent);
 }
 
 button:disabled {
@@ -509,6 +516,7 @@ button:disabled {
     gap: 20px;
     color: var(--muted);
     font-size: 14px;
+    font-variant-numeric: tabular-nums;
 }
 
 .stat {
@@ -714,6 +722,7 @@ button:disabled {
     gap: 16px;
     color: var(--muted);
     font-size: 13px;
+    font-variant-numeric: tabular-nums;
 }
 
 .quote-stat {
@@ -835,7 +844,7 @@ button:disabled {
 
 .thread-link:hover,
 .thread-link:active,
-.thread-link:focus {
+.thread-link:focus-visible {
     text-decoration: underline;
     background-color: transparent;
     box-shadow: none;
@@ -880,5 +889,15 @@ button:disabled {
 
     .quote-tabs {
         flex-wrap: wrap;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
     }
 }
