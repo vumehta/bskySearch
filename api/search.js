@@ -327,7 +327,7 @@ module.exports = async (req, res) => {
 
     return res.status(200).json(payload);
   } catch (error) {
-    console.error('Search proxy error:', error);
+    console.error('Search proxy error:', error.message || 'Unknown error');
     if (isUpstreamTimeoutError(error)) {
       return res.status(504).json({ error: error.message });
     }
@@ -336,20 +336,23 @@ module.exports = async (req, res) => {
 };
 
 // Test utilities export (must be after module.exports assignment)
-module.exports.testUtils = {
-  getQueryString,
-  stripControlChars,
-  getSearchCacheKey,
-  isSessionExpired,
-  getCachedSearchResult,
-  cleanupSearchCache,
-  enforceSearchCacheLimit,
-  searchResultsCache,
-  SEARCH_CACHE_TTL_MS,
-  MAX_SEARCH_CACHE_SIZE,
-  UPSTREAM_TIMEOUT_MS,
-  UPSTREAM_TIMEOUT_ERROR_CODE,
-  fetchWithTimeout,
-  isUpstreamTimeoutError,
-  resetModuleStateForTests,
-};
+// Only exposed for test consumption; gated to avoid leaking internals in production.
+if (process.env.NODE_ENV === 'test') {
+  module.exports.testUtils = {
+    getQueryString,
+    stripControlChars,
+    getSearchCacheKey,
+    isSessionExpired,
+    getCachedSearchResult,
+    cleanupSearchCache,
+    enforceSearchCacheLimit,
+    searchResultsCache,
+    SEARCH_CACHE_TTL_MS,
+    MAX_SEARCH_CACHE_SIZE,
+    UPSTREAM_TIMEOUT_MS,
+    UPSTREAM_TIMEOUT_ERROR_CODE,
+    fetchWithTimeout,
+    isUpstreamTimeoutError,
+    resetModuleStateForTests,
+  };
+}
