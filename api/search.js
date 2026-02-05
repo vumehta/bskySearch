@@ -3,6 +3,24 @@ const BSKY_SERVICE = 'https://bsky.social/xrpc';
 const BSKY_HANDLE = process.env.BSKY_HANDLE;
 const BSKY_APP_PASSWORD = process.env.BSKY_APP_PASSWORD;
 
+// Upstream fetch timeout — fits within Vercel Hobby 10s limit with 2s headroom
+const UPSTREAM_TIMEOUT_MS = 8000;
+
+async function fetchWithTimeout(url, options, timeoutMs = UPSTREAM_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error('Upstream request timed out');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // Session cache with TTL (2 hours, refresh tokens last longer)
 const SESSION_TTL_MS = 2 * 60 * 60 * 1000;
 let cachedSession = null;
@@ -29,7 +47,7 @@ function stripControlChars(value) {
 }
 
 async function createSession() {
-  const response = await fetch(`${BSKY_SERVICE}/com.atproto.server.createSession`, {
+  const response = await fetchWithTimeout(`${BSKY_SERVICE}/com.atproto.server.createSession`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -54,7 +72,7 @@ async function refreshSession() {
     throw new Error('Missing refresh token.');
   }
 
-  const response = await fetch(`${BSKY_SERVICE}/com.atproto.server.refreshSession`, {
+  const response = await fetchWithTimeout(`${BSKY_SERVICE}/com.atproto.server.refreshSession`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${cachedSession.refreshJwt}`,
@@ -186,7 +204,7 @@ async function searchPosts(term, cursor, accessJwt, sort) {
     params.set('cursor', cursor);
   }
 
-  return fetch(`${BSKY_SERVICE}/app.bsky.feed.searchPosts?${params}`, {
+  return fetchWithTimeout(`${BSKY_SERVICE}/app.bsky.feed.searchPosts?${params}`, {
     headers: {
       Authorization: `Bearer ${accessJwt}`,
     },
@@ -285,4 +303,5 @@ module.exports.testUtils = {
   searchResultsCache,
   SEARCH_CACHE_TTL_MS,
   MAX_SEARCH_CACHE_SIZE,
+  UPSTREAM_TIMEOUT_MS,
 };

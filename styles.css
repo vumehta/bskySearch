@@ -616,6 +616,11 @@ button:disabled {
     background: none;
 }
 
+.quote-tab:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}
+
 .quote-tab.active {
     color: var(--accent);
     border-bottom-color: var(--accent);
@@ -843,11 +848,16 @@ button:disabled {
 }
 
 .thread-link:hover,
-.thread-link:active,
+.thread-link:active {
+    text-decoration: underline;
+    background-color: transparent;
+}
+
 .thread-link:focus-visible {
     text-decoration: underline;
     background-color: transparent;
-    box-shadow: none;
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
 }
 
 .thread-link:disabled {

@@ -17,7 +17,7 @@ import {
   parseBlueskyPostUrl,
   setText,
 } from './utils.mjs';
-import { getCachedDid } from './cache.mjs';
+import { enforceDidCacheLimit, getCachedDid } from './cache.mjs';
 import { setQueryParam, updateURLWithParams } from './url.mjs';
 import { trackQuoteCursor } from './quotes-state.mjs';
 
@@ -288,6 +288,7 @@ async function fetchDid(actor) {
   }
 
   didCache.set(cacheKey, { did, timestamp: Date.now() });
+  enforceDidCacheLimit();
   return did;
 }
 

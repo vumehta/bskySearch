@@ -22,7 +22,12 @@ const {
   expandSearchTerms,
   formatDuration,
   didCache,
+  searchCache,
   DID_CACHE_TTL_MS,
+  MAX_SEARCH_CACHE_SIZE,
+  MAX_DID_CACHE_SIZE,
+  enforceSearchCacheLimit,
+  enforceDidCacheLimit,
 } = app;
 
 // ============================================================================
@@ -469,5 +474,90 @@ describe('formatDuration', () => {
 
   it('handles exactly one hour', () => {
     expect(formatDuration(3600000)).toBe('1h 0m');
+  });
+});
+
+// ============================================================================
+// enforceSearchCacheLimit
+// ============================================================================
+describe('enforceSearchCacheLimit', () => {
+  beforeEach(() => {
+    searchCache.clear();
+  });
+
+  it('trims search cache to MAX_SEARCH_CACHE_SIZE', () => {
+    for (let i = 0; i < MAX_SEARCH_CACHE_SIZE + 10; i++) {
+      searchCache.set(`key-${i}`, { data: { id: i }, timestamp: Date.now() });
+    }
+
+    enforceSearchCacheLimit();
+
+    expect(searchCache.size).toBe(MAX_SEARCH_CACHE_SIZE);
+  });
+
+  it('removes oldest entries first', () => {
+    for (let i = 0; i < MAX_SEARCH_CACHE_SIZE + 5; i++) {
+      searchCache.set(`key-${i}`, { data: { id: i }, timestamp: Date.now() });
+    }
+
+    enforceSearchCacheLimit();
+
+    // Oldest 5 entries should be gone
+    for (let i = 0; i < 5; i++) {
+      expect(searchCache.has(`key-${i}`)).toBe(false);
+    }
+    // Newest entries should remain
+    expect(searchCache.has(`key-${MAX_SEARCH_CACHE_SIZE + 4}`)).toBe(true);
+  });
+
+  it('does nothing when under limit', () => {
+    searchCache.set('a', { data: {}, timestamp: Date.now() });
+    searchCache.set('b', { data: {}, timestamp: Date.now() });
+
+    enforceSearchCacheLimit();
+
+    expect(searchCache.size).toBe(2);
+  });
+});
+
+// ============================================================================
+// enforceDidCacheLimit
+// ============================================================================
+describe('enforceDidCacheLimit', () => {
+  beforeEach(() => {
+    didCache.clear();
+  });
+
+  it('trims DID cache to MAX_DID_CACHE_SIZE', () => {
+    for (let i = 0; i < MAX_DID_CACHE_SIZE + 10; i++) {
+      didCache.set(`handle-${i}`, { did: `did:plc:${i}`, timestamp: Date.now() });
+    }
+
+    enforceDidCacheLimit();
+
+    expect(didCache.size).toBe(MAX_DID_CACHE_SIZE);
+  });
+
+  it('removes oldest entries first', () => {
+    for (let i = 0; i < MAX_DID_CACHE_SIZE + 3; i++) {
+      didCache.set(`handle-${i}`, { did: `did:plc:${i}`, timestamp: Date.now() });
+    }
+
+    enforceDidCacheLimit();
+
+    // Oldest 3 entries should be gone
+    for (let i = 0; i < 3; i++) {
+      expect(didCache.has(`handle-${i}`)).toBe(false);
+    }
+    // Newest entries should remain
+    expect(didCache.has(`handle-${MAX_DID_CACHE_SIZE + 2}`)).toBe(true);
+  });
+
+  it('does nothing when under limit', () => {
+    didCache.set('alice', { did: 'did:plc:1', timestamp: Date.now() });
+
+    enforceDidCacheLimit();
+
+    expect(didCache.size).toBe(1);
   });
 });

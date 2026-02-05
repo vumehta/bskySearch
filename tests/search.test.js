@@ -19,6 +19,7 @@ const {
   searchResultsCache,
   SEARCH_CACHE_TTL_MS,
   MAX_SEARCH_CACHE_SIZE,
+  UPSTREAM_TIMEOUT_MS,
 } = testUtils;
 
 beforeEach(() => {
@@ -27,6 +28,20 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+// ============================================================================
+// UPSTREAM_TIMEOUT_MS
+// ============================================================================
+describe('UPSTREAM_TIMEOUT_MS', () => {
+  it('is a positive number under Vercel Hobby limit', () => {
+    expect(UPSTREAM_TIMEOUT_MS).toBeGreaterThan(0);
+    expect(UPSTREAM_TIMEOUT_MS).toBeLessThanOrEqual(10000);
+  });
+
+  it('is 8000ms', () => {
+    expect(UPSTREAM_TIMEOUT_MS).toBe(8000);
+  });
 });
 
 // ============================================================================

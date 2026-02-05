@@ -13,6 +13,7 @@ export const state = {
   searchSort: 'top',
   minLikes: 10,
   timeFilterHours: 24,
+  searchGeneration: 0,
   isLoading: false,
   isRefreshing: false,
   pendingSearch: false,
