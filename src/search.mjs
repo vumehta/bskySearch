@@ -753,26 +753,55 @@ export async function performSearch() {
   try {
     showStatus(`Searching for: ${state.rawSearchTerms.join(', ')}…`, 'loading');
 
-    // Fetch all terms in parallel (Bluesky API doesn't support OR queries)
-    const promises = state.searchTerms.map((term) =>
-      fetchAllPostsForTerm(term, INITIAL_MAX_PAGES, state.searchSort)
-    );
-    const results = await Promise.all(promises);
-    let combinedPosts = results.flat();
+    // Track progress for progressive rendering
+    let completedTerms = 0;
+    const totalTerms = state.searchTerms.length;
 
-    combinedPosts = deduplicatePosts(combinedPosts);
-    combinedPosts = filterByDate(combinedPosts, state.timeFilterHours);
-    combinedPosts = filterByLikes(combinedPosts, state.minLikes);
-    state.allPosts = sortPosts(combinedPosts, state.searchSort);
+    // Fetch all terms in parallel, but render progressively as each completes
+    const promises = state.searchTerms.map(async (term) => {
+      const posts = await fetchAllPostsForTerm(term, INITIAL_MAX_PAGES, state.searchSort);
+
+      // Immediately merge and render as this term completes
+      completedTerms++;
+
+      // Merge new posts into state.allPosts progressively
+      let combined = deduplicatePosts([...state.allPosts, ...posts]);
+      combined = filterByDate(combined, state.timeFilterHours);
+      combined = filterByLikes(combined, state.minLikes);
+      state.allPosts = sortPosts(combined, state.searchSort);
+
+      // Update status and render immediately
+      if (completedTerms < totalTerms) {
+        showStatus(`Loaded ${completedTerms}/${totalTerms} terms…`, 'loading');
+      }
+      renderResults();
+
+      return posts;
+    });
+
+    // Use allSettled to wait for ALL promises before continuing
+    // This prevents race conditions where failed promises' siblings
+    // continue updating state after error handling
+    const results = await Promise.allSettled(promises);
+
+    // Check for failures
+    const failures = results.filter((r) => r.status === 'rejected');
+    if (failures.length > 0) {
+      const errorMsg =
+        failures.length === totalTerms
+          ? `Search failed: ${failures[0].reason.message}`
+          : `${failures.length}/${totalTerms} terms failed to load`;
+      showStatus(errorMsg, 'error');
+      // Continue - we may have partial results from successful terms
+    } else {
+      hideStatus();
+    }
 
     state.lastRefreshAt = new Date();
     state.lastRefreshNewCount = null;
     state.lastRefreshError = null;
     searchCompleted = true;
     updateRefreshMeta();
-
-    hideStatus();
-    renderResults();
   } catch (error) {
     console.error('Search error:', error);
     showStatus(`Error: ${error.message}`, 'error');
