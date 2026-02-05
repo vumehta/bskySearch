@@ -5,6 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bluesky Term Search</title>
+    <link rel="preconnect" href="https://public.api.bsky.app" crossorigin>
+    <link rel="preconnect" href="https://cdn.bsky.app" crossorigin>
     <link rel="stylesheet" href="/styles.min.css">
 </head>
 
@@ -28,7 +30,7 @@
         <div class="form-row">
             <div class="form-group">
                 <label for="terms">Search Terms (comma-separated)</label>
-                <input type="text" id="terms" placeholder="Enter search terms" />
+                <input type="text" id="terms" placeholder="Enter search terms…" autocomplete="off" spellcheck="false" />
             </div>
         </div>
         <div class="form-row">
@@ -49,7 +51,7 @@
         <div class="form-row align-bottom">
             <div class="form-group small">
                 <label for="minLikes">Min. Likes</label>
-                <input type="number" id="minLikes" value="10" min="0" />
+                <input type="number" id="minLikes" value="10" min="0" autocomplete="off" />
             </div>
             <div class="form-group small">
                 <label for="timeFilter">Time Range</label>
@@ -102,8 +104,8 @@
         </div>
     </div>
 
-    <div id="status" class="status"></div>
-    <div id="newPosts" class="new-posts hidden"></div>
+    <div id="status" class="status" role="status" aria-live="polite" aria-atomic="true"></div>
+    <div id="newPosts" class="new-posts hidden" aria-live="polite"></div>
     <div id="results"></div>
 
     <section class="quote-section" id="quoteSection">
@@ -114,13 +116,13 @@
             <div class="form-row align-bottom">
                 <div class="form-group">
                     <label for="postUrl">Bluesky Post URL</label>
-                    <input type="text" id="postUrl" placeholder="https://bsky.app/profile/handle/post/..." required />
+                    <input type="url" id="postUrl" placeholder="https://bsky.app/profile/handle/post/abc123" autocomplete="off" spellcheck="false" required />
                 </div>
                 <button type="submit" id="quoteSearchBtn">Find Quotes</button>
             </div>
         </form>
 
-        <div id="quoteStatus" class="status"></div>
+        <div id="quoteStatus" class="status" role="status" aria-live="polite" aria-atomic="true"></div>
         <div id="quoteTabs" class="quote-tabs">
             <button type="button" class="quote-tab active" data-sort="likes">Most Likes</button>
             <button type="button" class="quote-tab" data-sort="recent">Most Recent</button>
