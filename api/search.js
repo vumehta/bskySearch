@@ -23,6 +23,11 @@ function getQueryString(value) {
   return typeof value === 'string' ? value : '';
 }
 
+function stripControlChars(value) {
+  if (typeof value !== 'string') return '';
+  return value.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
+}
+
 async function createSession() {
   const response = await fetch(`${BSKY_SERVICE}/com.atproto.server.createSession`, {
     method: 'POST',
@@ -202,9 +207,9 @@ module.exports = async (req, res) => {
     });
   }
 
-  const term = getQueryString(req.query.term).trim();
-  const cursor = getQueryString(req.query.cursor);
-  const sort = getQueryString(req.query.sort).trim().toLowerCase();
+  const term = stripControlChars(getQueryString(req.query.term)).trim();
+  const cursor = stripControlChars(getQueryString(req.query.cursor));
+  const sort = stripControlChars(getQueryString(req.query.sort)).trim().toLowerCase();
 
   if (!term) {
     return res.status(400).json({ error: 'Missing term parameter.' });
@@ -271,6 +276,7 @@ module.exports = async (req, res) => {
 // Test utilities export (must be after module.exports assignment)
 module.exports.testUtils = {
   getQueryString,
+  stripControlChars,
   getSearchCacheKey,
   isSessionExpired,
   getCachedSearchResult,

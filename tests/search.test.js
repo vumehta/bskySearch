@@ -10,6 +10,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 const { testUtils } = await import('../api/search.js');
 const {
   getQueryString,
+  stripControlChars,
   getSearchCacheKey,
   isSessionExpired,
   getCachedSearchResult,
@@ -53,6 +54,20 @@ describe('getQueryString', () => {
 
   it('handles array with single element', () => {
     expect(getQueryString(['only'])).toBe('only');
+  });
+});
+
+// ============================================================================
+// stripControlChars
+// ============================================================================
+describe('stripControlChars', () => {
+  it('removes C0/C1 control characters', () => {
+    expect(stripControlChars('he\u0000l\u001Flo\u007F')).toBe('hello');
+  });
+
+  it('returns empty string for non-string input', () => {
+    expect(stripControlChars(null)).toBe('');
+    expect(stripControlChars(undefined)).toBe('');
   });
 });
 

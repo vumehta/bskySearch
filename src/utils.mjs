@@ -21,7 +21,8 @@ export function isValidBskyUrl(url) {
 }
 
 export function normalizeTerm(raw) {
-  let term = raw.trim();
+  const sanitized = raw.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
+  let term = sanitized.trim();
   if (
     (term.startsWith('"') && term.endsWith('"')) ||
     (term.startsWith("'") && term.endsWith("'"))
