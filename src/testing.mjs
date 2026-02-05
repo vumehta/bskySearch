@@ -11,5 +11,5 @@ export {
 } from './utils.mjs';
 export { trackQuoteCursor } from './quotes-state.mjs';
 export { enforceSearchCacheLimit, enforceDidCacheLimit, getCachedDid } from './cache.mjs';
-export { didCache, searchCache } from './state.mjs';
+export { didCache, isCurrentSearchGeneration, searchCache, state } from './state.mjs';
 export { DID_CACHE_TTL_MS, MAX_SEARCH_CACHE_SIZE, MAX_DID_CACHE_SIZE } from './constants.mjs';

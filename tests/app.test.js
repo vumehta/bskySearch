@@ -22,6 +22,8 @@ const {
   expandSearchTerms,
   formatDuration,
   didCache,
+  state,
+  isCurrentSearchGeneration,
   searchCache,
   DID_CACHE_TTL_MS,
   MAX_SEARCH_CACHE_SIZE,
@@ -474,6 +476,27 @@ describe('formatDuration', () => {
 
   it('handles exactly one hour', () => {
     expect(formatDuration(3600000)).toBe('1h 0m');
+  });
+});
+
+// ============================================================================
+// isCurrentSearchGeneration
+// ============================================================================
+describe('isCurrentSearchGeneration', () => {
+  const originalGeneration = state.searchGeneration;
+
+  beforeEach(() => {
+    state.searchGeneration = originalGeneration;
+  });
+
+  it('returns true when generation matches current state', () => {
+    state.searchGeneration = 42;
+    expect(isCurrentSearchGeneration(42)).toBe(true);
+  });
+
+  it('returns false when generation is stale', () => {
+    state.searchGeneration = 42;
+    expect(isCurrentSearchGeneration(41)).toBe(false);
   });
 });
 

@@ -5,7 +5,7 @@ import {
   SEARCH_API,
   SEARCH_DEBOUNCE_MS,
 } from './constants.mjs';
-import { searchCache, state } from './state.mjs';
+import { isCurrentSearchGeneration, searchCache, state } from './state.mjs';
 import {
   autoRefreshToggle,
   expandSummary,
@@ -788,7 +788,7 @@ export async function performSearch() {
       const posts = await fetchAllPostsForTerm(term, INITIAL_MAX_PAGES, state.searchSort);
 
       // Bail if a newer search has started — prevents stale data corruption
-      if (state.searchGeneration !== currentGeneration) return posts;
+      if (!isCurrentSearchGeneration(currentGeneration)) return posts;
 
       // Immediately merge and render as this term completes
       completedTerms++;
@@ -814,7 +814,7 @@ export async function performSearch() {
     const results = await Promise.allSettled(promises);
 
     // Bail if a newer search has started
-    if (state.searchGeneration !== currentGeneration) return;
+    if (!isCurrentSearchGeneration(currentGeneration)) return;
 
     // Check for failures
     const failures = results.filter((r) => r.status === 'rejected');

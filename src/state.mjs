@@ -38,3 +38,7 @@ export const state = {
   activeQuoteUri: null,
   searchDebounceTimer: null,
 };
+
+export function isCurrentSearchGeneration(generation) {
+  return state.searchGeneration === generation;
+}
