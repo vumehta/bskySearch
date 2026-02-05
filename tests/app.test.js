@@ -429,6 +429,10 @@ describe('normalizeTerm', () => {
   it('preserves internal quotes', () => {
     expect(normalizeTerm('hello "world"')).toBe('hello "world"');
   });
+
+  it('strips control characters', () => {
+    expect(normalizeTerm('he\u0000l\u001Flo\u007F')).toBe('hello');
+  });
 });
 
 // ============================================================================
