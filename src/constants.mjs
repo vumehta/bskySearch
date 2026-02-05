@@ -1,0 +1,9 @@
+export const PUBLIC_API = 'https://public.api.bsky.app/xrpc';
+export const SEARCH_API = '/api/search';
+export const INITIAL_RENDER_LIMIT = 200;
+export const RENDER_STEP = 100;
+export const SEARCH_DEBOUNCE_MS = 300;
+export const INITIAL_MAX_PAGES = 2;
+export const SEARCH_CACHE_TTL_MS = 30000;
+export const DID_CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
+export const THEME_STORAGE_KEY = 'bsky-theme';

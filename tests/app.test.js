@@ -2,35 +2,12 @@
  * Frontend pure function tests for bskySearch
  *
  * These tests cover the core utility functions that don't depend on DOM or network.
- * We mock the browser globals minimally to allow the module to load.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
 
-// Mock browser globals before importing app.js
-globalThis.document = {
-  getElementById: () => ({
-    value: '',
-    checked: false,
-    addEventListener: () => {},
-    querySelectorAll: () => [],
-    classList: { toggle: () => {} },
-    style: {},
-  }),
-  documentElement: { dataset: {} },
-};
-globalThis.window = {
-  location: { search: '', pathname: '/' },
-  history: { replaceState: () => {} },
-  matchMedia: () => ({ matches: false, addEventListener: () => {} }),
-};
-globalThis.localStorage = {
-  getItem: () => null,
-  setItem: () => {},
-};
-
-// Now import the module
-const app = await import('../app.js');
+// Import pure utilities from the refactored modules
+const app = await import('../src/testing.mjs');
 
 const {
   isValidBskyUrl,
