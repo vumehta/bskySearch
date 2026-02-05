@@ -6,4 +6,6 @@ export const SEARCH_DEBOUNCE_MS = 300;
 export const INITIAL_MAX_PAGES = 2;
 export const SEARCH_CACHE_TTL_MS = 30000;
 export const DID_CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
+export const MAX_SEARCH_CACHE_SIZE = 200;
+export const MAX_DID_CACHE_SIZE = 500;
 export const THEME_STORAGE_KEY = 'bsky-theme';

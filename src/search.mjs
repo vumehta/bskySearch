@@ -5,7 +5,7 @@ import {
   SEARCH_API,
   SEARCH_DEBOUNCE_MS,
 } from './constants.mjs';
-import { searchCache, state } from './state.mjs';
+import { isCurrentSearchGeneration, searchCache, state } from './state.mjs';
 import {
   autoRefreshToggle,
   expandSummary,
@@ -39,7 +39,7 @@ import {
   setText,
   sortPosts,
 } from './utils.mjs';
-import { getCachedSearch } from './cache.mjs';
+import { enforceSearchCacheLimit, getCachedSearch } from './cache.mjs';
 import { setQueryParam, updateURLWithParams } from './url.mjs';
 import { isReplyPost, toggleThread } from './thread.mjs';
 
@@ -126,6 +126,7 @@ async function searchTerm(term, cursor = null, sort = state.searchSort) {
 
   // Cache the result
   searchCache.set(cacheKey, { data, timestamp: Date.now() });
+  enforceSearchCacheLimit();
 
   return data;
 }
@@ -248,13 +249,33 @@ function scheduleNewPostHighlightClear() {
   }, 8000);
 }
 
+// Coalesce progressive renders into a single frame
+let pendingRenderFrame = null;
+
+function scheduleRender() {
+  if (pendingRenderFrame !== null) return;
+  pendingRenderFrame = requestAnimationFrame(() => {
+    pendingRenderFrame = null;
+    renderResults();
+  });
+}
+
+// Cache compiled highlight regex — reused for every post in a single search
+let highlightRegexCache = { terms: null, regex: null };
+
 // Create text with highlighted search terms using DOM methods (safe)
 function createHighlightedText(text, terms) {
   const fragment = document.createDocumentFragment();
   if (!text) return fragment;
 
-  const escapedTerms = terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-  const regex = new RegExp(`(${escapedTerms.join('|')})`, 'gi');
+  let regex;
+  if (terms === highlightRegexCache.terms) {
+    regex = highlightRegexCache.regex;
+  } else {
+    const escapedTerms = terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    regex = new RegExp(`(${escapedTerms.join('|')})`, 'gi');
+    highlightRegexCache = { terms, regex };
+  }
 
   const parts = text.split(regex);
 
@@ -485,9 +506,12 @@ function renderResults() {
     return;
   }
 
-  // Header
+  // Header — announce result count to screen readers
   const headerDiv = document.createElement('div');
   headerDiv.className = 'results-header';
+  headerDiv.setAttribute('role', 'status');
+  headerDiv.setAttribute('aria-live', 'polite');
+  headerDiv.setAttribute('aria-atomic', 'true');
 
   const countSpan = document.createElement('span');
   countSpan.className = 'results-count';
@@ -720,6 +744,8 @@ export async function performSearch() {
     return;
   }
   state.pendingSearch = false;
+  state.searchGeneration++;
+  const currentGeneration = state.searchGeneration;
   const termsValue = termsInput.value.trim();
   if (!termsValue) {
     showStatus('Please enter at least one search term.', 'error');
@@ -761,6 +787,9 @@ export async function performSearch() {
     const promises = state.searchTerms.map(async (term) => {
       const posts = await fetchAllPostsForTerm(term, INITIAL_MAX_PAGES, state.searchSort);
 
+      // Bail if a newer search has started — prevents stale data corruption
+      if (!isCurrentSearchGeneration(currentGeneration)) return posts;
+
       // Immediately merge and render as this term completes
       completedTerms++;
 
@@ -774,7 +803,7 @@ export async function performSearch() {
       if (completedTerms < totalTerms) {
         showStatus(`Loaded ${completedTerms}/${totalTerms} terms…`, 'loading');
       }
-      renderResults();
+      scheduleRender();
 
       return posts;
     });
@@ -783,6 +812,9 @@ export async function performSearch() {
     // This prevents race conditions where failed promises' siblings
     // continue updating state after error handling
     const results = await Promise.allSettled(promises);
+
+    // Bail if a newer search has started
+    if (!isCurrentSearchGeneration(currentGeneration)) return;
 
     // Check for failures
     const failures = results.filter((r) => r.status === 'rejected');
@@ -797,6 +829,7 @@ export async function performSearch() {
       hideStatus();
     }
 
+    renderResults();
     state.lastRefreshAt = new Date();
     state.lastRefreshNewCount = null;
     state.lastRefreshError = null;

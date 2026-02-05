@@ -3,6 +3,57 @@ const BSKY_SERVICE = 'https://bsky.social/xrpc';
 const BSKY_HANDLE = process.env.BSKY_HANDLE;
 const BSKY_APP_PASSWORD = process.env.BSKY_APP_PASSWORD;
 
+// Upstream fetch timeout — fits within Vercel Hobby 10s limit with 2s headroom
+const UPSTREAM_TIMEOUT_MS = 8000;
+const UPSTREAM_TIMEOUT_ERROR_CODE = 'UPSTREAM_TIMEOUT';
+
+function createUpstreamTimeoutError() {
+  const error = new Error('Upstream request timed out.');
+  error.code = UPSTREAM_TIMEOUT_ERROR_CODE;
+  return error;
+}
+
+function isUpstreamTimeoutError(error) {
+  return Boolean(error && error.code === UPSTREAM_TIMEOUT_ERROR_CODE);
+}
+
+function mergeAbortSignals(primarySignal, secondarySignal) {
+  if (!primarySignal) return secondarySignal;
+  if (!secondarySignal) return primarySignal;
+
+  if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.any === 'function') {
+    return AbortSignal.any([primarySignal, secondarySignal]);
+  }
+
+  const mergedController = new AbortController();
+  const abortMerged = () => mergedController.abort();
+  primarySignal.addEventListener('abort', abortMerged, { once: true });
+  secondarySignal.addEventListener('abort', abortMerged, { once: true });
+  if (primarySignal.aborted || secondarySignal.aborted) {
+    mergedController.abort();
+  }
+
+  return mergedController.signal;
+}
+
+async function fetchWithTimeout(url, options, timeoutMs = UPSTREAM_TIMEOUT_MS) {
+  const timeoutController = new AbortController();
+  const timer = setTimeout(() => timeoutController.abort(), timeoutMs);
+  const fetchOptions = { ...(options || {}) };
+  fetchOptions.signal = mergeAbortSignals(fetchOptions.signal, timeoutController.signal);
+
+  try {
+    return await fetch(url, fetchOptions);
+  } catch (error) {
+    if (error?.name === 'AbortError' && timeoutController.signal.aborted) {
+      throw createUpstreamTimeoutError();
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // Session cache with TTL (2 hours, refresh tokens last longer)
 const SESSION_TTL_MS = 2 * 60 * 60 * 1000;
 let cachedSession = null;
@@ -29,7 +80,7 @@ function stripControlChars(value) {
 }
 
 async function createSession() {
-  const response = await fetch(`${BSKY_SERVICE}/com.atproto.server.createSession`, {
+  const response = await fetchWithTimeout(`${BSKY_SERVICE}/com.atproto.server.createSession`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -54,7 +105,7 @@ async function refreshSession() {
     throw new Error('Missing refresh token.');
   }
 
-  const response = await fetch(`${BSKY_SERVICE}/com.atproto.server.refreshSession`, {
+  const response = await fetchWithTimeout(`${BSKY_SERVICE}/com.atproto.server.refreshSession`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${cachedSession.refreshJwt}`,
@@ -173,6 +224,14 @@ function cleanupSearchCache() {
   enforceSearchCacheLimit();
 }
 
+function resetModuleStateForTests() {
+  cachedSession = null;
+  sessionCreatedAt = null;
+  sessionPromise = null;
+  searchResultsCache.clear();
+  lastSearchCacheCleanupAt = 0;
+}
+
 async function searchPosts(term, cursor, accessJwt, sort) {
   const sortValue = sort === 'latest' ? 'latest' : 'top';
   const params = new URLSearchParams({
@@ -186,7 +245,7 @@ async function searchPosts(term, cursor, accessJwt, sort) {
     params.set('cursor', cursor);
   }
 
-  return fetch(`${BSKY_SERVICE}/app.bsky.feed.searchPosts?${params}`, {
+  return fetchWithTimeout(`${BSKY_SERVICE}/app.bsky.feed.searchPosts?${params}`, {
     headers: {
       Authorization: `Bearer ${accessJwt}`,
     },
@@ -269,6 +328,9 @@ module.exports = async (req, res) => {
     return res.status(200).json(payload);
   } catch (error) {
     console.error('Search proxy error:', error);
+    if (isUpstreamTimeoutError(error)) {
+      return res.status(504).json({ error: error.message });
+    }
     return res.status(500).json({ error: 'Search proxy failed.' });
   }
 };
@@ -285,4 +347,9 @@ module.exports.testUtils = {
   searchResultsCache,
   SEARCH_CACHE_TTL_MS,
   MAX_SEARCH_CACHE_SIZE,
+  UPSTREAM_TIMEOUT_MS,
+  UPSTREAM_TIMEOUT_ERROR_CODE,
+  fetchWithTimeout,
+  isUpstreamTimeoutError,
+  resetModuleStateForTests,
 };

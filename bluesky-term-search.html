@@ -38,8 +38,8 @@
                 <div class="label-row">
                     <label for="expandTermsToggle">Phrase Expansion</label>
                     <span class="info-trigger">
-                        <button type="button" class="info-button" aria-label="Phrase expansion summary">i</button>
-                        <span id="expandSummary" class="info-tooltip"></span>
+                        <button type="button" class="info-button" aria-label="Phrase expansion summary" aria-describedby="expandSummary">i</button>
+                        <span id="expandSummary" class="info-tooltip" role="tooltip"></span>
                     </span>
                 </div>
                 <div class="checkbox-inline">
@@ -105,7 +105,7 @@
     </div>
 
     <div id="status" class="status" role="status" aria-live="polite" aria-atomic="true"></div>
-    <div id="newPosts" class="new-posts hidden" aria-live="polite"></div>
+    <div id="newPosts" class="new-posts hidden" role="status" aria-live="polite" aria-atomic="true"></div>
     <div id="results"></div>
 
     <section class="quote-section" id="quoteSection">
