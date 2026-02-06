@@ -11,6 +11,7 @@
 </head>
 
 <body>
+    <a href="#results" class="skip-link">Skip to results</a>
     <div class="page-header">
         <div class="title-block">
             <h1>Bluesky Term Search</h1>
@@ -106,7 +107,7 @@
 
     <div id="status" class="status" role="status" aria-live="polite" aria-atomic="true"></div>
     <div id="newPosts" class="new-posts hidden" role="status" aria-live="polite" aria-atomic="true"></div>
-    <div id="results"></div>
+    <div id="results" role="region" aria-label="Search results"></div>
 
     <section class="quote-section" id="quoteSection">
         <h2>Quote Finder</h2>
@@ -123,10 +124,10 @@
         </form>
 
         <div id="quoteStatus" class="status" role="status" aria-live="polite" aria-atomic="true"></div>
-        <div id="quoteTabs" class="quote-tabs">
-            <button type="button" class="quote-tab active" data-sort="likes">Most Likes</button>
-            <button type="button" class="quote-tab" data-sort="recent">Most Recent</button>
-            <button type="button" class="quote-tab" data-sort="oldest">Oldest First</button>
+        <div id="quoteTabs" class="quote-tabs" role="tablist" aria-label="Quote sort order">
+            <button type="button" class="quote-tab active" data-sort="likes" role="tab" aria-selected="true">Most Likes</button>
+            <button type="button" class="quote-tab" data-sort="recent" role="tab" aria-selected="false">Most Recent</button>
+            <button type="button" class="quote-tab" data-sort="oldest" role="tab" aria-selected="false">Oldest First</button>
         </div>
         <div id="quoteOriginal"></div>
         <div id="quoteCount" class="quote-count"></div>

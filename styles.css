@@ -39,6 +39,9 @@
     --quote-depth-6: hsl(20, 60%, 40%);
     --quote-depth-7: hsl(330, 60%, 50%);
     --quote-depth-8: hsl(0, 0%, 40%);
+    --stat-likes: #e91e63;
+    --stat-reposts: #17bf63;
+    --stat-replies: #1da1f2;
 }
 
 [data-theme="dark"] {
@@ -70,6 +73,27 @@
     --avatar-bg: #2a2a2a;
     --tag-bg: #1a1a1a;
     --focus-ring: rgba(83, 168, 255, 0.25);
+    --stat-likes: #ff6b9d;
+    --stat-reposts: #4ade80;
+    --stat-replies: #60b5ff;
+}
+
+.skip-link {
+    position: absolute;
+    top: -100%;
+    left: 16px;
+    padding: 8px 16px;
+    background: var(--accent);
+    color: white;
+    border-radius: 0 0 6px 6px;
+    text-decoration: none;
+    font-size: 14px;
+    z-index: 100;
+    transition: top 0.2s;
+}
+
+.skip-link:focus {
+    top: 0;
 }
 
 body {
@@ -526,7 +550,7 @@ button:disabled {
 }
 
 .stat.likes {
-    color: #e91e63;
+    color: var(--stat-likes);
     font-weight: 500;
 }
 
@@ -737,16 +761,16 @@ button:disabled {
 }
 
 .quote-stat.likes {
-    color: #e91e63;
+    color: var(--stat-likes);
     font-weight: 500;
 }
 
 .quote-stat.reposts {
-    color: #17bf63;
+    color: var(--stat-reposts);
 }
 
 .quote-stat.replies {
-    color: #1da1f2;
+    color: var(--stat-replies);
 }
 
 .no-quotes {

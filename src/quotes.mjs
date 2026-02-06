@@ -15,11 +15,16 @@ import {
   getPostTimestamp,
   getPostUrl,
   parseBlueskyPostUrl,
-  setText,
 } from './utils.mjs';
 import { enforceDidCacheLimit, getCachedDid } from './cache.mjs';
 import { setQueryParam, updateURLWithParams } from './url.mjs';
 import { trackQuoteCursor } from './quotes-state.mjs';
+import {
+  createBlueskyLink,
+  createStatsBar,
+  hideStatusMessage,
+  showStatusMessage,
+} from './render.mjs';
 
 export function updateQuoteURL() {
   const params = new URLSearchParams(window.location.search);
@@ -35,18 +40,18 @@ export function updateQuoteURL() {
 
 export function updateQuoteTabs() {
   quoteTabs.querySelectorAll('.quote-tab').forEach((tab) => {
-    tab.classList.toggle('active', tab.dataset.sort === state.quoteSort);
+    const isActive = tab.dataset.sort === state.quoteSort;
+    tab.classList.toggle('active', isActive);
+    tab.setAttribute('aria-selected', String(isActive));
   });
 }
 
 function showQuoteStatus(message, type = 'info') {
-  quoteStatusDiv.className = `status ${type}`;
-  setText(quoteStatusDiv, message);
-  quoteStatusDiv.style.display = 'block';
+  showStatusMessage(quoteStatusDiv, message, type);
 }
 
 function hideQuoteStatus() {
-  quoteStatusDiv.style.display = 'none';
+  hideStatusMessage(quoteStatusDiv);
 }
 
 function updateQuoteCount() {
@@ -76,14 +81,18 @@ function sortQuotes(quotes, sortMode) {
   return sorted;
 }
 
-function createQuoteOriginalElement(post) {
-  const wrapper = document.createElement('div');
-  wrapper.className = 'quote-original';
+function createQuoteBaseElement(post, options = {}) {
+  const { className = 'quote-post', showLabel = false, index } = options;
 
-  const label = document.createElement('div');
-  label.className = 'label';
-  label.textContent = 'Original Post';
-  wrapper.appendChild(label);
+  const wrapper = document.createElement('div');
+  wrapper.className = index != null ? `${className} depth-${(index % 8) + 1}` : className;
+
+  if (showLabel) {
+    const label = document.createElement('div');
+    label.className = 'label';
+    label.textContent = 'Original Post';
+    wrapper.appendChild(label);
+  }
 
   const author = document.createElement('div');
   author.className = 'quote-author';
@@ -100,18 +109,7 @@ function createQuoteOriginalElement(post) {
 
   const postUrl = getPostUrl(post);
   if (postUrl) {
-    const actions = document.createElement('div');
-    actions.className = 'link-actions';
-
-    const link = document.createElement('a');
-    link.className = 'thread-link';
-    link.href = postUrl;
-    link.target = '_blank';
-    link.rel = 'noopener noreferrer';
-    link.textContent = 'View on Bluesky';
-    actions.appendChild(link);
-
-    wrapper.appendChild(actions);
+    wrapper.appendChild(createBlueskyLink(postUrl));
   }
 
   const text = document.createElement('div');
@@ -119,121 +117,26 @@ function createQuoteOriginalElement(post) {
   text.textContent = post.record?.text || '';
   wrapper.appendChild(text);
 
-  const stats = document.createElement('div');
-  stats.className = 'quote-stats';
+  wrapper.appendChild(
+    createStatsBar(post, {
+      statPrefix: 'quote-stat',
+      containerClass: 'quote-stats',
+      showQuotes: showLabel,
+    })
+  );
 
-  const likeStat = document.createElement('span');
-  likeStat.className = 'quote-stat likes';
-  likeStat.setAttribute('aria-label', `${post.likeCount || 0} likes`);
-  const likeIcon = document.createElement('span');
-  likeIcon.setAttribute('aria-hidden', 'true');
-  likeIcon.textContent = '\u2665 ';
-  likeStat.appendChild(likeIcon);
-  likeStat.appendChild(document.createTextNode(post.likeCount || 0));
-  stats.appendChild(likeStat);
-
-  const repostStat = document.createElement('span');
-  repostStat.className = 'quote-stat reposts';
-  repostStat.setAttribute('aria-label', `${post.repostCount || 0} reposts`);
-  const repostIcon = document.createElement('span');
-  repostIcon.setAttribute('aria-hidden', 'true');
-  repostIcon.textContent = '\u21bb ';
-  repostStat.appendChild(repostIcon);
-  repostStat.appendChild(document.createTextNode(post.repostCount || 0));
-  stats.appendChild(repostStat);
-
-  const replyStat = document.createElement('span');
-  replyStat.className = 'quote-stat replies';
-  replyStat.setAttribute('aria-label', `${post.replyCount || 0} replies`);
-  const replyIcon = document.createElement('span');
-  replyIcon.setAttribute('aria-hidden', 'true');
-  replyIcon.textContent = '\ud83d\udcac ';
-  replyStat.appendChild(replyIcon);
-  replyStat.appendChild(document.createTextNode(post.replyCount || 0));
-  stats.appendChild(replyStat);
-
-  const quoteStat = document.createElement('span');
-  quoteStat.className = 'quote-stat';
-  quoteStat.textContent = `Quotes ${post.quoteCount || 0}`;
-  stats.appendChild(quoteStat);
-
-  wrapper.appendChild(stats);
   return wrapper;
 }
 
+function createQuoteOriginalElement(post) {
+  return createQuoteBaseElement(post, {
+    className: 'quote-original',
+    showLabel: true,
+  });
+}
+
 function createQuotePostElement(post, index) {
-  const wrapper = document.createElement('div');
-  wrapper.className = `quote-post depth-${(index % 8) + 1}`;
-
-  const author = document.createElement('div');
-  author.className = 'quote-author';
-  const authorName = post.author.displayName || post.author.handle;
-  author.textContent = `${authorName} (@${post.author.handle})`;
-  wrapper.appendChild(author);
-
-  const meta = document.createElement('div');
-  meta.className = 'quote-meta';
-  const time = document.createElement('span');
-  time.textContent = formatDateTime(post.record?.createdAt || post.indexedAt);
-  meta.appendChild(time);
-  wrapper.appendChild(meta);
-
-  const postUrl = getPostUrl(post);
-  if (postUrl) {
-    const actions = document.createElement('div');
-    actions.className = 'link-actions';
-
-    const link = document.createElement('a');
-    link.className = 'thread-link';
-    link.href = postUrl;
-    link.target = '_blank';
-    link.rel = 'noopener noreferrer';
-    link.textContent = 'View on Bluesky';
-    actions.appendChild(link);
-
-    wrapper.appendChild(actions);
-  }
-
-  const text = document.createElement('div');
-  text.className = 'quote-text';
-  text.textContent = post.record?.text || '';
-  wrapper.appendChild(text);
-
-  const stats = document.createElement('div');
-  stats.className = 'quote-stats';
-
-  const likeStat = document.createElement('span');
-  likeStat.className = 'quote-stat likes';
-  likeStat.setAttribute('aria-label', `${post.likeCount || 0} likes`);
-  const likeIcon = document.createElement('span');
-  likeIcon.setAttribute('aria-hidden', 'true');
-  likeIcon.textContent = '\u2665 ';
-  likeStat.appendChild(likeIcon);
-  likeStat.appendChild(document.createTextNode(post.likeCount || 0));
-  stats.appendChild(likeStat);
-
-  const repostStat = document.createElement('span');
-  repostStat.className = 'quote-stat reposts';
-  repostStat.setAttribute('aria-label', `${post.repostCount || 0} reposts`);
-  const repostIcon = document.createElement('span');
-  repostIcon.setAttribute('aria-hidden', 'true');
-  repostIcon.textContent = '\u21bb ';
-  repostStat.appendChild(repostIcon);
-  repostStat.appendChild(document.createTextNode(post.repostCount || 0));
-  stats.appendChild(repostStat);
-
-  const replyStat = document.createElement('span');
-  replyStat.className = 'quote-stat replies';
-  replyStat.setAttribute('aria-label', `${post.replyCount || 0} replies`);
-  const replyIcon = document.createElement('span');
-  replyIcon.setAttribute('aria-hidden', 'true');
-  replyIcon.textContent = '\ud83d\udcac ';
-  replyStat.appendChild(replyIcon);
-  replyStat.appendChild(document.createTextNode(post.replyCount || 0));
-  stats.appendChild(replyStat);
-
-  wrapper.appendChild(stats);
-  return wrapper;
+  return createQuoteBaseElement(post, { index });
 }
 
 function renderQuoteLoadMore() {
