@@ -40,7 +40,7 @@ import {
   sortPosts,
 } from './utils.mjs';
 import { enforceSearchCacheLimit, getCachedSearch } from './cache.mjs';
-import { setQueryParam, updateURLWithParams } from './url.mjs';
+import { isSearchSort, setQueryParam, updateURLWithParams } from './url.mjs';
 import { isReplyPost, toggleThread } from './thread.mjs';
 
 // Show status message
@@ -59,7 +59,10 @@ export function updateSearchURL() {
   setQueryParam(params, 'terms', termsInput.value.trim());
   setQueryParam(params, 'minLikes', minLikesInput.value);
   setQueryParam(params, 'time', timeFilterSelect.value !== '24' ? timeFilterSelect.value : '');
-  setQueryParam(params, 'sort', state.searchSort !== 'top' ? state.searchSort : '');
+  setQueryParam(params, 'searchSort', state.searchSort !== 'top' ? state.searchSort : '');
+  if (isSearchSort(params.get('sort'))) {
+    params.delete('sort');
+  }
   setQueryParam(params, 'expand', expandTermsToggle.checked ? '1' : '');
   updateURLWithParams(params);
 }

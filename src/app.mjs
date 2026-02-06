@@ -37,6 +37,7 @@ import {
   initTheme,
   prefersDarkScheme,
 } from './theme.mjs';
+import { resolveQuoteSortParam, resolveSearchSortParam } from './url.mjs';
 
 function initFromURL() {
   const params = new URLSearchParams(window.location.search);
@@ -52,11 +53,9 @@ function initFromURL() {
       timeFilterSelect.value = timeValue;
     }
   }
-  if (params.get('sort')) {
-    const sortValue = params.get('sort');
-    if (['top', 'latest'].includes(sortValue)) {
-      sortSelect.value = sortValue;
-    }
+  const searchSortParam = resolveSearchSortParam(params);
+  if (searchSortParam) {
+    sortSelect.value = searchSortParam;
   }
   state.searchSort = sortSelect.value === 'latest' ? 'latest' : 'top';
   if (params.get('expand') === '1') {
@@ -64,9 +63,9 @@ function initFromURL() {
   }
 
   const postParam = params.get('post');
-  const sortParam = params.get('sort');
-  if (sortParam && ['likes', 'recent', 'oldest'].includes(sortParam)) {
-    state.quoteSort = sortParam;
+  const quoteSortParam = resolveQuoteSortParam(params);
+  if (quoteSortParam) {
+    state.quoteSort = quoteSortParam;
     updateQuoteTabs();
   }
   if (postParam) {
