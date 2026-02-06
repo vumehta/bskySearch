@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-bskySearch is a full-stack web application for searching Bluesky posts with advanced filtering. Vanilla JavaScript frontend, Vercel serverless backend.
+bskySearch is a full-stack web application for searching Bluesky posts with advanced filtering. Vanilla JavaScript frontend, Vercel serverless backend. This is a personal-use tool with at most 2–3 total users and never more than 2 concurrent users—no rate limiting is needed.
 
 ## Build & Run
 
