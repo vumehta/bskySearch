@@ -28,6 +28,10 @@ export function hideStatus() {
   hideStatusMessage(statusDiv);
 }
 
+export function clearNewPostHighlightsFromDOM() {
+  resultsDiv.querySelectorAll('.new-post').forEach((el) => el.classList.remove('new-post'));
+}
+
 // Render limit management
 export function resetRenderLimit() {
   state.renderLimit = INITIAL_RENDER_LIMIT;

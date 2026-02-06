@@ -34,6 +34,7 @@ import {
 import { enforceSearchCacheLimit, getCachedSearch } from './cache.mjs';
 import { setQueryParam, updateURLWithParams } from './url.mjs';
 import {
+  clearNewPostHighlightsFromDOM,
   hideStatus,
   renderNewPosts,
   renderResults,
@@ -253,7 +254,7 @@ function scheduleNewPostHighlightClear() {
     state.newPostUris.clear();
     state.clearHighlightsTimeout = null;
     // Remove highlight class directly — avoids full DOM rebuild
-    resultsDiv.querySelectorAll('.new-post').forEach((el) => el.classList.remove('new-post'));
+    clearNewPostHighlightsFromDOM();
   }, 8000);
 }
 
