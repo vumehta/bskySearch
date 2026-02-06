@@ -30,6 +30,10 @@ const {
   MAX_DID_CACHE_SIZE,
   enforceSearchCacheLimit,
   enforceDidCacheLimit,
+  resolveSearchSortParam,
+  resolveQuoteSortParam,
+  isSearchSort,
+  isQuoteSort,
 } = app;
 
 // ============================================================================
@@ -582,5 +586,55 @@ describe('enforceDidCacheLimit', () => {
     enforceDidCacheLimit();
 
     expect(didCache.size).toBe(1);
+  });
+});
+
+// ============================================================================
+// sort query param helpers
+// ============================================================================
+describe('sort query param helpers', () => {
+  it('identifies valid search sorts', () => {
+    expect(isSearchSort('top')).toBe(true);
+    expect(isSearchSort('latest')).toBe(true);
+    expect(isSearchSort('recent')).toBe(false);
+    expect(isSearchSort(null)).toBe(false);
+  });
+
+  it('identifies valid quote sorts', () => {
+    expect(isQuoteSort('likes')).toBe(true);
+    expect(isQuoteSort('recent')).toBe(true);
+    expect(isQuoteSort('oldest')).toBe(true);
+    expect(isQuoteSort('latest')).toBe(false);
+    expect(isQuoteSort(null)).toBe(false);
+  });
+
+  it('prefers searchSort over legacy sort for search state', () => {
+    const params = new URLSearchParams('searchSort=latest&sort=top');
+    expect(resolveSearchSortParam(params)).toBe('latest');
+  });
+
+  it('uses legacy sort for search state when searchSort is absent', () => {
+    const params = new URLSearchParams('sort=latest');
+    expect(resolveSearchSortParam(params)).toBe('latest');
+  });
+
+  it('ignores quote-only legacy sort for search state', () => {
+    const params = new URLSearchParams('sort=recent');
+    expect(resolveSearchSortParam(params)).toBe(null);
+  });
+
+  it('prefers quoteSort over legacy sort for quote state', () => {
+    const params = new URLSearchParams('quoteSort=recent&sort=likes');
+    expect(resolveQuoteSortParam(params)).toBe('recent');
+  });
+
+  it('uses legacy sort for quote state when quoteSort is absent', () => {
+    const params = new URLSearchParams('sort=oldest');
+    expect(resolveQuoteSortParam(params)).toBe('oldest');
+  });
+
+  it('ignores search-only legacy sort for quote state', () => {
+    const params = new URLSearchParams('sort=latest');
+    expect(resolveQuoteSortParam(params)).toBe(null);
   });
 });

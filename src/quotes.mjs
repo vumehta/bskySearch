@@ -18,16 +18,15 @@ import {
   setText,
 } from './utils.mjs';
 import { enforceDidCacheLimit, getCachedDid } from './cache.mjs';
-import { setQueryParam, updateURLWithParams } from './url.mjs';
+import { isQuoteSort, setQueryParam, updateURLWithParams } from './url.mjs';
 import { trackQuoteCursor } from './quotes-state.mjs';
 
 export function updateQuoteURL() {
   const params = new URLSearchParams(window.location.search);
   const postValue = postUrlInput.value.trim();
   setQueryParam(params, 'post', postValue);
-  if (postValue && state.quoteSort !== 'likes') {
-    params.set('sort', state.quoteSort);
-  } else {
+  setQueryParam(params, 'quoteSort', postValue && state.quoteSort !== 'likes' ? state.quoteSort : '');
+  if (isQuoteSort(params.get('sort'))) {
     params.delete('sort');
   }
   updateURLWithParams(params);
