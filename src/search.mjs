@@ -35,13 +35,28 @@ import { enforceSearchCacheLimit, getCachedSearch } from './cache.mjs';
 import { setQueryParam, updateURLWithParams } from './url.mjs';
 import {
   hideStatus,
-  registerSearchCallbacks,
   renderNewPosts,
   renderResults,
   resetRenderLimit,
   scheduleRender,
   showStatus,
 } from './search-render.mjs';
+
+function getRenderHandlers() {
+  return {
+    onLoadMore: loadMore,
+    onMergePending: mergePendingPosts,
+    onDismissPending: dismissPendingPosts,
+  };
+}
+
+function renderAllResults() {
+  renderResults(getRenderHandlers());
+}
+
+function renderPendingPanel() {
+  renderNewPosts(getRenderHandlers());
+}
 
 // --- URL & Expansion ---
 
@@ -253,8 +268,8 @@ function mergePendingPosts() {
   state.newPostUris = new Set(state.pendingPosts.map((post) => post.uri));
   scheduleNewPostHighlightClear();
   state.pendingPosts = [];
-  renderNewPosts();
-  renderResults();
+  renderPendingPanel();
+  renderAllResults();
 }
 
 function dismissPendingPosts() {
@@ -263,8 +278,8 @@ function dismissPendingPosts() {
   }
   state.pendingPosts = [];
   clearNewPostHighlights();
-  renderNewPosts();
-  renderResults();
+  renderPendingPanel();
+  renderAllResults();
 }
 
 async function refreshSearch() {
@@ -294,8 +309,8 @@ async function refreshSearch() {
     scheduleNewPostHighlightClear();
   }
 
-  renderNewPosts();
-  renderResults();
+  renderPendingPanel();
+  renderAllResults();
   return newPosts.length;
 }
 
@@ -390,7 +405,7 @@ export async function performSearch() {
   resultsDiv.textContent = '';
   clearNewPostHighlights();
   state.pendingPosts = [];
-  renderNewPosts();
+  renderPendingPanel();
   resetRenderLimit();
 
   updateSearchURL();
@@ -412,7 +427,7 @@ export async function performSearch() {
       if (completedTerms < totalTerms) {
         showStatus(`Loaded ${completedTerms}/${totalTerms} terms…`, 'loading');
       }
-      scheduleRender();
+      scheduleRender(getRenderHandlers());
 
       return posts;
     });
@@ -432,7 +447,7 @@ export async function performSearch() {
       hideStatus();
     }
 
-    renderResults();
+    renderAllResults();
     state.lastRefreshAt = new Date();
     state.lastRefreshNewCount = null;
     state.lastRefreshError = null;
@@ -493,7 +508,7 @@ export async function loadMore() {
       if (state.allPosts.length > prevCount) {
         state.renderLimit = Math.min(state.allPosts.length, state.renderLimit + RENDER_STEP);
       }
-      renderResults();
+      renderAllResults();
     } else {
       if (loadMoreBtn) {
         loadMoreBtn.remove();
@@ -541,16 +556,9 @@ export function focusSearchInput() {
 }
 
 export function renderSearchResults() {
-  renderResults();
+  renderAllResults();
 }
 
 export function renderPendingPosts() {
-  renderNewPosts();
+  renderPendingPanel();
 }
-
-// Register callbacks for rendering module (breaks circular dependency)
-registerSearchCallbacks({
-  loadMore,
-  mergePending: mergePendingPosts,
-  dismissPending: dismissPendingPosts,
-});

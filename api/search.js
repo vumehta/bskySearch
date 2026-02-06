@@ -6,37 +6,6 @@ const BSKY_APP_PASSWORD = process.env.BSKY_APP_PASSWORD;
 // Upstream fetch timeout — fits within Vercel Hobby 10s limit with 2s headroom
 const UPSTREAM_TIMEOUT_MS = 8000;
 
-// --- Rate Limiting ---
-const RATE_LIMIT_WINDOW_MS = 60000; // 1 minute
-const RATE_LIMIT_MAX_REQUESTS = 30; // per IP per window
-const rateLimitMap = new Map();
-
-function getRateLimitKey(req) {
-  return req.headers?.['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || 'unknown';
-}
-
-function isRateLimited(key) {
-  const now = Date.now();
-  let entry = rateLimitMap.get(key);
-
-  if (!entry || now - entry.windowStart > RATE_LIMIT_WINDOW_MS) {
-    entry = { windowStart: now, count: 0 };
-    rateLimitMap.set(key, entry);
-  }
-
-  entry.count++;
-
-  // Periodically prune old entries to prevent unbounded growth
-  if (rateLimitMap.size > 10000) {
-    for (const [k, v] of rateLimitMap.entries()) {
-      if (now - v.windowStart > RATE_LIMIT_WINDOW_MS) {
-        rateLimitMap.delete(k);
-      }
-    }
-  }
-
-  return entry.count > RATE_LIMIT_MAX_REQUESTS;
-}
 const UPSTREAM_TIMEOUT_ERROR_CODE = 'UPSTREAM_TIMEOUT';
 
 function createUpstreamTimeoutError() {
@@ -262,7 +231,6 @@ function resetModuleStateForTests() {
   sessionPromise = null;
   searchResultsCache.clear();
   lastSearchCacheCleanupAt = 0;
-  rateLimitMap.clear();
 }
 
 async function searchPosts(term, cursor, accessJwt, sort) {
@@ -291,13 +259,6 @@ module.exports = async (req, res) => {
   if (req.method !== 'GET') {
     res.setHeader('Allow', 'GET');
     return res.status(405).json({ error: 'Method not allowed.' });
-  }
-
-  // Rate limiting
-  const clientKey = getRateLimitKey(req);
-  if (isRateLimited(clientKey)) {
-    res.setHeader('Retry-After', '60');
-    return res.status(429).json({ error: 'Too many requests. Please try again later.' });
   }
 
   if (!BSKY_HANDLE || !BSKY_APP_PASSWORD) {
@@ -394,10 +355,5 @@ if (process.env.NODE_ENV === 'test') {
     fetchWithTimeout,
     isUpstreamTimeoutError,
     resetModuleStateForTests,
-    rateLimitMap,
-    isRateLimited,
-    getRateLimitKey,
-    RATE_LIMIT_WINDOW_MS,
-    RATE_LIMIT_MAX_REQUESTS,
   };
 }

@@ -19,13 +19,6 @@ import {
   showStatusMessage,
 } from './render.mjs';
 
-// Callback registration — set by search.mjs to avoid circular imports
-let callbacks = { loadMore: null, mergePending: null, dismissPending: null };
-
-export function registerSearchCallbacks(cbs) {
-  Object.assign(callbacks, cbs);
-}
-
 // Status helpers
 export function showStatus(message, type = 'info') {
   showStatusMessage(statusDiv, message, type);
@@ -38,36 +31,26 @@ export function hideStatus() {
 // Render limit management
 export function resetRenderLimit() {
   state.renderLimit = INITIAL_RENDER_LIMIT;
-  invalidateRenderCache();
 }
 
 export function increaseRenderLimit(step = RENDER_STEP) {
   state.renderLimit = Math.min(state.allPosts.length, state.renderLimit + step);
 }
 
-// Incremental render tracking — avoids full DOM rebuild when only appending posts
-let renderCache = {
-  postsRef: null,       // reference to the allPosts array used for last render
-  renderedUpTo: 0,      // number of posts currently in the DOM
-  searchSort: null,     // sort mode used for last render
-  postsContainer: null, // reference to the .posts-container element
-};
-
-export function invalidateRenderCache() {
-  renderCache.postsRef = null;
-  renderCache.renderedUpTo = 0;
-  renderCache.searchSort = null;
-  renderCache.postsContainer = null;
-}
-
 // Coalesce progressive renders into a single frame
 let pendingRenderFrame = null;
+let pendingRenderHandlers = null;
 
-export function scheduleRender() {
-  if (pendingRenderFrame !== null) return;
+export function scheduleRender(handlers = {}) {
+  pendingRenderHandlers = handlers;
+  if (pendingRenderFrame !== null) {
+    return;
+  }
   pendingRenderFrame = requestAnimationFrame(() => {
+    const handlersForFrame = pendingRenderHandlers || {};
+    pendingRenderHandlers = null;
     pendingRenderFrame = null;
-    renderResults();
+    renderResults(handlersForFrame);
   });
 }
 
@@ -248,7 +231,7 @@ function updateResultsHeader(visibleCount, totalCount) {
   }
 }
 
-function updateResultsButtons(visibleCount, totalCount) {
+function updateResultsButtons(visibleCount, totalCount, handlers = {}) {
   // Remove old buttons
   const oldShowMore = resultsDiv.querySelector('#showMoreBtn');
   if (oldShowMore) oldShowMore.remove();
@@ -268,7 +251,7 @@ function updateResultsButtons(visibleCount, totalCount) {
     }
     showMoreBtn.addEventListener('click', () => {
       increaseRenderLimit();
-      renderResults();
+      renderResults(handlers);
     });
     resultsDiv.appendChild(showMoreBtn);
   }
@@ -279,19 +262,18 @@ function updateResultsButtons(visibleCount, totalCount) {
     loadMoreBtn.className = 'load-more';
     loadMoreBtn.id = 'loadMoreBtn';
     loadMoreBtn.textContent = 'Load More Results';
-    loadMoreBtn.addEventListener('click', () => callbacks.loadMore && callbacks.loadMore());
+    loadMoreBtn.addEventListener('click', () => handlers.onLoadMore && handlers.onLoadMore());
     resultsDiv.appendChild(loadMoreBtn);
   }
 }
 
-// Render all results — uses incremental append when only the render limit increased
-export function renderResults() {
+// Render all results using a full rebuild. For this app's scale, this is simpler and easier to reason about.
+export function renderResults(handlers = {}) {
   const totalCount = state.allPosts.length;
   const visibleCount = Math.min(state.renderLimit, totalCount);
 
   // Empty state
   if (totalCount === 0) {
-    invalidateRenderCache();
     resultsDiv.textContent = '';
 
     const noResults = document.createElement('div');
@@ -315,36 +297,6 @@ export function renderResults() {
     return;
   }
 
-  // Check if we can do an incremental append instead of full rebuild.
-  // Safe when: same data array, same sort, and we just need to show more posts.
-  const canAppend =
-    renderCache.postsRef === state.allPosts &&
-    renderCache.searchSort === state.searchSort &&
-    renderCache.renderedUpTo > 0 &&
-    renderCache.postsContainer?.parentNode === resultsDiv &&
-    visibleCount >= renderCache.renderedUpTo;
-
-  if (canAppend && visibleCount > renderCache.renderedUpTo) {
-    // Incremental: append only the new posts
-    const fragment = document.createDocumentFragment();
-    const newPosts = state.allPosts.slice(renderCache.renderedUpTo, visibleCount);
-    newPosts.forEach((post) => fragment.appendChild(createPostElement(post)));
-    renderCache.postsContainer.appendChild(fragment);
-    renderCache.renderedUpTo = visibleCount;
-
-    updateResultsHeader(visibleCount, totalCount);
-    updateResultsButtons(visibleCount, totalCount);
-    return;
-  }
-
-  if (canAppend && visibleCount === renderCache.renderedUpTo) {
-    // Nothing new to render, just update counts/buttons
-    updateResultsHeader(visibleCount, totalCount);
-    updateResultsButtons(visibleCount, totalCount);
-    return;
-  }
-
-  // Full rebuild — data changed, sort changed, or first render
   resultsDiv.textContent = '';
 
   const postsContainer = document.createElement('div');
@@ -357,18 +309,11 @@ export function renderResults() {
 
   resultsDiv.appendChild(postsContainer);
 
-  renderCache = {
-    postsRef: state.allPosts,
-    renderedUpTo: visibleCount,
-    searchSort: state.searchSort,
-    postsContainer,
-  };
-
   updateResultsHeader(visibleCount, totalCount);
-  updateResultsButtons(visibleCount, totalCount);
+  updateResultsButtons(visibleCount, totalCount, handlers);
 }
 
-export function renderNewPosts() {
+export function renderNewPosts(handlers = {}) {
   newPostsDiv.textContent = '';
   if (state.pendingPosts.length === 0) {
     newPostsDiv.classList.add('hidden');
@@ -392,14 +337,20 @@ export function renderNewPosts() {
   addBtn.type = 'button';
   addBtn.className = 'button-small';
   addBtn.textContent = 'Add to results';
-  addBtn.addEventListener('click', () => callbacks.mergePending && callbacks.mergePending());
+  addBtn.addEventListener(
+    'click',
+    () => handlers.onMergePending && handlers.onMergePending(),
+  );
   actions.appendChild(addBtn);
 
   const dismissBtn = document.createElement('button');
   dismissBtn.type = 'button';
   dismissBtn.className = 'button-secondary button-small';
   dismissBtn.textContent = 'Dismiss';
-  dismissBtn.addEventListener('click', () => callbacks.dismissPending && callbacks.dismissPending());
+  dismissBtn.addEventListener(
+    'click',
+    () => handlers.onDismissPending && handlers.onDismissPending(),
+  );
   actions.appendChild(dismissBtn);
 
   header.appendChild(actions);

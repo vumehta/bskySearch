@@ -1,7 +1,7 @@
 /**
  * Integration tests for bskySearch
  *
- * Tests full request/response flows, rate limiting, caching, session
+ * Tests full request/response flows, caching, session
  * management, and the frontend filter pipeline.
  */
 
@@ -19,11 +19,6 @@ const searchHandler = searchModule.default;
 const { testUtils } = searchModule;
 const {
   resetModuleStateForTests,
-  rateLimitMap,
-  isRateLimited,
-  getRateLimitKey,
-  RATE_LIMIT_WINDOW_MS,
-  RATE_LIMIT_MAX_REQUESTS,
   searchResultsCache,
   getCachedSearchResult,
   SEARCH_CACHE_TTL_MS,
@@ -235,84 +230,6 @@ describe('search handler input validation', () => {
     expect(res.status).toHaveBeenCalledWith(200);
     const searchCall = global.fetch.mock.calls.find((c) => c[0].includes('searchPosts'));
     expect(searchCall[0]).toContain('q=hello');
-  });
-});
-
-// ============================================================================
-// Rate limiting
-// ============================================================================
-describe('rate limiting', () => {
-  it('extracts IP from x-forwarded-for header', () => {
-    const req = {
-      headers: { 'x-forwarded-for': '1.2.3.4, 5.6.7.8' },
-      socket: { remoteAddress: '10.0.0.1' },
-    };
-    expect(getRateLimitKey(req)).toBe('1.2.3.4');
-  });
-
-  it('falls back to socket remoteAddress', () => {
-    const req = {
-      headers: {},
-      socket: { remoteAddress: '192.168.1.1' },
-    };
-    expect(getRateLimitKey(req)).toBe('192.168.1.1');
-  });
-
-  it('returns unknown for missing headers and socket', () => {
-    const req = {};
-    expect(getRateLimitKey(req)).toBe('unknown');
-  });
-
-  it('allows requests under the limit', () => {
-    for (let i = 0; i < RATE_LIMIT_MAX_REQUESTS; i++) {
-      expect(isRateLimited('test-ip')).toBe(false);
-    }
-  });
-
-  it('blocks requests over the limit', () => {
-    for (let i = 0; i < RATE_LIMIT_MAX_REQUESTS; i++) {
-      isRateLimited('test-ip');
-    }
-    expect(isRateLimited('test-ip')).toBe(true);
-  });
-
-  it('resets after the window expires', () => {
-    vi.useFakeTimers();
-
-    for (let i = 0; i < RATE_LIMIT_MAX_REQUESTS; i++) {
-      isRateLimited('test-ip');
-    }
-    expect(isRateLimited('test-ip')).toBe(true);
-
-    vi.advanceTimersByTime(RATE_LIMIT_WINDOW_MS + 1);
-    expect(isRateLimited('test-ip')).toBe(false);
-  });
-
-  it('tracks different IPs independently', () => {
-    for (let i = 0; i < RATE_LIMIT_MAX_REQUESTS; i++) {
-      isRateLimited('ip-1');
-    }
-    expect(isRateLimited('ip-1')).toBe(true);
-    expect(isRateLimited('ip-2')).toBe(false);
-  });
-
-  it('returns 429 when rate limited via handler', async () => {
-    const ip = '10.20.30.40';
-    for (let i = 0; i < RATE_LIMIT_MAX_REQUESTS; i++) {
-      isRateLimited(ip);
-    }
-
-    const req = createMockRequest(
-      { term: 'test' },
-      { headers: { 'x-forwarded-for': ip } }
-    );
-    const res = createMockResponse();
-
-    await searchHandler(req, res);
-
-    expect(res.status).toHaveBeenCalledWith(429);
-    expect(res.body.error).toContain('Too many requests');
-    expect(res.setHeader).toHaveBeenCalledWith('Retry-After', '60');
   });
 });
 
