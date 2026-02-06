@@ -5,6 +5,7 @@ const BSKY_APP_PASSWORD = process.env.BSKY_APP_PASSWORD;
 
 // Upstream fetch timeout — fits within Vercel Hobby 10s limit with 2s headroom
 const UPSTREAM_TIMEOUT_MS = 8000;
+
 const UPSTREAM_TIMEOUT_ERROR_CODE = 'UPSTREAM_TIMEOUT';
 
 function createUpstreamTimeoutError() {

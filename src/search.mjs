@@ -1,6 +1,5 @@
 import {
   INITIAL_MAX_PAGES,
-  INITIAL_RENDER_LIMIT,
   RENDER_STEP,
   SEARCH_API,
   SEARCH_DEBOUNCE_MS,
@@ -11,7 +10,6 @@ import {
   expandSummary,
   expandTermsToggle,
   minLikesInput,
-  newPostsDiv,
   refreshIntervalSelect,
   refreshLastDiv,
   refreshNextDiv,
@@ -19,7 +17,6 @@ import {
   resultsDiv,
   searchBtn,
   sortSelect,
-  statusDiv,
   termsInput,
   timeFilterSelect,
 } from './dom.mjs';
@@ -29,30 +26,40 @@ import {
   filterByDate,
   filterByLikes,
   formatDuration,
-  formatRelativeTime,
   formatTime,
-  getPostTimestamp,
-  getPostUrl,
   getSearchCacheKey,
-  isValidBskyUrl,
   normalizeTerm,
-  setText,
   sortPosts,
 } from './utils.mjs';
 import { enforceSearchCacheLimit, getCachedSearch } from './cache.mjs';
 import { setQueryParam, updateURLWithParams } from './url.mjs';
-import { isReplyPost, toggleThread } from './thread.mjs';
+import {
+  clearNewPostHighlightsFromDOM,
+  hideStatus,
+  renderNewPosts,
+  renderResults,
+  resetRenderLimit,
+  scheduleRender,
+  showStatus,
+} from './search-render.mjs';
 
-// Show status message
-function showStatus(message, type = 'info') {
-  statusDiv.className = `status ${type}`;
-  setText(statusDiv, message);
-  statusDiv.style.display = 'block';
+function getRenderHandlers() {
+  return {
+    onLoadMore: loadMore,
+    onMergePending: mergePendingPosts,
+    onDismissPending: dismissPendingPosts,
+  };
 }
 
-function hideStatus() {
-  statusDiv.style.display = 'none';
+function renderAllResults() {
+  renderResults(getRenderHandlers());
 }
+
+function renderPendingPanel() {
+  renderNewPosts(getRenderHandlers());
+}
+
+// --- URL & Expansion ---
 
 export function updateSearchURL() {
   const params = new URLSearchParams(window.location.search);
@@ -94,12 +101,12 @@ export function updateExpansionSummary() {
   expandSummary.textContent = `Typed: ${rawTerms.join(', ')}. Expanded: ${expanded.join(', ')}`;
 }
 
-// Search posts for a single term (server-side proxy)
+// --- API / Fetching ---
+
 async function searchTerm(term, cursor = null, sort = state.searchSort) {
   const sortValue = sort === 'latest' ? 'latest' : 'top';
   const cacheKey = getSearchCacheKey(term, cursor, sortValue);
 
-  // Check cache first
   const cached = getCachedSearch(cacheKey);
   if (cached) {
     return cached;
@@ -124,14 +131,12 @@ async function searchTerm(term, cursor = null, sort = state.searchSort) {
 
   const data = await response.json();
 
-  // Cache the result
   searchCache.set(cacheKey, { data, timestamp: Date.now() });
   enforceSearchCacheLimit();
 
   return data;
 }
 
-// Fetch all posts for a term (with pagination)
 async function fetchAllPostsForTerm(term, maxPages = INITIAL_MAX_PAGES, sort = state.searchSort) {
   let allTermPosts = [];
   let cursor = null;
@@ -168,13 +173,16 @@ async function fetchLatestPostsForTerm(term, sort = state.searchSort) {
   return [];
 }
 
-function resetRenderLimit() {
-  state.renderLimit = INITIAL_RENDER_LIMIT;
+// --- Post pipeline helper ---
+
+function applyPostPipeline(posts) {
+  let result = deduplicatePosts(posts);
+  result = filterByDate(result, state.timeFilterHours);
+  result = filterByLikes(result, state.minLikes);
+  return sortPosts(result, state.searchSort);
 }
 
-function increaseRenderLimit(step = RENDER_STEP) {
-  state.renderLimit = Math.min(state.allPosts.length, state.renderLimit + step);
-}
+// --- Auto-refresh ---
 
 function clearRefreshTimers() {
   if (state.refreshTimerId) {
@@ -245,375 +253,9 @@ function scheduleNewPostHighlightClear() {
   state.clearHighlightsTimeout = setTimeout(() => {
     state.newPostUris.clear();
     state.clearHighlightsTimeout = null;
-    renderResults();
+    // Remove highlight class directly — avoids full DOM rebuild
+    clearNewPostHighlightsFromDOM();
   }, 8000);
-}
-
-// Coalesce progressive renders into a single frame
-let pendingRenderFrame = null;
-
-function scheduleRender() {
-  if (pendingRenderFrame !== null) return;
-  pendingRenderFrame = requestAnimationFrame(() => {
-    pendingRenderFrame = null;
-    renderResults();
-  });
-}
-
-// Cache compiled highlight regex — reused for every post in a single search
-let highlightRegexCache = { terms: null, regex: null };
-
-// Create text with highlighted search terms using DOM methods (safe)
-function createHighlightedText(text, terms) {
-  const fragment = document.createDocumentFragment();
-  if (!text) return fragment;
-
-  let regex;
-  if (terms === highlightRegexCache.terms) {
-    regex = highlightRegexCache.regex;
-  } else {
-    const escapedTerms = terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-    regex = new RegExp(`(${escapedTerms.join('|')})`, 'gi');
-    highlightRegexCache = { terms, regex };
-  }
-
-  const parts = text.split(regex);
-
-  parts.forEach((part) => {
-    if (terms.some((term) => part.toLowerCase() === term.toLowerCase())) {
-      const span = document.createElement('span');
-      span.className = 'highlight';
-      span.textContent = part;
-      fragment.appendChild(span);
-    } else {
-      fragment.appendChild(document.createTextNode(part));
-    }
-  });
-
-  return fragment;
-}
-
-// Create a post element using safe DOM methods
-function createPostElement(post) {
-  const postUrl = getPostUrl(post);
-  const handle = post.author.handle;
-  const displayName = post.author.displayName || handle;
-  const text = post.record?.text || '';
-
-  const postDiv = document.createElement('div');
-  postDiv.className = 'post';
-  if (state.newPostUris.has(post.uri)) {
-    postDiv.classList.add('new-post');
-  }
-
-  // Search terms tags
-  const termsDiv = document.createElement('div');
-  termsDiv.className = 'search-terms';
-  post.matchedTerms.forEach((term) => {
-    const tag = document.createElement('span');
-    tag.className = 'term-tag';
-    tag.textContent = term;
-    termsDiv.appendChild(tag);
-  });
-  postDiv.appendChild(termsDiv);
-
-  // Header
-  const header = document.createElement('div');
-  header.className = 'post-header';
-
-  // Avatar
-  if (post.author.avatar && isValidBskyUrl(post.author.avatar)) {
-    const avatar = document.createElement('img');
-    avatar.className = 'avatar';
-    avatar.src = post.author.avatar;
-    avatar.alt = '';
-    avatar.loading = 'lazy';
-    header.appendChild(avatar);
-  } else {
-    const avatarPlaceholder = document.createElement('div');
-    avatarPlaceholder.className = 'avatar';
-    header.appendChild(avatarPlaceholder);
-  }
-
-  // Author info
-  const authorInfo = document.createElement('div');
-  authorInfo.className = 'author-info';
-
-  const authorUrl = `https://bsky.app/profile/${encodeURIComponent(handle)}`;
-  const nameLink = document.createElement('a');
-  nameLink.className = 'display-name';
-  nameLink.href = authorUrl;
-  nameLink.target = '_blank';
-  nameLink.rel = 'noopener noreferrer';
-  nameLink.textContent = displayName;
-  authorInfo.appendChild(nameLink);
-
-  const handleSpan = document.createElement('span');
-  handleSpan.className = 'handle';
-  handleSpan.textContent = `@${handle}`;
-  authorInfo.appendChild(handleSpan);
-
-  header.appendChild(authorInfo);
-
-  // Time
-  const timeSpan = document.createElement('span');
-  timeSpan.className = 'post-time';
-  timeSpan.textContent = formatRelativeTime(post.indexedAt);
-  header.appendChild(timeSpan);
-
-  postDiv.appendChild(header);
-
-  // Post text with highlights
-  const textDiv = document.createElement('div');
-  textDiv.className = 'post-text';
-  textDiv.appendChild(createHighlightedText(text, state.searchTerms));
-  postDiv.appendChild(textDiv);
-
-  // Images (hidden by default)
-  if (post.embed?.$type === 'app.bsky.embed.images#view' && post.embed.images) {
-    const validImages = post.embed.images.filter((img) => img.thumb && isValidBskyUrl(img.thumb));
-
-    if (validImages.length > 0) {
-      const imagesContainer = document.createElement('div');
-      imagesContainer.className = 'post-images-container';
-
-      // Create placeholder
-      const placeholder = document.createElement('div');
-      placeholder.className = 'image-placeholder';
-
-      const showBtn = document.createElement('button');
-      showBtn.type = 'button';
-      const count = validImages.length;
-      showBtn.textContent = `Show ${count} image${count !== 1 ? 's' : ''}`;
-      showBtn.addEventListener('click', () => {
-        // Replace placeholder with actual images
-        const imagesDiv = document.createElement('div');
-        imagesDiv.className = `post-images ${validImages.length === 1 ? 'single' : 'multiple'}`;
-
-        validImages.forEach((img) => {
-          const imgEl = document.createElement('img');
-          imgEl.className = 'post-image';
-          imgEl.src = img.thumb;
-          imgEl.alt = img.alt || '';
-          imgEl.loading = 'lazy';
-          imagesDiv.appendChild(imgEl);
-        });
-
-        imagesContainer.replaceChild(imagesDiv, placeholder);
-      });
-
-      placeholder.appendChild(showBtn);
-      imagesContainer.appendChild(placeholder);
-      postDiv.appendChild(imagesContainer);
-    }
-  }
-
-  // Stats
-  const statsDiv = document.createElement('div');
-  statsDiv.className = 'post-stats';
-
-  const likeStat = document.createElement('span');
-  likeStat.className = 'stat likes';
-  likeStat.setAttribute('aria-label', `${post.likeCount || 0} likes`);
-  const likeIcon = document.createElement('span');
-  likeIcon.setAttribute('aria-hidden', 'true');
-  likeIcon.textContent = '\u2665 ';
-  likeStat.appendChild(likeIcon);
-  likeStat.appendChild(document.createTextNode(post.likeCount || 0));
-  statsDiv.appendChild(likeStat);
-
-  const repostStat = document.createElement('span');
-  repostStat.className = 'stat';
-  repostStat.setAttribute('aria-label', `${post.repostCount || 0} reposts`);
-  const repostIcon = document.createElement('span');
-  repostIcon.setAttribute('aria-hidden', 'true');
-  repostIcon.textContent = '\u21bb ';
-  repostStat.appendChild(repostIcon);
-  repostStat.appendChild(document.createTextNode(post.repostCount || 0));
-  statsDiv.appendChild(repostStat);
-
-  const replyStat = document.createElement('span');
-  replyStat.className = 'stat';
-  replyStat.setAttribute('aria-label', `${post.replyCount || 0} replies`);
-  const replyIcon = document.createElement('span');
-  replyIcon.setAttribute('aria-hidden', 'true');
-  replyIcon.textContent = '\ud83d\udcac ';
-  replyStat.appendChild(replyIcon);
-  replyStat.appendChild(document.createTextNode(post.replyCount || 0));
-  statsDiv.appendChild(replyStat);
-
-  postDiv.appendChild(statsDiv);
-
-  // Links container
-  const linksDiv = document.createElement('div');
-  linksDiv.className = 'link-actions';
-
-  // Thread link (View Thread for replies, View Replies for standalone posts)
-  if (postUrl) {
-    if (isReplyPost(post)) {
-      const threadLink = document.createElement('button');
-      threadLink.className = 'thread-link';
-      threadLink.textContent = 'View Thread';
-      threadLink.addEventListener('click', () => toggleThread(post, postDiv));
-      linksDiv.appendChild(threadLink);
-
-      const blueskyLink = document.createElement('a');
-      blueskyLink.className = 'thread-link';
-      blueskyLink.href = postUrl;
-      blueskyLink.target = '_blank';
-      blueskyLink.rel = 'noopener noreferrer';
-      blueskyLink.textContent = 'View on Bluesky';
-      linksDiv.appendChild(blueskyLink);
-    } else {
-      const repliesLink = document.createElement('a');
-      repliesLink.className = 'thread-link';
-      repliesLink.href = postUrl;
-      repliesLink.target = '_blank';
-      repliesLink.rel = 'noopener noreferrer';
-      repliesLink.textContent = 'View Replies \u2192';
-      linksDiv.appendChild(repliesLink);
-    }
-  }
-
-  postDiv.appendChild(linksDiv);
-
-  return postDiv;
-}
-
-// Render all results using safe DOM methods
-function renderResults() {
-  resultsDiv.textContent = '';
-
-  if (state.allPosts.length === 0) {
-    const noResults = document.createElement('div');
-    noResults.className = 'no-results';
-
-    const p1 = document.createElement('p');
-    p1.textContent =
-      state.pendingPosts.length > 0
-        ? 'New posts are waiting above.'
-        : 'No posts found matching your criteria.';
-    noResults.appendChild(p1);
-
-    const p2 = document.createElement('p');
-    p2.textContent =
-      state.pendingPosts.length > 0
-        ? 'Use "Add to results" to merge them into the main list.'
-        : 'Try different search terms or lower the minimum likes.';
-    noResults.appendChild(p2);
-
-    resultsDiv.appendChild(noResults);
-    return;
-  }
-
-  // Header — announce result count to screen readers
-  const headerDiv = document.createElement('div');
-  headerDiv.className = 'results-header';
-  headerDiv.setAttribute('role', 'status');
-  headerDiv.setAttribute('aria-live', 'polite');
-  headerDiv.setAttribute('aria-atomic', 'true');
-
-  const countSpan = document.createElement('span');
-  countSpan.className = 'results-count';
-  const totalCount = state.allPosts.length;
-  const visibleCount = Math.min(state.renderLimit, totalCount);
-  const totalLabel = totalCount === 1 ? 'post' : 'posts';
-  if (visibleCount < totalCount) {
-    countSpan.textContent = `Showing ${visibleCount} of ${totalCount} ${totalLabel}`;
-  } else {
-    countSpan.textContent = `${totalCount} ${totalLabel} found`;
-  }
-  headerDiv.appendChild(countSpan);
-
-  const sortSpan = document.createElement('span');
-  sortSpan.textContent =
-    state.searchSort === 'latest'
-      ? 'Sorted by time (newest first)'
-      : 'Sorted by likes (high to low)';
-  headerDiv.appendChild(sortSpan);
-
-  resultsDiv.appendChild(headerDiv);
-
-  // Posts
-  const visiblePosts = state.allPosts.slice(0, visibleCount);
-  visiblePosts.forEach((post) => {
-    resultsDiv.appendChild(createPostElement(post));
-  });
-
-  if (visibleCount < totalCount) {
-    const showMoreBtn = document.createElement('button');
-    showMoreBtn.className = 'load-more';
-    showMoreBtn.id = 'showMoreBtn';
-    const remaining = totalCount - visibleCount;
-    if (remaining <= RENDER_STEP) {
-      showMoreBtn.textContent =
-        remaining === 1 ? 'Show 1 more loaded result' : `Show ${remaining} more loaded results`;
-    } else {
-      showMoreBtn.textContent = `Show ${RENDER_STEP} more loaded results`;
-    }
-    showMoreBtn.addEventListener('click', () => {
-      increaseRenderLimit();
-      renderResults();
-    });
-    resultsDiv.appendChild(showMoreBtn);
-  }
-
-  // Load more button
-  const hasMoreResults = Object.values(state.currentCursors).some((cursor) => cursor !== null);
-  if (hasMoreResults) {
-    const loadMoreBtn = document.createElement('button');
-    loadMoreBtn.className = 'load-more';
-    loadMoreBtn.id = 'loadMoreBtn';
-    loadMoreBtn.textContent = 'Load More Results';
-    loadMoreBtn.addEventListener('click', loadMore);
-    resultsDiv.appendChild(loadMoreBtn);
-  }
-}
-
-function renderNewPosts() {
-  newPostsDiv.textContent = '';
-  if (state.pendingPosts.length === 0) {
-    newPostsDiv.classList.add('hidden');
-    return;
-  }
-
-  newPostsDiv.classList.remove('hidden');
-
-  const header = document.createElement('div');
-  header.className = 'new-posts-header';
-
-  const title = document.createElement('div');
-  title.className = 'new-posts-title';
-  title.textContent = `${state.pendingPosts.length} new post${state.pendingPosts.length !== 1 ? 's' : ''} from auto-refresh`;
-  header.appendChild(title);
-
-  const actions = document.createElement('div');
-  actions.className = 'new-posts-actions';
-
-  const addBtn = document.createElement('button');
-  addBtn.type = 'button';
-  addBtn.className = 'button-small';
-  addBtn.textContent = 'Add to results';
-  addBtn.addEventListener('click', mergePendingPosts);
-  actions.appendChild(addBtn);
-
-  const dismissBtn = document.createElement('button');
-  dismissBtn.type = 'button';
-  dismissBtn.className = 'button-secondary button-small';
-  dismissBtn.textContent = 'Dismiss';
-  dismissBtn.addEventListener('click', dismissPendingPosts);
-  actions.appendChild(dismissBtn);
-
-  header.appendChild(actions);
-  newPostsDiv.appendChild(header);
-
-  const list = document.createElement('div');
-  list.className = 'new-posts-list';
-  const sorted = [...state.pendingPosts].sort((a, b) => getPostTimestamp(b) - getPostTimestamp(a));
-  sorted.forEach((post) => {
-    list.appendChild(createPostElement(post));
-  });
-  newPostsDiv.appendChild(list);
 }
 
 function mergePendingPosts() {
@@ -621,17 +263,14 @@ function mergePendingPosts() {
     return;
   }
 
-  let combined = deduplicatePosts([...state.pendingPosts, ...state.allPosts]);
-  combined = filterByDate(combined, state.timeFilterHours);
-  combined = filterByLikes(combined, state.minLikes);
-  state.allPosts = sortPosts(combined, state.searchSort);
+  state.allPosts = applyPostPipeline([...state.pendingPosts, ...state.allPosts]);
 
   clearNewPostHighlights();
   state.newPostUris = new Set(state.pendingPosts.map((post) => post.uri));
   scheduleNewPostHighlightClear();
   state.pendingPosts = [];
-  renderNewPosts();
-  renderResults();
+  renderPendingPanel();
+  renderAllResults();
 }
 
 function dismissPendingPosts() {
@@ -640,8 +279,8 @@ function dismissPendingPosts() {
   }
   state.pendingPosts = [];
   clearNewPostHighlights();
-  renderNewPosts();
-  renderResults();
+  renderPendingPanel();
+  renderAllResults();
 }
 
 async function refreshSearch() {
@@ -649,10 +288,7 @@ async function refreshSearch() {
     return 0;
   }
 
-  let trimmed = filterByDate(state.allPosts, state.timeFilterHours);
-  trimmed = filterByLikes(trimmed, state.minLikes);
-  state.allPosts = sortPosts(trimmed, state.searchSort);
-
+  state.allPosts = applyPostPipeline(state.allPosts);
   state.pendingPosts = filterByDate(state.pendingPosts, state.timeFilterHours);
   state.pendingPosts = filterByLikes(state.pendingPosts, state.minLikes);
 
@@ -660,9 +296,7 @@ async function refreshSearch() {
   const results = await Promise.all(
     state.searchTerms.map((term) => fetchLatestPostsForTerm(term, state.searchSort))
   );
-  let latestPosts = deduplicatePosts(results.flat());
-  latestPosts = filterByDate(latestPosts, state.timeFilterHours);
-  latestPosts = filterByLikes(latestPosts, state.minLikes);
+  let latestPosts = applyPostPipeline(results.flat());
 
   const newPosts = latestPosts.filter((post) => !existingUris.has(post.uri));
 
@@ -676,8 +310,8 @@ async function refreshSearch() {
     scheduleNewPostHighlightClear();
   }
 
-  renderNewPosts();
-  renderResults();
+  renderPendingPanel();
+  renderAllResults();
   return newPosts.length;
 }
 
@@ -737,7 +371,8 @@ export function disableAutoRefresh() {
   updateRefreshMeta();
 }
 
-// Main search function
+// --- Core search ---
+
 export async function performSearch() {
   if (state.isLoading) {
     state.pendingSearch = true;
@@ -771,7 +406,7 @@ export async function performSearch() {
   resultsDiv.textContent = '';
   clearNewPostHighlights();
   state.pendingPosts = [];
-  renderNewPosts();
+  renderPendingPanel();
   resetRenderLimit();
 
   updateSearchURL();
@@ -779,44 +414,29 @@ export async function performSearch() {
   try {
     showStatus(`Searching for: ${state.rawSearchTerms.join(', ')}…`, 'loading');
 
-    // Track progress for progressive rendering
     let completedTerms = 0;
     const totalTerms = state.searchTerms.length;
 
-    // Fetch all terms in parallel, but render progressively as each completes
     const promises = state.searchTerms.map(async (term) => {
       const posts = await fetchAllPostsForTerm(term, INITIAL_MAX_PAGES, state.searchSort);
 
-      // Bail if a newer search has started — prevents stale data corruption
       if (!isCurrentSearchGeneration(currentGeneration)) return posts;
 
-      // Immediately merge and render as this term completes
       completedTerms++;
+      state.allPosts = applyPostPipeline([...state.allPosts, ...posts]);
 
-      // Merge new posts into state.allPosts progressively
-      let combined = deduplicatePosts([...state.allPosts, ...posts]);
-      combined = filterByDate(combined, state.timeFilterHours);
-      combined = filterByLikes(combined, state.minLikes);
-      state.allPosts = sortPosts(combined, state.searchSort);
-
-      // Update status and render immediately
       if (completedTerms < totalTerms) {
         showStatus(`Loaded ${completedTerms}/${totalTerms} terms…`, 'loading');
       }
-      scheduleRender();
+      scheduleRender(getRenderHandlers());
 
       return posts;
     });
 
-    // Use allSettled to wait for ALL promises before continuing
-    // This prevents race conditions where failed promises' siblings
-    // continue updating state after error handling
     const results = await Promise.allSettled(promises);
 
-    // Bail if a newer search has started
     if (!isCurrentSearchGeneration(currentGeneration)) return;
 
-    // Check for failures
     const failures = results.filter((r) => r.status === 'rejected');
     if (failures.length > 0) {
       const errorMsg =
@@ -824,12 +444,11 @@ export async function performSearch() {
           ? `Search failed: ${failures[0].reason.message}`
           : `${failures.length}/${totalTerms} terms failed to load`;
       showStatus(errorMsg, 'error');
-      // Continue - we may have partial results from successful terms
     } else {
       hideStatus();
     }
 
-    renderResults();
+    renderAllResults();
     state.lastRefreshAt = new Date();
     state.lastRefreshNewCount = null;
     state.lastRefreshError = null;
@@ -851,7 +470,6 @@ export async function performSearch() {
   }
 }
 
-// Load more results
 export async function loadMore() {
   if (state.isLoading) return;
 
@@ -879,23 +497,27 @@ export async function loadMore() {
         return [];
       });
 
-    const results = await Promise.all(promises);
-    let newPosts = results.flat();
+    const settled = await Promise.allSettled(promises);
+
+    const failures = settled.filter((r) => r.status === 'rejected');
+    const newPosts = settled
+      .filter((r) => r.status === 'fulfilled')
+      .flatMap((r) => r.value);
 
     if (newPosts.length > 0) {
-      let combined = [...state.allPosts, ...newPosts];
-      combined = deduplicatePosts(combined);
-      combined = filterByDate(combined, state.timeFilterHours);
-      combined = filterByLikes(combined, state.minLikes);
-      state.allPosts = sortPosts(combined, state.searchSort);
+      state.allPosts = applyPostPipeline([...state.allPosts, ...newPosts]);
       if (state.allPosts.length > prevCount) {
         state.renderLimit = Math.min(state.allPosts.length, state.renderLimit + RENDER_STEP);
       }
-      renderResults();
+      renderAllResults();
     } else {
       if (loadMoreBtn) {
         loadMoreBtn.remove();
       }
+    }
+
+    if (failures.length > 0) {
+      showStatus(`${failures.length} term(s) failed to load more`, 'error');
     }
   } catch (error) {
     console.error('Load more error:', error);
@@ -904,6 +526,8 @@ export async function loadMore() {
     state.isLoading = false;
   }
 }
+
+// --- Debounce & UI ---
 
 export function debouncedSearch() {
   if (state.searchDebounceTimer) {
@@ -933,9 +557,9 @@ export function focusSearchInput() {
 }
 
 export function renderSearchResults() {
-  renderResults();
+  renderAllResults();
 }
 
 export function renderPendingPosts() {
-  renderNewPosts();
+  renderPendingPanel();
 }

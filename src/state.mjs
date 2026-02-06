@@ -5,7 +5,10 @@ export const didCache = new Map();
 // Search results cache: key -> { data, timestamp }
 export const searchCache = new Map();
 
-export const state = {
+// --- State slices ---
+// Grouped by concern for maintainability. Each slice owns related properties.
+
+const searchState = {
   allPosts: [],
   currentCursors: {},
   rawSearchTerms: [],
@@ -15,10 +18,14 @@ export const state = {
   timeFilterHours: 24,
   searchGeneration: 0,
   isLoading: false,
-  isRefreshing: false,
   pendingSearch: false,
   renderLimit: INITIAL_RENDER_LIMIT,
+  searchDebounceTimer: null,
+};
+
+const refreshState = {
   autoRefreshEnabled: false,
+  isRefreshing: false,
   refreshIntervalMs: 5 * 60 * 1000,
   refreshTimerId: null,
   refreshCountdownId: null,
@@ -29,6 +36,9 @@ export const state = {
   pendingPosts: [],
   newPostUris: new Set(),
   clearHighlightsTimeout: null,
+};
+
+const quoteState = {
   allQuotes: [],
   quoteSort: 'likes',
   isQuoteLoading: false,
@@ -36,8 +46,11 @@ export const state = {
   quoteSeenCursors: new Set(),
   quoteTotalCount: null,
   activeQuoteUri: null,
-  searchDebounceTimer: null,
 };
+
+// Unified state object — provides a single access point while keeping
+// the conceptual grouping above for documentation.
+export const state = Object.assign({}, searchState, refreshState, quoteState);
 
 export function isCurrentSearchGeneration(generation) {
   return state.searchGeneration === generation;
