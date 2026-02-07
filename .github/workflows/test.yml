@@ -10,5 +10,6 @@ jobs:
           node-version: '20'
       - run: npm ci
       - run: npm test
+      - run: npm run perf:smoke
       - run: npm run build
         if: github.event_name == 'pull_request'

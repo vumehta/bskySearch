@@ -21,6 +21,16 @@ import { enforceDidCacheLimit, getCachedDid } from './cache.mjs';
 import { setQueryParam, updateURLWithParams } from './url.mjs';
 import { trackQuoteCursor } from './quotes-state.mjs';
 
+let quoteSortCache = { quotesRef: null, sortMode: '', sorted: [] };
+let lastRenderedQuoteSort = null;
+let lastRenderedQuoteUris = [];
+
+function resetQuoteRenderCache() {
+  quoteSortCache = { quotesRef: null, sortMode: '', sorted: [] };
+  lastRenderedQuoteSort = null;
+  lastRenderedQuoteUris = [];
+}
+
 export function updateQuoteURL() {
   const params = new URLSearchParams(window.location.search);
   const postValue = postUrlInput.value.trim();
@@ -74,6 +84,39 @@ function sortQuotes(quotes, sortMode) {
       break;
   }
   return sorted;
+}
+
+function getSortedQuotes(quotes, sortMode) {
+  if (quoteSortCache.quotesRef === quotes && quoteSortCache.sortMode === sortMode) {
+    return quoteSortCache.sorted;
+  }
+  const sorted = sortQuotes(quotes, sortMode);
+  quoteSortCache = {
+    quotesRef: quotes,
+    sortMode,
+    sorted,
+  };
+  return sorted;
+}
+
+function canAppendQuotes(sortedQuotes, sortMode) {
+  if (sortMode !== lastRenderedQuoteSort) {
+    return false;
+  }
+  if (lastRenderedQuoteUris.length === 0) {
+    return false;
+  }
+  if (sortedQuotes.length <= lastRenderedQuoteUris.length) {
+    return false;
+  }
+
+  for (let index = 0; index < lastRenderedQuoteUris.length; index += 1) {
+    if (sortedQuotes[index]?.uri !== lastRenderedQuoteUris[index]) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function createQuoteOriginalElement(post) {
@@ -252,20 +295,34 @@ function renderQuoteLoadMore() {
   quoteLoadMoreDiv.appendChild(button);
 }
 
-export function renderQuoteResults() {
-  quoteResultsDiv.textContent = '';
+export function renderQuoteResults({ allowAppend = false } = {}) {
   if (state.allQuotes.length === 0) {
+    quoteResultsDiv.textContent = '';
     const empty = document.createElement('div');
     empty.className = 'no-quotes';
     empty.textContent = 'No quotes found for this post.';
     quoteResultsDiv.appendChild(empty);
+    lastRenderedQuoteSort = state.quoteSort;
+    lastRenderedQuoteUris = [];
     return;
   }
 
-  const sorted = sortQuotes(state.allQuotes, state.quoteSort);
-  sorted.forEach((quote, index) => {
-    quoteResultsDiv.appendChild(createQuotePostElement(quote, index));
-  });
+  const sorted = getSortedQuotes(state.allQuotes, state.quoteSort);
+  const appendOnly = allowAppend && canAppendQuotes(sorted, state.quoteSort);
+  const startIndex = appendOnly ? lastRenderedQuoteUris.length : 0;
+
+  if (!appendOnly) {
+    quoteResultsDiv.textContent = '';
+  }
+
+  const fragment = document.createDocumentFragment();
+  for (let index = startIndex; index < sorted.length; index += 1) {
+    fragment.appendChild(createQuotePostElement(sorted[index], index));
+  }
+  quoteResultsDiv.appendChild(fragment);
+
+  lastRenderedQuoteSort = state.quoteSort;
+  lastRenderedQuoteUris = sorted.map((quote) => quote.uri);
 }
 
 async function fetchDid(actor) {
@@ -337,12 +394,15 @@ async function loadMoreQuotes() {
 
   try {
     const page = await fetchQuotesPage(state.activeQuoteUri, state.quoteCursor);
+    const hasNewQuotes = page.posts.length > 0;
     if (page.posts.length > 0) {
       state.allQuotes = state.allQuotes.concat(page.posts);
     }
     state.quoteCursor = trackQuoteCursor(page.cursor);
     updateQuoteCount();
-    renderQuoteResults();
+    if (hasNewQuotes) {
+      renderQuoteResults({ allowAppend: true });
+    }
     hideQuoteStatus();
   } catch (error) {
     console.error('Load more quotes error:', error);
@@ -375,6 +435,7 @@ export async function performQuoteSearch() {
   state.quoteSeenCursors = new Set();
   state.quoteTotalCount = null;
   state.activeQuoteUri = null;
+  resetQuoteRenderCache();
 
   updateQuoteURL();
 

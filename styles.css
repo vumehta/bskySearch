@@ -764,10 +764,10 @@ button:disabled {
     margin-bottom: 0;
 }
 
-.thread-context + .post {
-    border-top-left-radius: 0;
-    border-top-right-radius: 0;
-    margin-top: 0;
+.thread-context-inline {
+    border-bottom: 1px solid var(--accent-soft-border);
+    border-radius: 8px;
+    margin-bottom: 12px;
 }
 
 .thread-parent {

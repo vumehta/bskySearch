@@ -1,8 +1,10 @@
 export {
   deduplicatePosts,
   expandSearchTerms,
+  filterByDate,
   filterByLikes,
   formatDuration,
+  getPostTimestamp,
   getSearchCacheKey,
   isValidBskyUrl,
   normalizeTerm,
