@@ -770,12 +770,6 @@ button:disabled {
     margin-bottom: 12px;
 }
 
-.thread-context + .post {
-    border-top-left-radius: 0;
-    border-top-right-radius: 0;
-    margin-top: 0;
-}
-
 .thread-parent {
     position: relative;
     padding: 12px;

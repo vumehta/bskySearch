@@ -299,11 +299,28 @@ function flushDerivedPostsRebuild({ render = false } = {}) {
 }
 
 function pruneIngestedPostsByCurrentFilters() {
-  const filtered = filterByLikes(
-    filterByDate(Array.from(ingestedPostsByUri.values()), state.timeFilterHours),
-    state.minLikes
-  );
-  ingestedPostsByUri = new Map(filtered.map((post) => [post.uri, post]));
+  const hours =
+    Number.isFinite(state.timeFilterHours) && state.timeFilterHours > 0 ? state.timeFilterHours : 24;
+  const cutoffTs = Date.now() - hours * 3600000;
+  const minLikes = Number.isFinite(state.minLikes) && state.minLikes > 0 ? state.minLikes : 0;
+
+  const retainedPosts = [];
+  const prunedStore = new Map();
+
+  for (const [uri, post] of ingestedPostsByUri.entries()) {
+    if (getPostTimestamp(post) < cutoffTs) {
+      continue;
+    }
+    if ((post.likeCount || 0) < minLikes) {
+      continue;
+    }
+
+    prunedStore.set(uri, post);
+    retainedPosts.push(post);
+  }
+
+  ingestedPostsByUri = prunedStore;
+  return retainedPosts;
 }
 
 function clearIngestedPosts() {
@@ -893,8 +910,8 @@ async function refreshSearch() {
     return 0;
   }
 
-  pruneIngestedPostsByCurrentFilters();
-  flushDerivedPostsRebuild();
+  const retainedPosts = pruneIngestedPostsByCurrentFilters();
+  state.allPosts = sortPosts(retainedPosts, state.searchSort);
 
   state.pendingPosts = filterByDate(state.pendingPosts, state.timeFilterHours);
   state.pendingPosts = filterByLikes(state.pendingPosts, state.minLikes);
