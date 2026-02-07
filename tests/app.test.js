@@ -4,7 +4,7 @@
  * These tests cover the core utility functions that don't depend on DOM or network.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // Import pure utilities from the refactored modules
 const app = await import('../src/testing.mjs');
@@ -16,11 +16,13 @@ const {
   trackQuoteCursor,
   getSearchCacheKey,
   getCachedDid,
+  filterByDate,
   filterByLikes,
   sortPosts,
   normalizeTerm,
   expandSearchTerms,
   formatDuration,
+  getPostTimestamp,
   didCache,
   state,
   isCurrentSearchGeneration,
@@ -355,6 +357,85 @@ describe('filterByLikes', () => {
     const posts = [{ uri: 'at://1', likeCount: 10 }];
     const result = filterByLikes(posts, 10);
     expect(result).toHaveLength(1);
+  });
+});
+
+// ============================================================================
+// filterByDate
+// ============================================================================
+describe('filterByDate', () => {
+  const fixedNow = Date.parse('2026-01-01T12:00:00.000Z');
+
+  beforeEach(() => {
+    vi.spyOn(Date, 'now').mockReturnValue(fixedNow);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('defaults invalid/non-positive hours to 24', () => {
+    const posts = [
+      {
+        uri: 'at://fresh',
+        indexedAt: '2025-12-31T14:00:00.000Z', // 22h before fixedNow
+      },
+      {
+        uri: 'at://stale',
+        indexedAt: '2025-12-31T10:00:00.000Z', // 26h before fixedNow
+      },
+    ];
+
+    const zeroHours = filterByDate(posts, 0);
+    const negativeHours = filterByDate(posts, -6);
+    const nanHours = filterByDate(posts, Number.NaN);
+
+    expect(zeroHours.map((post) => post.uri)).toEqual(['at://fresh']);
+    expect(negativeHours.map((post) => post.uri)).toEqual(['at://fresh']);
+    expect(nanHours.map((post) => post.uri)).toEqual(['at://fresh']);
+  });
+
+  it('uses getPostTimestamp fallback to record.createdAt', () => {
+    const posts = [
+      {
+        uri: 'at://fallback-recent',
+        indexedAt: '2025-12-31T08:00:00.000Z', // stale if used directly
+        record: { createdAt: '2026-01-01T11:00:00.000Z' }, // fresh
+      },
+      {
+        uri: 'at://stale',
+        indexedAt: '2025-12-31T07:00:00.000Z',
+      },
+    ];
+
+    const result = filterByDate(posts, 24);
+    expect(result.map((post) => post.uri)).toEqual(['at://fallback-recent']);
+  });
+});
+
+// ============================================================================
+// getPostTimestamp
+// ============================================================================
+describe('getPostTimestamp', () => {
+  it('prefers record.createdAt when present', () => {
+    const post = {
+      indexedAt: '2025-01-01T00:00:00.000Z',
+      record: { createdAt: '2026-01-01T00:00:00.000Z' },
+    };
+    expect(getPostTimestamp(post)).toBe(Date.parse('2026-01-01T00:00:00.000Z'));
+  });
+
+  it('falls back to indexedAt when createdAt is missing', () => {
+    const post = { indexedAt: '2026-01-02T00:00:00.000Z' };
+    expect(getPostTimestamp(post)).toBe(Date.parse('2026-01-02T00:00:00.000Z'));
+  });
+
+  it('returns 0 for invalid timestamps', () => {
+    const post = {
+      indexedAt: 'not-a-date',
+      record: { createdAt: 'also-not-a-date' },
+    };
+    expect(getPostTimestamp(post)).toBe(0);
   });
 });
 

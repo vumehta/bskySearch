@@ -99,18 +99,21 @@ function optimizedIngestThenDerive(results, hours = 24, minLikes = 10, sortMode 
   return sortPosts(derived, sortMode);
 }
 
-function currentHighlightMatch(text, terms) {
+function createCachedHighlightMatcher(terms) {
   const escapedTerms = terms.map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   const regex = new RegExp(`(${escapedTerms.join('|')})`, 'gi');
   const termSet = new Set(terms.map((term) => term.toLowerCase()));
-  const parts = text.split(regex);
-  let hits = 0;
-  for (const part of parts) {
-    if (termSet.has(part.toLowerCase())) {
-      hits += 1;
+
+  return (text) => {
+    const parts = text.split(regex);
+    let hits = 0;
+    for (const part of parts) {
+      if (termSet.has(part.toLowerCase())) {
+        hits += 1;
+      }
     }
-  }
-  return hits;
+    return hits;
+  };
 }
 
 function legacyHighlightMatch(text, terms) {
@@ -126,23 +129,58 @@ function legacyHighlightMatch(text, terms) {
   return hits;
 }
 
+function runOrderedPair(runIndex, legacyFn, optimizedFn) {
+  let legacyDuration = 0;
+  let optimizedDuration = 0;
+
+  if (runIndex % 2 === 0) {
+    let start = performance.now();
+    legacyFn();
+    legacyDuration = performance.now() - start;
+
+    start = performance.now();
+    optimizedFn();
+    optimizedDuration = performance.now() - start;
+  } else {
+    let start = performance.now();
+    optimizedFn();
+    optimizedDuration = performance.now() - start;
+
+    start = performance.now();
+    legacyFn();
+    legacyDuration = performance.now() - start;
+  }
+
+  return { legacyDuration, optimizedDuration };
+}
+
 function benchmarkSearchMerge() {
+  const warmupRuns = 8;
   const runs = 50;
   const baseResults = buildTermResults();
   let legacyMs = 0;
   let optimizedMs = 0;
 
+  for (let run = 0; run < warmupRuns; run += 1) {
+    const legacyInput = cloneResults(baseResults);
+    const optimizedInput = cloneResults(baseResults);
+    runOrderedPair(
+      run,
+      () => legacyProgressiveMerge(legacyInput),
+      () => optimizedIngestThenDerive(optimizedInput)
+    );
+  }
+
   for (let run = 0; run < runs; run += 1) {
     const legacyInput = cloneResults(baseResults);
     const optimizedInput = cloneResults(baseResults);
-
-    let start = performance.now();
-    legacyProgressiveMerge(legacyInput);
-    legacyMs += performance.now() - start;
-
-    start = performance.now();
-    optimizedIngestThenDerive(optimizedInput);
-    optimizedMs += performance.now() - start;
+    const { legacyDuration, optimizedDuration } = runOrderedPair(
+      run,
+      () => legacyProgressiveMerge(legacyInput),
+      () => optimizedIngestThenDerive(optimizedInput)
+    );
+    legacyMs += legacyDuration;
+    optimizedMs += optimizedDuration;
   }
 
   return {
@@ -154,22 +192,32 @@ function benchmarkSearchMerge() {
 }
 
 function benchmarkHighlighting() {
+  const warmupRuns = 40;
   const runs = 500;
   const terms = Array.from({ length: 28 }, (_, index) => `term${index}`);
   const text = Array.from({ length: 120 }, (_, index) => `token${index % 25} term${index % 28}`).join(
     ' '
   );
+  const cachedMatcher = createCachedHighlightMatcher(terms);
   let legacyMs = 0;
   let currentMs = 0;
 
-  for (let run = 0; run < runs; run += 1) {
-    let start = performance.now();
-    legacyHighlightMatch(text, terms);
-    legacyMs += performance.now() - start;
+  for (let run = 0; run < warmupRuns; run += 1) {
+    runOrderedPair(
+      run,
+      () => legacyHighlightMatch(text, terms),
+      () => cachedMatcher(text)
+    );
+  }
 
-    start = performance.now();
-    currentHighlightMatch(text, terms);
-    currentMs += performance.now() - start;
+  for (let run = 0; run < runs; run += 1) {
+    const { legacyDuration, optimizedDuration } = runOrderedPair(
+      run,
+      () => legacyHighlightMatch(text, terms),
+      () => cachedMatcher(text)
+    );
+    legacyMs += legacyDuration;
+    currentMs += optimizedDuration;
   }
 
   return {
