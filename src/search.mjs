@@ -43,6 +43,30 @@ import { enforceSearchCacheLimit, getCachedSearch } from './cache.mjs';
 import { setQueryParam, updateURLWithParams } from './url.mjs';
 import { isReplyPost, toggleThread } from './thread.mjs';
 
+const DERIVE_THROTTLE_MS = 120;
+
+let ingestedPostsByUri = new Map();
+let deriveTimerId = null;
+
+// Coalesce render updates into a single frame.
+let pendingRenderFrame = null;
+
+// Search results rendering cache.
+let resultsHeaderEl = null;
+let resultsCountEl = null;
+let resultsSortEl = null;
+let resultsEmptyEl = null;
+let resultsEmptyPrimaryEl = null;
+let resultsEmptySecondaryEl = null;
+let resultsListEl = null;
+let showMoreBtnEl = null;
+let loadMoreBtnEl = null;
+const renderedPostElements = new Map();
+const renderedPostFingerprints = new Map();
+
+// Highlight matcher cache for a single active term set.
+let highlightMatcherCache = { key: '', regex: null, termSet: null };
+
 // Show status message
 function showStatus(message, type = 'info') {
   statusDiv.className = `status ${type}`;
@@ -176,6 +200,116 @@ function increaseRenderLimit(step = RENDER_STEP) {
   state.renderLimit = Math.min(state.allPosts.length, state.renderLimit + step);
 }
 
+function cancelScheduledRender() {
+  if (pendingRenderFrame !== null) {
+    cancelAnimationFrame(pendingRenderFrame);
+    pendingRenderFrame = null;
+  }
+}
+
+function scheduleRender() {
+  if (pendingRenderFrame !== null) return;
+  pendingRenderFrame = requestAnimationFrame(() => {
+    pendingRenderFrame = null;
+    renderResults();
+  });
+}
+
+function clearDerivedPostsTimer() {
+  if (deriveTimerId) {
+    clearTimeout(deriveTimerId);
+    deriveTimerId = null;
+  }
+}
+
+function getMatchedTermsForPost(post) {
+  if (Array.isArray(post.matchedTerms) && post.matchedTerms.length > 0) {
+    return post.matchedTerms.filter(Boolean);
+  }
+  if (post.matchedTerm) {
+    return [post.matchedTerm];
+  }
+  return [];
+}
+
+function mergeMatchedTerms(existingTerms, incomingTerms) {
+  const merged = [];
+  const seen = new Set();
+
+  const add = (term) => {
+    if (!term) return;
+    const normalized = term.toLowerCase();
+    if (seen.has(normalized)) return;
+    seen.add(normalized);
+    merged.push(term);
+  };
+
+  existingTerms.forEach(add);
+  incomingTerms.forEach(add);
+  return merged;
+}
+
+function ingestPosts(posts) {
+  for (const post of posts) {
+    if (!post?.uri) continue;
+
+    const incomingTerms = getMatchedTermsForPost(post);
+    const existing = ingestedPostsByUri.get(post.uri);
+
+    if (!existing) {
+      const normalized = { ...post };
+      normalized.matchedTerms = incomingTerms;
+      normalized.matchedTerm = normalized.matchedTerms[0] || '';
+      ingestedPostsByUri.set(post.uri, normalized);
+      continue;
+    }
+
+    const mergedTerms = mergeMatchedTerms(getMatchedTermsForPost(existing), incomingTerms);
+    Object.assign(existing, post);
+    existing.matchedTerms = mergedTerms;
+    existing.matchedTerm = existing.matchedTerms[0] || '';
+  }
+}
+
+function recomputeDerivedPosts() {
+  let derived = Array.from(ingestedPostsByUri.values());
+  derived = filterByDate(derived, state.timeFilterHours);
+  derived = filterByLikes(derived, state.minLikes);
+  state.allPosts = sortPosts(derived, state.searchSort);
+}
+
+function scheduleDerivedPostsRebuild() {
+  if (deriveTimerId) {
+    return;
+  }
+  deriveTimerId = setTimeout(() => {
+    deriveTimerId = null;
+    recomputeDerivedPosts();
+    scheduleRender();
+  }, DERIVE_THROTTLE_MS);
+}
+
+function flushDerivedPostsRebuild({ render = false } = {}) {
+  clearDerivedPostsTimer();
+  recomputeDerivedPosts();
+  if (render) {
+    cancelScheduledRender();
+    renderResults();
+  }
+}
+
+function pruneIngestedPostsByCurrentFilters() {
+  const filtered = filterByLikes(
+    filterByDate(Array.from(ingestedPostsByUri.values()), state.timeFilterHours),
+    state.minLikes
+  );
+  ingestedPostsByUri = new Map(filtered.map((post) => [post.uri, post]));
+}
+
+function clearIngestedPosts() {
+  ingestedPostsByUri.clear();
+}
+
 function clearRefreshTimers() {
   if (state.refreshTimerId) {
     clearTimeout(state.refreshTimerId);
@@ -249,38 +383,39 @@ function scheduleNewPostHighlightClear() {
   }, 8000);
 }
 
-// Coalesce progressive renders into a single frame
-let pendingRenderFrame = null;
+function getHighlightMatcher(terms) {
+  const key = terms.map((term) => term.toLowerCase()).join('\u0001');
+  if (key === highlightMatcherCache.key) {
+    return highlightMatcherCache;
+  }
 
-function scheduleRender() {
-  if (pendingRenderFrame !== null) return;
-  pendingRenderFrame = requestAnimationFrame(() => {
-    pendingRenderFrame = null;
-    renderResults();
-  });
+  if (terms.length === 0) {
+    highlightMatcherCache = { key, regex: null, termSet: new Set() };
+    return highlightMatcherCache;
+  }
+
+  const escapedTerms = terms.map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const regex = new RegExp(`(${escapedTerms.join('|')})`, 'gi');
+  const termSet = new Set(terms.map((term) => term.toLowerCase()));
+  highlightMatcherCache = { key, regex, termSet };
+  return highlightMatcherCache;
 }
-
-// Cache compiled highlight regex — reused for every post in a single search
-let highlightRegexCache = { terms: null, regex: null };
 
 // Create text with highlighted search terms using DOM methods (safe)
 function createHighlightedText(text, terms) {
   const fragment = document.createDocumentFragment();
   if (!text) return fragment;
 
-  let regex;
-  if (terms === highlightRegexCache.terms) {
-    regex = highlightRegexCache.regex;
-  } else {
-    const escapedTerms = terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-    regex = new RegExp(`(${escapedTerms.join('|')})`, 'gi');
-    highlightRegexCache = { terms, regex };
+  const { regex, termSet } = getHighlightMatcher(terms);
+  if (!regex) {
+    fragment.appendChild(document.createTextNode(text));
+    return fragment;
   }
 
   const parts = text.split(regex);
 
   parts.forEach((part) => {
-    if (terms.some((term) => part.toLowerCase() === term.toLowerCase())) {
+    if (termSet.has(part.toLowerCase())) {
       const span = document.createElement('span');
       span.className = 'highlight';
       span.textContent = part;
@@ -309,7 +444,8 @@ function createPostElement(post) {
   // Search terms tags
   const termsDiv = document.createElement('div');
   termsDiv.className = 'search-terms';
-  post.matchedTerms.forEach((term) => {
+  const matchedTerms = getMatchedTermsForPost(post);
+  matchedTerms.forEach((term) => {
     const tag = document.createElement('span');
     tag.className = 'term-tag';
     tag.textContent = term;
@@ -480,94 +616,204 @@ function createPostElement(post) {
   return postDiv;
 }
 
-// Render all results using safe DOM methods
-function renderResults() {
+function resetResultsRenderCache() {
+  cancelScheduledRender();
+  resultsHeaderEl = null;
+  resultsCountEl = null;
+  resultsSortEl = null;
+  resultsEmptyEl = null;
+  resultsEmptyPrimaryEl = null;
+  resultsEmptySecondaryEl = null;
+  resultsListEl = null;
+  showMoreBtnEl = null;
+  loadMoreBtnEl = null;
+  renderedPostElements.clear();
+  renderedPostFingerprints.clear();
   resultsDiv.textContent = '';
+}
 
-  if (state.allPosts.length === 0) {
-    const noResults = document.createElement('div');
-    noResults.className = 'no-results';
-
-    const p1 = document.createElement('p');
-    p1.textContent =
-      state.pendingPosts.length > 0
-        ? 'New posts are waiting above.'
-        : 'No posts found matching your criteria.';
-    noResults.appendChild(p1);
-
-    const p2 = document.createElement('p');
-    p2.textContent =
-      state.pendingPosts.length > 0
-        ? 'Use "Add to results" to merge them into the main list.'
-        : 'Try different search terms or lower the minimum likes.';
-    noResults.appendChild(p2);
-
-    resultsDiv.appendChild(noResults);
+function ensureResultsShell() {
+  if (resultsHeaderEl) {
     return;
   }
 
-  // Header — announce result count to screen readers
-  const headerDiv = document.createElement('div');
-  headerDiv.className = 'results-header';
-  headerDiv.setAttribute('role', 'status');
-  headerDiv.setAttribute('aria-live', 'polite');
-  headerDiv.setAttribute('aria-atomic', 'true');
+  resetResultsRenderCache();
 
-  const countSpan = document.createElement('span');
-  countSpan.className = 'results-count';
+  resultsHeaderEl = document.createElement('div');
+  resultsHeaderEl.className = 'results-header';
+  resultsHeaderEl.setAttribute('role', 'status');
+  resultsHeaderEl.setAttribute('aria-live', 'polite');
+  resultsHeaderEl.setAttribute('aria-atomic', 'true');
+
+  resultsCountEl = document.createElement('span');
+  resultsCountEl.className = 'results-count';
+  resultsHeaderEl.appendChild(resultsCountEl);
+
+  resultsSortEl = document.createElement('span');
+  resultsHeaderEl.appendChild(resultsSortEl);
+
+  resultsEmptyEl = document.createElement('div');
+  resultsEmptyEl.className = 'no-results';
+  resultsEmptyPrimaryEl = document.createElement('p');
+  resultsEmptySecondaryEl = document.createElement('p');
+  resultsEmptyEl.appendChild(resultsEmptyPrimaryEl);
+  resultsEmptyEl.appendChild(resultsEmptySecondaryEl);
+
+  resultsListEl = document.createElement('div');
+  resultsListEl.className = 'results-list';
+
+  showMoreBtnEl = document.createElement('button');
+  showMoreBtnEl.className = 'load-more';
+  showMoreBtnEl.id = 'showMoreBtn';
+  showMoreBtnEl.type = 'button';
+  showMoreBtnEl.addEventListener('click', () => {
+    increaseRenderLimit();
+    renderResults();
+  });
+
+  loadMoreBtnEl = document.createElement('button');
+  loadMoreBtnEl.className = 'load-more';
+  loadMoreBtnEl.id = 'loadMoreBtn';
+  loadMoreBtnEl.type = 'button';
+  loadMoreBtnEl.textContent = 'Load More Results';
+  loadMoreBtnEl.addEventListener('click', loadMore);
+
+  resultsDiv.appendChild(resultsHeaderEl);
+  resultsDiv.appendChild(resultsEmptyEl);
+  resultsDiv.appendChild(resultsListEl);
+  resultsDiv.appendChild(showMoreBtnEl);
+  resultsDiv.appendChild(loadMoreBtnEl);
+}
+
+function getPostRenderFingerprint(post) {
+  const matchedTerms = getMatchedTermsForPost(post).join('\u0001');
+  return [
+    post.uri || '',
+    post.author?.handle || '',
+    post.author?.displayName || '',
+    post.author?.avatar || '',
+    post.indexedAt || '',
+    post.record?.text || '',
+    post.likeCount || 0,
+    post.repostCount || 0,
+    post.replyCount || 0,
+    matchedTerms,
+    state.newPostUris.has(post.uri) ? '1' : '0',
+  ].join('\u0002');
+}
+
+function syncVisibleResultPosts(visiblePosts) {
+  const visibleUris = new Set();
+  let renderedCount = 0;
+
+  visiblePosts.forEach((post) => {
+    const uri = post.uri;
+    if (!uri) return;
+    visibleUris.add(uri);
+
+    const nextFingerprint = getPostRenderFingerprint(post);
+    const previousFingerprint = renderedPostFingerprints.get(uri);
+    let postElement = renderedPostElements.get(uri);
+
+    if (!postElement || previousFingerprint !== nextFingerprint) {
+      const nextElement = createPostElement(post);
+      nextElement.dataset.uri = uri;
+
+      if (postElement?.parentNode === resultsListEl) {
+        resultsListEl.replaceChild(nextElement, postElement);
+      }
+
+      postElement = nextElement;
+      renderedPostElements.set(uri, postElement);
+      renderedPostFingerprints.set(uri, nextFingerprint);
+    }
+
+    const currentAtIndex = resultsListEl.children[renderedCount];
+    if (currentAtIndex !== postElement) {
+      resultsListEl.insertBefore(postElement, currentAtIndex || null);
+    }
+    renderedCount += 1;
+  });
+
+  for (const [uri, element] of renderedPostElements.entries()) {
+    if (visibleUris.has(uri)) {
+      continue;
+    }
+    if (element.parentNode === resultsListEl) {
+      element.remove();
+    }
+    renderedPostElements.delete(uri);
+    renderedPostFingerprints.delete(uri);
+  }
+
+  while (resultsListEl.children.length > renderedCount) {
+    resultsListEl.lastElementChild?.remove();
+  }
+}
+
+// Render all results using safe DOM methods
+function renderResults() {
+  ensureResultsShell();
+
   const totalCount = state.allPosts.length;
   const visibleCount = Math.min(state.renderLimit, totalCount);
-  const totalLabel = totalCount === 1 ? 'post' : 'posts';
-  if (visibleCount < totalCount) {
-    countSpan.textContent = `Showing ${visibleCount} of ${totalCount} ${totalLabel}`;
-  } else {
-    countSpan.textContent = `${totalCount} ${totalLabel} found`;
-  }
-  headerDiv.appendChild(countSpan);
 
-  const sortSpan = document.createElement('span');
-  sortSpan.textContent =
+  if (totalCount === 0) {
+    resultsHeaderEl.style.display = 'none';
+    resultsListEl.style.display = 'none';
+    showMoreBtnEl.style.display = 'none';
+    loadMoreBtnEl.style.display = 'none';
+    resultsEmptyEl.style.display = 'block';
+    resultsEmptyPrimaryEl.textContent =
+      state.pendingPosts.length > 0
+        ? 'New posts are waiting above.'
+        : 'No posts found matching your criteria.';
+    resultsEmptySecondaryEl.textContent =
+      state.pendingPosts.length > 0
+        ? 'Use "Add to results" to merge them into the main list.'
+        : 'Try different search terms or lower the minimum likes.';
+    if (resultsListEl.children.length > 0) {
+      resultsListEl.textContent = '';
+      renderedPostElements.clear();
+      renderedPostFingerprints.clear();
+    }
+    return;
+  }
+
+  resultsEmptyEl.style.display = 'none';
+  resultsHeaderEl.style.display = '';
+  resultsListEl.style.display = '';
+
+  const totalLabel = totalCount === 1 ? 'post' : 'posts';
+  resultsCountEl.textContent =
+    visibleCount < totalCount
+      ? `Showing ${visibleCount} of ${totalCount} ${totalLabel}`
+      : `${totalCount} ${totalLabel} found`;
+  resultsSortEl.textContent =
     state.searchSort === 'latest'
       ? 'Sorted by time (newest first)'
       : 'Sorted by likes (high to low)';
-  headerDiv.appendChild(sortSpan);
 
-  resultsDiv.appendChild(headerDiv);
-
-  // Posts
   const visiblePosts = state.allPosts.slice(0, visibleCount);
-  visiblePosts.forEach((post) => {
-    resultsDiv.appendChild(createPostElement(post));
-  });
+  syncVisibleResultPosts(visiblePosts);
 
-  if (visibleCount < totalCount) {
-    const showMoreBtn = document.createElement('button');
-    showMoreBtn.className = 'load-more';
-    showMoreBtn.id = 'showMoreBtn';
-    const remaining = totalCount - visibleCount;
-    if (remaining <= RENDER_STEP) {
-      showMoreBtn.textContent =
-        remaining === 1 ? 'Show 1 more loaded result' : `Show ${remaining} more loaded results`;
-    } else {
-      showMoreBtn.textContent = `Show ${RENDER_STEP} more loaded results`;
-    }
-    showMoreBtn.addEventListener('click', () => {
-      increaseRenderLimit();
-      renderResults();
-    });
-    resultsDiv.appendChild(showMoreBtn);
+  const remaining = totalCount - visibleCount;
+  if (remaining > 0) {
+    showMoreBtnEl.style.display = '';
+    showMoreBtnEl.textContent =
+      remaining <= RENDER_STEP
+        ? remaining === 1
+          ? 'Show 1 more loaded result'
+          : `Show ${remaining} more loaded results`
+        : `Show ${RENDER_STEP} more loaded results`;
+  } else {
+    showMoreBtnEl.style.display = 'none';
   }
 
-  // Load more button
   const hasMoreResults = Object.values(state.currentCursors).some((cursor) => cursor !== null);
-  if (hasMoreResults) {
-    const loadMoreBtn = document.createElement('button');
-    loadMoreBtn.className = 'load-more';
-    loadMoreBtn.id = 'loadMoreBtn';
-    loadMoreBtn.textContent = 'Load More Results';
-    loadMoreBtn.addEventListener('click', loadMore);
-    resultsDiv.appendChild(loadMoreBtn);
-  }
+  loadMoreBtnEl.style.display = hasMoreResults ? '' : 'none';
+  loadMoreBtnEl.disabled = false;
+  loadMoreBtnEl.textContent = 'Load More Results';
 }
 
 function renderNewPosts() {
@@ -621,10 +867,8 @@ function mergePendingPosts() {
     return;
   }
 
-  let combined = deduplicatePosts([...state.pendingPosts, ...state.allPosts]);
-  combined = filterByDate(combined, state.timeFilterHours);
-  combined = filterByLikes(combined, state.minLikes);
-  state.allPosts = sortPosts(combined, state.searchSort);
+  ingestPosts(state.pendingPosts);
+  flushDerivedPostsRebuild();
 
   clearNewPostHighlights();
   state.newPostUris = new Set(state.pendingPosts.map((post) => post.uri));
@@ -649,14 +893,16 @@ async function refreshSearch() {
     return 0;
   }
 
-  let trimmed = filterByDate(state.allPosts, state.timeFilterHours);
-  trimmed = filterByLikes(trimmed, state.minLikes);
-  state.allPosts = sortPosts(trimmed, state.searchSort);
+  pruneIngestedPostsByCurrentFilters();
+  flushDerivedPostsRebuild();
 
   state.pendingPosts = filterByDate(state.pendingPosts, state.timeFilterHours);
   state.pendingPosts = filterByLikes(state.pendingPosts, state.minLikes);
 
-  const existingUris = new Set([...state.allPosts, ...state.pendingPosts].map((post) => post.uri));
+  const existingUris = new Set([
+    ...Array.from(ingestedPostsByUri.keys()),
+    ...state.pendingPosts.map((post) => post.uri),
+  ]);
   const results = await Promise.all(
     state.searchTerms.map((term) => fetchLatestPostsForTerm(term, state.searchSort))
   );
@@ -768,7 +1014,10 @@ export async function performSearch() {
   let searchCompleted = false;
   state.allPosts = [];
   state.currentCursors = {};
-  resultsDiv.textContent = '';
+  clearDerivedPostsTimer();
+  clearIngestedPosts();
+  resetResultsRenderCache();
+  highlightMatcherCache = { key: '', regex: null, termSet: null };
   clearNewPostHighlights();
   state.pendingPosts = [];
   renderNewPosts();
@@ -792,18 +1041,13 @@ export async function performSearch() {
 
       // Immediately merge and render as this term completes
       completedTerms++;
-
-      // Merge new posts into state.allPosts progressively
-      let combined = deduplicatePosts([...state.allPosts, ...posts]);
-      combined = filterByDate(combined, state.timeFilterHours);
-      combined = filterByLikes(combined, state.minLikes);
-      state.allPosts = sortPosts(combined, state.searchSort);
+      ingestPosts(posts);
 
       // Update status and render immediately
       if (completedTerms < totalTerms) {
         showStatus(`Loaded ${completedTerms}/${totalTerms} terms…`, 'loading');
       }
-      scheduleRender();
+      scheduleDerivedPostsRebuild();
 
       return posts;
     });
@@ -829,7 +1073,7 @@ export async function performSearch() {
       hideStatus();
     }
 
-    renderResults();
+    flushDerivedPostsRebuild({ render: true });
     state.lastRefreshAt = new Date();
     state.lastRefreshNewCount = null;
     state.lastRefreshError = null;
@@ -857,7 +1101,7 @@ export async function loadMore() {
 
   const prevCount = state.allPosts.length;
   state.isLoading = true;
-  const loadMoreBtn = document.getElementById('loadMoreBtn');
+  const loadMoreBtn = loadMoreBtnEl || document.getElementById('loadMoreBtn');
   if (loadMoreBtn) {
     loadMoreBtn.disabled = true;
     loadMoreBtn.textContent = 'Loading…';
@@ -880,28 +1124,25 @@ export async function loadMore() {
       });
 
     const results = await Promise.all(promises);
-    let newPosts = results.flat();
+    const newPosts = results.flat();
 
     if (newPosts.length > 0) {
-      let combined = [...state.allPosts, ...newPosts];
-      combined = deduplicatePosts(combined);
-      combined = filterByDate(combined, state.timeFilterHours);
-      combined = filterByLikes(combined, state.minLikes);
-      state.allPosts = sortPosts(combined, state.searchSort);
+      ingestPosts(newPosts);
+      flushDerivedPostsRebuild();
       if (state.allPosts.length > prevCount) {
         state.renderLimit = Math.min(state.allPosts.length, state.renderLimit + RENDER_STEP);
       }
-      renderResults();
-    } else {
-      if (loadMoreBtn) {
-        loadMoreBtn.remove();
-      }
     }
+    renderResults();
   } catch (error) {
     console.error('Load more error:', error);
     showStatus(`Error loading more: ${error.message}`, 'error');
   } finally {
     state.isLoading = false;
+    if (loadMoreBtn) {
+      loadMoreBtn.disabled = false;
+      loadMoreBtn.textContent = 'Load More Results';
+    }
   }
 }
 

@@ -99,12 +99,9 @@ export function filterByLikes(posts, minLikes) {
 
 // Filter posts by date (configurable hours)
 export function filterByDate(posts, hours) {
-  const cutoff = new Date();
-  cutoff.setHours(cutoff.getHours() - hours);
-  return posts.filter((post) => {
-    const postDate = new Date(post.indexedAt);
-    return postDate >= cutoff;
-  });
+  const normalizedHours = Number.isFinite(hours) && hours > 0 ? hours : 24;
+  const cutoffTs = Date.now() - normalizedHours * 3600000;
+  return posts.filter((post) => getPostTimestamp(post) >= cutoffTs);
 }
 
 // Sort posts by selected mode
