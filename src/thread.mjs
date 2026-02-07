@@ -76,7 +76,7 @@ function createThreadParentElement(post) {
 
 function createThreadContextElement(parents) {
   const container = document.createElement('div');
-  container.className = 'thread-context';
+  container.className = 'thread-context thread-context-inline';
 
   const label = document.createElement('div');
   label.className = 'thread-label';
@@ -91,13 +91,14 @@ function createThreadContextElement(parents) {
 }
 
 function removeThreadContexts(postElement) {
-  let previous = postElement.previousElementSibling;
+  const directChildren = Array.from(postElement.children);
   let removed = false;
 
-  while (previous?.classList.contains('thread-context')) {
-    const toRemove = previous;
-    previous = previous.previousElementSibling;
-    toRemove.remove();
+  for (const child of directChildren) {
+    if (!child.classList.contains('thread-context')) {
+      continue;
+    }
+    child.remove();
     removed = true;
   }
 
@@ -134,7 +135,7 @@ export async function toggleThread(post, postElement) {
     }
 
     const contextElement = createThreadContextElement(parents);
-    postElement.parentNode.insertBefore(contextElement, postElement);
+    postElement.insertBefore(contextElement, postElement.firstElementChild || null);
     link.textContent = 'Hide Thread';
   } catch (error) {
     console.error('Thread fetch error:', error);
