@@ -1,4 +1,5 @@
 import { deduplicatePosts, filterByDate, filterByLikes, sortPosts } from '../src/utils.mjs';
+import { performance } from 'node:perf_hooks';
 
 function createPost(uri, term, likeCount, indexedAtOffsetHours) {
   const indexedAt = new Date(Date.now() - indexedAtOffsetHours * 3600000).toISOString();

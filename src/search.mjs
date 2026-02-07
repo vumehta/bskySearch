@@ -828,9 +828,22 @@ function renderResults() {
   }
 
   const hasMoreResults = Object.values(state.currentCursors).some((cursor) => cursor !== null);
-  loadMoreBtnEl.style.display = hasMoreResults ? '' : 'none';
-  loadMoreBtnEl.disabled = false;
-  loadMoreBtnEl.textContent = 'Load More Results';
+  if (hasMoreResults) {
+    loadMoreBtnEl.style.display = '';
+    if (state.isLoading) {
+      loadMoreBtnEl.disabled = true;
+      if (!loadMoreBtnEl.textContent || loadMoreBtnEl.textContent === 'Load More Results') {
+        loadMoreBtnEl.textContent = 'Loading…';
+      }
+    } else {
+      loadMoreBtnEl.disabled = false;
+      loadMoreBtnEl.textContent = 'Load More Results';
+    }
+  } else {
+    loadMoreBtnEl.style.display = 'none';
+    loadMoreBtnEl.disabled = false;
+    loadMoreBtnEl.textContent = 'Load More Results';
+  }
 }
 
 function renderNewPosts() {
