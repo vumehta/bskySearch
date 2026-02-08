@@ -6,6 +6,7 @@
 .env*.local
 node_modules/
 app.min.js
+app.min.js.map
 styles.min.css
 dist/
 tasks/lessons.md
