@@ -20,7 +20,9 @@ import {
   enableAutoRefresh,
   focusSearchInput,
   performSearch,
+  recomputeDerivedPosts,
   scheduleNextRefresh,
+  scheduleRender,
   updateExpansionSummary,
   updateRefreshInterval,
   updateRefreshMeta,
@@ -115,8 +117,22 @@ refreshIntervalSelect.addEventListener('change', () => {
 
 sortSelect.addEventListener('change', () => {
   state.searchSort = sortSelect.value === 'latest' ? 'latest' : 'top';
+  updateSearchURL();
+  if (state.allPosts.length > 0) {
+    recomputeDerivedPosts();
+    scheduleRender();
+  }
   if (state.autoRefreshEnabled) {
     scheduleNextRefresh();
+  }
+});
+
+timeFilterSelect.addEventListener('change', () => {
+  state.timeFilterHours = parseInt(timeFilterSelect.value) || 24;
+  updateSearchURL();
+  if (state.searchTerms.length > 0) {
+    recomputeDerivedPosts();
+    scheduleRender();
   }
 });
 

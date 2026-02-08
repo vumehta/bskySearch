@@ -31,6 +31,9 @@
     --avatar-bg: #e0e0e0;
     --tag-bg: #e3f2fd;
     --focus-ring: rgba(0, 133, 255, 0.1);
+    --stat-likes: #c2185b;
+    --stat-reposts: #0d8043;
+    --stat-replies: #1a78c2;
     --quote-depth-1: hsl(200, 70%, 45%);
     --quote-depth-2: hsl(30, 80%, 50%);
     --quote-depth-3: hsl(120, 60%, 40%);
@@ -70,6 +73,9 @@
     --avatar-bg: #2a2a2a;
     --tag-bg: #1a1a1a;
     --focus-ring: rgba(83, 168, 255, 0.25);
+    --stat-likes: #e91e63;
+    --stat-reposts: #17bf63;
+    --stat-replies: #1da1f2;
 }
 
 body {
@@ -309,6 +315,7 @@ button:focus-visible {
 
 button:disabled {
     background: var(--button-disabled);
+    color: var(--muted);
     cursor: not-allowed;
 }
 
@@ -526,7 +533,7 @@ button:disabled {
 }
 
 .stat.likes {
-    color: #e91e63;
+    color: var(--stat-likes);
     font-weight: 500;
 }
 
@@ -737,16 +744,16 @@ button:disabled {
 }
 
 .quote-stat.likes {
-    color: #e91e63;
+    color: var(--stat-likes);
     font-weight: 500;
 }
 
 .quote-stat.reposts {
-    color: #17bf63;
+    color: var(--stat-reposts);
 }
 
 .quote-stat.replies {
-    color: #1da1f2;
+    color: var(--stat-replies);
 }
 
 .no-quotes {

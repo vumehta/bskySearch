@@ -207,7 +207,7 @@ function cancelScheduledRender() {
   }
 }
 
-function scheduleRender() {
+export function scheduleRender() {
   if (pendingRenderFrame !== null) return;
   pendingRenderFrame = requestAnimationFrame(() => {
     pendingRenderFrame = null;
@@ -271,7 +271,7 @@ function ingestPosts(posts) {
   }
 }
 
-function recomputeDerivedPosts() {
+export function recomputeDerivedPosts() {
   let derived = Array.from(ingestedPostsByUri.values());
   derived = filterByDate(derived, state.timeFilterHours);
   derived = filterByLikes(derived, state.minLikes);
@@ -933,10 +933,18 @@ async function refreshSearch() {
     ...Array.from(ingestedPostsByUri.keys()),
     ...state.pendingPosts.map((post) => post.uri),
   ]);
-  const results = await Promise.all(
+  const results = await Promise.allSettled(
     state.searchTerms.map((term) => fetchLatestPostsForTerm(term, state.searchSort))
   );
-  let latestPosts = deduplicatePosts(results.flat());
+
+  // Check for failures
+  const failures = results.filter((r) => r.status === 'rejected');
+  if (failures.length === state.searchTerms.length) {
+    throw new Error(failures[0].reason.message || 'All refresh terms failed');
+  }
+
+  const fulfilled = results.filter((r) => r.status === 'fulfilled').map((r) => r.value);
+  let latestPosts = deduplicatePosts(fulfilled.flat());
   latestPosts = filterByDate(latestPosts, state.timeFilterHours);
   latestPosts = filterByLikes(latestPosts, state.minLikes);
 
@@ -950,6 +958,10 @@ async function refreshSearch() {
   if (newPosts.length > 0) {
     state.newPostUris = new Set(newPosts.map((post) => post.uri));
     scheduleNewPostHighlightClear();
+  }
+
+  if (failures.length > 0) {
+    console.warn(`Refresh: ${failures.length}/${state.searchTerms.length} terms failed`);
   }
 
   renderNewPosts();
@@ -1138,23 +1150,35 @@ export async function loadMore() {
   }
 
   try {
-    const promises = state.searchTerms
-      .filter((term) => state.currentCursors[term])
-      .map(async (term) => {
+    const termsWithCursors = state.searchTerms.filter((term) => state.currentCursors[term]);
+    const promises = termsWithCursors.map(async (term) => {
         const data = await searchTerm(term, state.currentCursors[term], state.searchSort);
-        state.currentCursors[term] = data.cursor || null;
-
-        if (data.posts && data.posts.length > 0) {
-          return data.posts.map((post) => ({
-            ...post,
-            matchedTerm: term,
-          }));
-        }
-        return [];
+        return { term, data };
       });
 
-    const results = await Promise.all(promises);
-    const newPosts = results.flat();
+    const settled = await Promise.allSettled(promises);
+
+    // Check for failures
+    const failures = settled.filter((r) => r.status === 'rejected');
+    if (failures.length === termsWithCursors.length && failures.length > 0) {
+      throw new Error(failures[0].reason.message || 'All load-more requests failed');
+    }
+    if (failures.length > 0) {
+      console.warn(`Load more: ${failures.length}/${termsWithCursors.length} terms failed`);
+    }
+
+    // Process successful results — update cursors and collect posts
+    const newPosts = [];
+    for (const result of settled) {
+      if (result.status !== 'fulfilled') continue;
+      const { term, data } = result.value;
+      state.currentCursors[term] = data.cursor || null;
+      if (data.posts && data.posts.length > 0) {
+        for (const post of data.posts) {
+          newPosts.push({ ...post, matchedTerm: term });
+        }
+      }
+    }
 
     if (newPosts.length > 0) {
       ingestPosts(newPosts);
