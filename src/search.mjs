@@ -36,6 +36,7 @@ import {
   getSearchCacheKey,
   isValidBskyUrl,
   normalizeTerm,
+  reportClientError,
   setText,
   sortPosts,
 } from './utils.mjs';
@@ -142,7 +143,9 @@ async function searchTerm(term, cursor = null, sort = state.searchSort) {
       const errorData = await response.json();
       if (errorData.message) errorMsg += ` - ${errorData.message}`;
       if (errorData.error) errorMsg += ` - ${errorData.error}`;
-    } catch (e) {}
+    } catch {
+      // Ignore non-JSON error payloads and fall back to status-only message.
+    }
     throw new Error(errorMsg);
   }
 
@@ -162,6 +165,7 @@ async function fetchAllPostsForTerm(term, maxPages = INITIAL_MAX_PAGES, sort = s
   let pages = 0;
 
   while (pages < maxPages) {
+    // eslint-disable-next-line no-await-in-loop -- Sequential pagination: each request needs the previous cursor
     const data = await searchTerm(term, cursor, sort);
 
     if (data.posts && data.posts.length > 0) {
@@ -985,7 +989,7 @@ async function runAutoRefresh() {
     state.lastRefreshAt = new Date();
     state.lastRefreshNewCount = newCount;
   } catch (error) {
-    console.error('Auto-refresh error:', error);
+    reportClientError('Auto-refresh error', error);
     state.lastRefreshError = error.message || 'Refresh failed.';
   } finally {
     state.isRefreshing = false;
@@ -1110,7 +1114,7 @@ export async function performSearch() {
     searchCompleted = true;
     updateRefreshMeta();
   } catch (error) {
-    console.error('Search error:', error);
+    reportClientError('Search error', error);
     showStatus(`Error: ${error.message}`, 'error');
   } finally {
     state.isLoading = false;
@@ -1165,7 +1169,7 @@ export async function loadMore() {
     }
     renderResults();
   } catch (error) {
-    console.error('Load more error:', error);
+    reportClientError('Load more error', error);
     showStatus(`Error loading more: ${error.message}`, 'error');
   } finally {
     state.isLoading = false;

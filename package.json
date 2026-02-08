@@ -7,6 +7,7 @@
     "minify:js": "esbuild src/app.mjs --bundle --minify --platform=browser --format=iife --target=es2019 --outfile=app.min.js",
     "minify:css": "postcss styles.css --use cssnano --no-map -o styles.min.css",
     "build": "npm run minify:js && npm run minify:css && node scripts/prepare-dist.js",
+    "lint": "eslint .",
     "perf:smoke": "node scripts/perf-smoke.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
@@ -24,8 +25,11 @@
   },
   "homepage": "https://github.com/vumehta/bskySearch#readme",
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "cssnano": "^7.1.2",
     "esbuild": "^0.27.2",
+    "eslint": "^10.0.0",
+    "globals": "^17.3.0",
     "postcss": "^8.5.6",
     "postcss-cli": "^11.0.1",
     "terser": "^5.46.0",
