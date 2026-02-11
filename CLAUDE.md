@@ -37,6 +37,9 @@ Deployed via Vercel—push to `main` and Vercel handles everything:
 - ESM modules under src/ bundled via esbuild into app.min.js
 - Build entry is src/app.mjs
 - Central state object lives in src/state.mjs
+- Shared helpers in src/utils.mjs (text formatting, safe DOM), constants in src/constants.mjs
+- URL parsing and navigation in src/url.mjs, caching layer in src/cache.mjs
+- Thread rendering in src/thread.mjs, test utilities in src/testing.mjs
 - Map/Set for caches and tracking (didCache, searchCache, newPostUris)
 - URL params encode search state for shareable links
 
@@ -91,7 +94,7 @@ Backend requires (set in Vercel dashboard):
 
 ## Testing
 
-Run `npm test` for the Vitest suite, then verify manually:
+Run `npm test` for the Vitest suite, or `npm run test:watch` for continuous mode. Run `npm run perf:smoke` for performance smoke tests. Then verify manually:
 1. Search with various terms
 2. Test filters (likes, time range)
 3. Test auto-refresh feature
