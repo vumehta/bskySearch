@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-bskySearch is a full-stack web application for searching Bluesky posts with advanced filtering. Vanilla JavaScript frontend, Vercel serverless backend. This is a personal-use tool with at most 2–3 total users and never more than 2 concurrent users—no rate limiting is needed.
+bskySearch is a full-stack web application for searching Bluesky posts with advanced filtering. Vanilla JavaScript frontend plus a Vercel API route implemented as a Web-standard handler. This is a personal-use tool with at most 2–3 total users and never more than 2 concurrent users—no rate limiting is needed.
 
 ## Build & Run
 
@@ -37,11 +37,15 @@ Deployed via Vercel—push to `main` and Vercel handles everything:
 - ESM modules under src/ bundled via esbuild into app.min.js
 - Build entry is src/app.mjs
 - Central state object lives in src/state.mjs
+- Shared helpers in src/utils.mjs (text formatting, safe DOM), constants in src/constants.mjs
+- URL parsing and navigation in src/url.mjs, caching layer in src/cache.mjs
+- Thread rendering in src/thread.mjs, test utilities in src/testing.mjs
 - Map/Set for caches and tracking (didCache, searchCache, newPostUris)
 - URL params encode search state for shareable links
 
-### Backend (api/search.js)
+### Backend (api/search.mjs)
 - Proxies Bluesky API to handle authentication server-side
+- Uses a Web-standard handler (`GET(request) -> Response`) with WHATWG URL parsing
 - Session tokens cached with 2-hour TTL, auto-refresh on 401
 - Session creation uses promise deduplication (`sessionPromise`) to prevent race conditions
 - Response caching with 30s TTL
@@ -82,7 +86,7 @@ Backend requires (set in Vercel dashboard):
 1. Add UI control in bluesky-term-search.html
 2. Add state variable in src/state.mjs
 3. Update search flow in src/search.mjs
-4. If backend needs it, update api/search.js validation
+4. If backend needs it, update api/search.mjs validation
 
 ### Adding a new theme color
 1. Add CSS variable in `:root` in styles.css
@@ -91,7 +95,7 @@ Backend requires (set in Vercel dashboard):
 
 ## Testing
 
-Run `npm test` for the Vitest suite, then verify manually:
+Run `npm test` for the Vitest suite, or `npm run test:watch` for continuous mode. Run `npm run perf:smoke` for performance smoke tests. Then verify manually:
 1. Search with various terms
 2. Test filters (likes, time range)
 3. Test auto-refresh feature
@@ -103,7 +107,7 @@ Run `npm test` for the Vitest suite, then verify manually:
 - 401 errors: Session expired, check `refreshOrCreateSession()` flow
 - Duplicate posts: Check `deduplicatePosts()` and URI-based dedup logic
 - Missing quotes: Verify `quoteSeenCursors` isn't blocking valid cursors
-- Missing posts: Search API filters to English only (`lang: 'en'` in api/search.js)
+- Missing posts: Search API filters to English only (`lang: 'en'` in api/search.mjs)
 
 ## Git Workflow
 

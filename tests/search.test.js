@@ -10,8 +10,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 process.env.BSKY_HANDLE = process.env.BSKY_HANDLE || 'test-handle';
 process.env.BSKY_APP_PASSWORD = process.env.BSKY_APP_PASSWORD || 'test-app-password';
 
-const searchModule = await import('../api/search.js');
-const searchHandler = searchModule.default;
+const searchModule = await import('../api/search.mjs');
+const searchHandler = searchModule.GET;
 const { testUtils } = searchModule;
 const {
   getQueryString,
@@ -33,27 +33,6 @@ const {
 
 const originalFetch = global.fetch;
 
-function createMockResponse() {
-  const res = {
-    headers: {},
-    statusCode: 200,
-    body: null,
-    setHeader: vi.fn((key, value) => {
-      res.headers[key] = value;
-      return res;
-    }),
-    status: vi.fn((code) => {
-      res.statusCode = code;
-      return res;
-    }),
-    json: vi.fn((payload) => {
-      res.body = payload;
-      return res;
-    }),
-  };
-  return res;
-}
-
 beforeEach(() => {
   resetModuleStateForTests();
 });
@@ -68,7 +47,7 @@ afterEach(() => {
 // UPSTREAM_TIMEOUT_MS
 // ============================================================================
 describe('UPSTREAM_TIMEOUT_MS', () => {
-  it('is a positive number under Vercel Hobby limit', () => {
+  it('is a positive, bounded timeout value', () => {
     expect(UPSTREAM_TIMEOUT_MS).toBeGreaterThan(0);
     expect(UPSTREAM_TIMEOUT_MS).toBeLessThanOrEqual(10000);
   });
@@ -173,20 +152,33 @@ describe('search handler timeout mapping', () => {
       throw new Error(`Unexpected fetch URL in test: ${url}`);
     });
 
-    const req = {
+    const request = new Request('https://example.com/api/search?term=timeout-test', {
       method: 'GET',
-      query: {
-        term: 'timeout-test',
-      },
-    };
-    const res = createMockResponse();
-
-    const handlerPromise = searchHandler(req, res);
+    });
+    const handlerPromise = searchHandler(request);
     await vi.advanceTimersByTimeAsync(UPSTREAM_TIMEOUT_MS + 1);
-    await handlerPromise;
+    const response = await handlerPromise;
 
-    expect(res.status).toHaveBeenCalledWith(504);
-    expect(res.body).toEqual({ error: 'Upstream request timed out.' });
+    expect(response.status).toBe(504);
+    await expect(response.json()).resolves.toEqual({ error: 'Upstream request timed out.' });
+  });
+});
+
+describe('search handler request/response behavior', () => {
+  it('returns 400 for missing term and keeps no-store cache policy', async () => {
+    const response = await searchHandler(new Request('https://example.com/api/search', { method: 'GET' }));
+    expect(response.status).toBe(400);
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    await expect(response.json()).resolves.toEqual({ error: 'Missing term parameter.' });
+  });
+
+  it('returns 405 with Allow header for non-GET methods', async () => {
+    const response = await searchHandler(
+      new Request('https://example.com/api/search?term=test', { method: 'POST' }),
+    );
+    expect(response.status).toBe(405);
+    expect(response.headers.get('Allow')).toBe('GET');
+    await expect(response.json()).resolves.toEqual({ error: 'Method not allowed.' });
   });
 });
 
