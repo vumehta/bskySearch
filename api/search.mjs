@@ -1,9 +1,6 @@
 const BSKY_SERVICE = 'https://bsky.social/xrpc';
 
-const BSKY_HANDLE = process.env.BSKY_HANDLE;
-const BSKY_APP_PASSWORD = process.env.BSKY_APP_PASSWORD;
-
-// Upstream fetch timeout — fits within Vercel Hobby 10s limit with 2s headroom
+// Upstream fetch timeout (8s) keeps tail latency bounded and maps to 504.
 const UPSTREAM_TIMEOUT_MS = 8000;
 const UPSTREAM_TIMEOUT_ERROR_CODE = 'UPSTREAM_TIMEOUT';
 
@@ -67,6 +64,21 @@ const MAX_SEARCH_CACHE_SIZE = 500;
 const searchResultsCache = new Map();
 let lastSearchCacheCleanupAt = 0;
 
+function getRuntimeEnv(context) {
+  if (context && typeof context === 'object' && 'env' in context) {
+    return context.env || {};
+  }
+  return process.env;
+}
+
+function getRuntimeCredentials(context) {
+  const env = getRuntimeEnv(context);
+  return {
+    handle: env.BSKY_HANDLE,
+    appPassword: env.BSKY_APP_PASSWORD,
+  };
+}
+
 function getQueryString(value) {
   if (Array.isArray(value)) {
     return value[0];
@@ -79,15 +91,33 @@ function stripControlChars(value) {
   return value.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
 }
 
-async function createSession() {
+function jsonNoStore(payload, status = 200, extraHeaders = {}) {
+  return Response.json(payload, {
+    status,
+    headers: {
+      'Cache-Control': 'no-store',
+      ...extraHeaders,
+    },
+  });
+}
+
+function parseSearchInput(request) {
+  const url = new URL(request.url);
+  const term = stripControlChars(getQueryString(url.searchParams.get('term'))).trim();
+  const cursor = stripControlChars(getQueryString(url.searchParams.get('cursor')));
+  const sort = stripControlChars(getQueryString(url.searchParams.get('sort'))).trim().toLowerCase();
+  return { term, cursor, sort };
+}
+
+async function createSession(handle, appPassword) {
   const response = await fetchWithTimeout(`${BSKY_SERVICE}/com.atproto.server.createSession`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      identifier: BSKY_HANDLE,
-      password: BSKY_APP_PASSWORD,
+      identifier: handle,
+      password: appPassword,
     }),
   });
 
@@ -126,13 +156,13 @@ function isSessionExpired() {
   return Date.now() - sessionCreatedAt > SESSION_TTL_MS;
 }
 
-async function ensureSession() {
+async function ensureSession(handle, appPassword) {
   if (cachedSession && !isSessionExpired()) {
     return cachedSession;
   }
 
   if (!sessionPromise) {
-    sessionPromise = createSession()
+    sessionPromise = createSession(handle, appPassword)
       .then((session) => {
         cachedSession = session;
         sessionCreatedAt = Date.now();
@@ -146,7 +176,7 @@ async function ensureSession() {
   return sessionPromise;
 }
 
-async function refreshOrCreateSession() {
+async function refreshOrCreateSession(handle, appPassword) {
   if (sessionPromise) {
     return sessionPromise;
   }
@@ -169,11 +199,11 @@ async function refreshOrCreateSession() {
       }
     }
 
-    if (!BSKY_HANDLE || !BSKY_APP_PASSWORD) {
+    if (!handle || !appPassword) {
       throw new Error('Cannot create session: missing credentials');
     }
 
-    const created = await createSession();
+    const created = await createSession(handle, appPassword);
     cachedSession = created;
     sessionCreatedAt = Date.now();
     return created;
@@ -184,12 +214,10 @@ async function refreshOrCreateSession() {
   return sessionPromise;
 }
 
-// Generate cache key for search results
 function getSearchCacheKey(term, cursor, sort) {
   return JSON.stringify([term, cursor || '', sort]);
 }
 
-// Get cached search result if valid
 function getCachedSearchResult(cacheKey) {
   const cached = searchResultsCache.get(cacheKey);
   if (!cached) return null;
@@ -197,6 +225,7 @@ function getCachedSearchResult(cacheKey) {
     searchResultsCache.delete(cacheKey);
     return null;
   }
+
   // Refresh order for LRU-style eviction without extending TTL.
   searchResultsCache.delete(cacheKey);
   searchResultsCache.set(cacheKey, cached);
@@ -213,7 +242,6 @@ function enforceSearchCacheLimit() {
   }
 }
 
-// Clean up expired cache entries periodically
 function cleanupSearchCache() {
   const now = Date.now();
   for (const [key, value] of searchResultsCache.entries()) {
@@ -252,50 +280,41 @@ async function searchPosts(term, cursor, accessJwt, sort) {
   });
 }
 
-module.exports = async (req, res) => {
-  res.setHeader('Cache-Control', 'no-store');
-
-  if (req.method !== 'GET') {
-    res.setHeader('Allow', 'GET');
-    return res.status(405).json({ error: 'Method not allowed.' });
+export async function GET(request, context) {
+  if (request.method !== 'GET') {
+    return jsonNoStore({ error: 'Method not allowed.' }, 405, { Allow: 'GET' });
   }
 
-  if (!BSKY_HANDLE || !BSKY_APP_PASSWORD) {
-    return res.status(500).json({
-      error: 'Server missing BSKY_HANDLE or BSKY_APP_PASSWORD.',
-    });
+  const { handle, appPassword } = getRuntimeCredentials(context);
+  if (!handle || !appPassword) {
+    return jsonNoStore({ error: 'Server missing BSKY_HANDLE or BSKY_APP_PASSWORD.' }, 500);
   }
 
-  const term = stripControlChars(getQueryString(req.query.term)).trim();
-  const cursor = stripControlChars(getQueryString(req.query.cursor));
-  const sort = stripControlChars(getQueryString(req.query.sort)).trim().toLowerCase();
+  const { term, cursor, sort } = parseSearchInput(request);
 
   if (!term) {
-    return res.status(400).json({ error: 'Missing term parameter.' });
+    return jsonNoStore({ error: 'Missing term parameter.' }, 400);
   }
 
   if (term.length > 500) {
-    return res.status(400).json({ error: 'Search term is too long.' });
+    return jsonNoStore({ error: 'Search term is too long.' }, 400);
   }
 
   if (cursor && cursor.length > 1000) {
-    return res.status(400).json({ error: 'Cursor is too long.' });
+    return jsonNoStore({ error: 'Cursor is too long.' }, 400);
   }
 
   if (sort && !['top', 'latest'].includes(sort)) {
-    return res.status(400).json({ error: 'Invalid sort parameter.' });
+    return jsonNoStore({ error: 'Invalid sort parameter.' }, 400);
   }
 
   const sortValue = sort || 'top';
   const cacheKey = getSearchCacheKey(term, cursor, sortValue);
-
-  // Check server-side cache first
   const cachedResult = getCachedSearchResult(cacheKey);
   if (cachedResult) {
-    return res.status(200).json(cachedResult);
+    return jsonNoStore(cachedResult, 200);
   }
 
-  // Periodically clean up expired cache entries
   const now = Date.now();
   if (
     searchResultsCache.size > 100 ||
@@ -306,53 +325,50 @@ module.exports = async (req, res) => {
   }
 
   try {
-    let session = await ensureSession();
+    let session = await ensureSession(handle, appPassword);
     let response = await searchPosts(term, cursor, session.accessJwt, sortValue);
 
     if (response.status === 401) {
-      session = await refreshOrCreateSession();
+      session = await refreshOrCreateSession(handle, appPassword);
       response = await searchPosts(term, cursor, session.accessJwt, sortValue);
     }
 
     const payload = await response.json().catch(() => null);
-
     if (!response.ok) {
       const message = payload?.message || payload?.error || `Search failed: ${response.status}`;
-      return res.status(response.status).json({ error: message });
+      return jsonNoStore({ error: message }, response.status);
     }
 
-    // Cache the successful result
     searchResultsCache.set(cacheKey, { data: payload, timestamp: Date.now() });
     enforceSearchCacheLimit();
-
-    return res.status(200).json(payload);
+    return jsonNoStore(payload, 200);
   } catch (error) {
     console.error('Search proxy error:', error.message || 'Unknown error');
     if (isUpstreamTimeoutError(error)) {
-      return res.status(504).json({ error: error.message });
+      return jsonNoStore({ error: error.message }, 504);
     }
-    return res.status(500).json({ error: 'Search proxy failed.' });
+    return jsonNoStore({ error: 'Search proxy failed.' }, 500);
   }
-};
-
-// Test utilities export (must be after module.exports assignment)
-// Only exposed for test consumption; gated to avoid leaking internals in production.
-if (process.env.NODE_ENV === 'test') {
-  module.exports.testUtils = {
-    getQueryString,
-    stripControlChars,
-    getSearchCacheKey,
-    isSessionExpired,
-    getCachedSearchResult,
-    cleanupSearchCache,
-    enforceSearchCacheLimit,
-    searchResultsCache,
-    SEARCH_CACHE_TTL_MS,
-    MAX_SEARCH_CACHE_SIZE,
-    UPSTREAM_TIMEOUT_MS,
-    UPSTREAM_TIMEOUT_ERROR_CODE,
-    fetchWithTimeout,
-    isUpstreamTimeoutError,
-    resetModuleStateForTests,
-  };
 }
+
+// Test utilities for unit/integration coverage.
+export const testUtils =
+  process.env.NODE_ENV === 'test'
+    ? {
+        getQueryString,
+        stripControlChars,
+        getSearchCacheKey,
+        isSessionExpired,
+        getCachedSearchResult,
+        cleanupSearchCache,
+        enforceSearchCacheLimit,
+        searchResultsCache,
+        SEARCH_CACHE_TTL_MS,
+        MAX_SEARCH_CACHE_SIZE,
+        UPSTREAM_TIMEOUT_MS,
+        UPSTREAM_TIMEOUT_ERROR_CODE,
+        fetchWithTimeout,
+        isUpstreamTimeoutError,
+        resetModuleStateForTests,
+      }
+    : undefined;

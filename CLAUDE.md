@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-bskySearch is a full-stack web application for searching Bluesky posts with advanced filtering. Vanilla JavaScript frontend, Vercel serverless backend. This is a personal-use tool with at most 2–3 total users and never more than 2 concurrent users—no rate limiting is needed.
+bskySearch is a full-stack web application for searching Bluesky posts with advanced filtering. Vanilla JavaScript frontend plus a Vercel API route implemented as a Web-standard handler. This is a personal-use tool with at most 2–3 total users and never more than 2 concurrent users—no rate limiting is needed.
 
 ## Build & Run
 
@@ -43,8 +43,9 @@ Deployed via Vercel—push to `main` and Vercel handles everything:
 - Map/Set for caches and tracking (didCache, searchCache, newPostUris)
 - URL params encode search state for shareable links
 
-### Backend (api/search.js)
+### Backend (api/search.mjs)
 - Proxies Bluesky API to handle authentication server-side
+- Uses a Web-standard handler (`GET(request) -> Response`) with WHATWG URL parsing
 - Session tokens cached with 2-hour TTL, auto-refresh on 401
 - Session creation uses promise deduplication (`sessionPromise`) to prevent race conditions
 - Response caching with 30s TTL
@@ -85,7 +86,7 @@ Backend requires (set in Vercel dashboard):
 1. Add UI control in bluesky-term-search.html
 2. Add state variable in src/state.mjs
 3. Update search flow in src/search.mjs
-4. If backend needs it, update api/search.js validation
+4. If backend needs it, update api/search.mjs validation
 
 ### Adding a new theme color
 1. Add CSS variable in `:root` in styles.css
@@ -106,7 +107,7 @@ Run `npm test` for the Vitest suite, or `npm run test:watch` for continuous mode
 - 401 errors: Session expired, check `refreshOrCreateSession()` flow
 - Duplicate posts: Check `deduplicatePosts()` and URI-based dedup logic
 - Missing quotes: Verify `quoteSeenCursors` isn't blocking valid cursors
-- Missing posts: Search API filters to English only (`lang: 'en'` in api/search.js)
+- Missing posts: Search API filters to English only (`lang: 'en'` in api/search.mjs)
 
 ## Git Workflow
 
