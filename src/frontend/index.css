@@ -1,0 +1,122 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+  --bg: #ffffff;
+  --surface: #f8f9fa;
+  --card-bg: #ffffff;
+  --text: #333333;
+  --muted: #666666;
+  --muted-2: #888888;
+  --border: #e0e0e0;
+  --border-soft: #eeeeee;
+  --input-bg: #ffffff;
+  --input-border: #d4d4d8;
+  --accent: #0085ff;
+  --accent-soft: #f0f7ff;
+  --accent-soft-border: #cce0ff;
+  --accent-text: #1565c0;
+  --highlight: #fff59d;
+  --button-disabled: #cccccc;
+  --focus-ring: rgba(0, 133, 255, 0.2);
+  --avatar-bg: #e0e0e0;
+  --tag-bg: #e3f2fd;
+  --quote-depth-1: hsl(200, 70%, 45%);
+  --quote-depth-2: hsl(30, 80%, 50%);
+  --quote-depth-3: hsl(120, 60%, 40%);
+  --quote-depth-4: hsl(0, 70%, 50%);
+  --quote-depth-5: hsl(280, 60%, 50%);
+  --quote-depth-6: hsl(20, 60%, 40%);
+  --quote-depth-7: hsl(330, 60%, 50%);
+  --quote-depth-8: hsl(0, 0%, 40%);
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #0a0a0a;
+  --surface: #141414;
+  --card-bg: #121212;
+  --text: #e6e9ed;
+  --muted: #b0b6bf;
+  --muted-2: #8c93a0;
+  --border: #2a2a2a;
+  --border-soft: #1f1f1f;
+  --input-bg: #0a0a0a;
+  --input-border: #2a2a2a;
+  --accent: #53a8ff;
+  --accent-soft: #12375c;
+  --accent-soft-border: #1f5a8c;
+  --accent-text: #9cc8ff;
+  --highlight: #3b3611;
+  --button-disabled: #3a3a3a;
+  --focus-ring: rgba(83, 168, 255, 0.25);
+  --avatar-bg: #2a2a2a;
+  --tag-bg: #1a1a1a;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+}
+
+.search-highlight {
+  background: var(--highlight);
+  border-radius: 0.2rem;
+  padding: 0 0.15rem;
+}
+
+.quote-depth-stripe {
+  position: relative;
+  padding-left: 1.1rem;
+}
+
+.quote-depth-stripe::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0.3rem;
+  border-radius: 999px;
+  background: var(--quote-stripe, transparent);
+}
+
+.quote-depth-stripe[data-depth='1'] {
+  --quote-stripe: var(--quote-depth-1);
+}
+
+.quote-depth-stripe[data-depth='2'] {
+  --quote-stripe: var(--quote-depth-2);
+}
+
+.quote-depth-stripe[data-depth='3'] {
+  --quote-stripe: var(--quote-depth-3);
+}
+
+.quote-depth-stripe[data-depth='4'] {
+  --quote-stripe: var(--quote-depth-4);
+}
+
+.quote-depth-stripe[data-depth='5'] {
+  --quote-stripe: var(--quote-depth-5);
+}
+
+.quote-depth-stripe[data-depth='6'] {
+  --quote-stripe: var(--quote-depth-6);
+}
+
+.quote-depth-stripe[data-depth='7'] {
+  --quote-stripe: var(--quote-depth-7);
+}
+
+.quote-depth-stripe[data-depth='8'] {
+  --quote-stripe: var(--quote-depth-8);
+}

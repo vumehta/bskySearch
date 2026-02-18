@@ -4,7 +4,7 @@
   "rewrites": [
     {
       "source": "/",
-      "destination": "/bluesky-term-search.html"
+      "destination": "/index.html"
     }
   ],
   "headers": [
