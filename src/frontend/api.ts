@@ -202,6 +202,22 @@ interface ThreadNode {
   parent?: ThreadNode;
 }
 
+export const testUtils = {
+  get didCache() {
+    return didCache;
+  },
+  get searchCache() {
+    return searchCache;
+  },
+  getCachedDid,
+  enforceSearchCacheLimit(maxSize: number = MAX_SEARCH_CACHE_SIZE) {
+    enforceMapLimit(searchCache, maxSize);
+  },
+  enforceDidCacheLimit(maxSize: number = MAX_DID_CACHE_SIZE) {
+    enforceMapLimit(didCache, maxSize);
+  },
+};
+
 export async function fetchThreadParents(atUri: string): Promise<Post[]> {
   const params = new URLSearchParams({
     uri: atUri,

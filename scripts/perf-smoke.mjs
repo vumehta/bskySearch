@@ -1,4 +1,4 @@
-import { deduplicatePosts, filterByDate, filterByLikes, sortPosts } from '../src/utils.mjs';
+import { deduplicatePosts, filterByDate, filterByLikes, sortPosts } from '../src/frontend/utils.ts';
 import { performance } from 'node:perf_hooks';
 
 function createPost(uri, term, likeCount, indexedAtOffsetHours) {

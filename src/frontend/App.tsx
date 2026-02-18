@@ -22,6 +22,7 @@ import type {
   StatusMessage,
   ThreadState,
 } from './types';
+import { useLatest } from './useLatest';
 import { useTheme } from './useTheme';
 import {
   deduplicatePosts,
@@ -163,8 +164,8 @@ function PostCard({
 
   return (
     <article
-      className={`rounded-xl border bg-[var(--card-bg)] p-4 shadow-sm transition-shadow hover:shadow-md ${
-        isHighlighted ? 'ring-2 ring-[var(--focus-ring)] border-[var(--accent)]' : 'border-[var(--border)]'
+      className={`rounded-xl border bg-card-bg p-4 shadow-sm transition-shadow hover:shadow-md ${
+        isHighlighted ? 'ring-2 ring-focus-ring border-accent' : 'border-border'
       }`}
     >
       {matchedTerms.length > 0 && (
@@ -172,7 +173,7 @@ function PostCard({
           {matchedTerms.map((term) => (
             <span
               key={`${post.uri}-${term}`}
-              className="rounded bg-[var(--tag-bg)] px-2 py-0.5 text-xs font-medium text-[var(--accent-text)]"
+              className="rounded bg-tag-bg px-2 py-0.5 text-xs font-medium text-accent-text"
             >
               {term}
             </span>
@@ -181,22 +182,22 @@ function PostCard({
       )}
 
       {threadState?.visible && threadState.parents.length > 0 && (
-        <div className="mb-3 rounded-lg border border-[var(--accent-soft-border)] bg-[var(--accent-soft)] p-3">
-          <div className="mb-2 text-xs uppercase tracking-wide text-[var(--muted)]">Thread context</div>
+        <div className="mb-3 rounded-lg border border-accent-soft-border bg-accent-soft p-3">
+          <div className="mb-2 text-xs uppercase tracking-wide text-muted">Thread context</div>
           <div className="space-y-2">
             {threadState.parents.map((parent) => (
               <div
                 key={parent.uri}
-                className="rounded-r-md border-l-4 border-[var(--accent)] bg-[var(--card-bg)] px-3 py-2"
+                className="rounded-r-md border-l-4 border-accent bg-card-bg px-3 py-2"
               >
-                <div className="mb-1 flex items-center gap-2 text-xs text-[var(--muted-2)]">
-                  <span className="font-semibold text-[var(--text)]">
+                <div className="mb-1 flex items-center gap-2 text-xs text-muted-2">
+                  <span className="font-semibold text-text">
                     {parent.author?.displayName || parent.author?.handle || 'Unknown'}
                   </span>
                   <span>@{parent.author?.handle || 'unknown'}</span>
                   <span className="ml-auto">{formatRelativeTime(parent.indexedAt)}</span>
                 </div>
-                <p className="whitespace-pre-wrap break-words text-sm text-[var(--text)]">
+                <p className="whitespace-pre-wrap break-words text-sm text-text">
                   {parent.record?.text || ''}
                 </p>
               </div>
@@ -211,10 +212,10 @@ function PostCard({
             src={post.author.avatar}
             alt=""
             loading="lazy"
-            className="h-10 w-10 rounded-full bg-[var(--avatar-bg)] object-cover"
+            className="h-10 w-10 rounded-full bg-avatar-bg object-cover"
           />
         ) : (
-          <div className="h-10 w-10 rounded-full bg-[var(--avatar-bg)]" aria-hidden="true" />
+          <div className="h-10 w-10 rounded-full bg-avatar-bg" aria-hidden="true" />
         )}
 
         <div className="min-w-0 flex-1">
@@ -222,17 +223,17 @@ function PostCard({
             href={`https://bsky.app/profile/${encodeURIComponent(handle)}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="block truncate text-sm font-semibold text-[var(--text)] hover:underline"
+            className="block truncate text-sm font-semibold text-text hover:underline"
           >
             {displayName}
           </a>
-          <div className="truncate text-xs text-[var(--muted-2)]">@{handle}</div>
+          <div className="truncate text-xs text-muted-2">@{handle}</div>
         </div>
 
-        <time className="text-xs text-[var(--muted-2)]">{formatRelativeTime(post.indexedAt)}</time>
+        <time className="text-xs text-muted-2">{formatRelativeTime(post.indexedAt)}</time>
       </header>
 
-      <p className="mb-3 whitespace-pre-wrap break-words text-sm leading-relaxed text-[var(--text)]">
+      <p className="mb-3 whitespace-pre-wrap break-words text-sm leading-relaxed text-text">
         {highlightText(text, searchTerms)}
       </p>
 
@@ -242,7 +243,7 @@ function PostCard({
             <button
               type="button"
               onClick={() => onShowImages(post.uri)}
-              className="rounded border border-dashed border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--accent)] hover:underline"
+              className="rounded border border-dashed border-border bg-surface px-3 py-2 text-sm text-accent hover:underline"
             >
               Show {validImages.length} image{validImages.length !== 1 ? 's' : ''}
             </button>
@@ -266,7 +267,7 @@ function PostCard({
         </div>
       )}
 
-      <div className="mb-2 flex flex-wrap items-center gap-4 text-xs text-[var(--muted)]">
+      <div className="mb-2 flex flex-wrap items-center gap-4 text-xs text-muted">
         <span className="font-semibold text-pink-500">Likes {post.likeCount || 0}</span>
         <span>Reposts {post.repostCount || 0}</span>
         <span>Replies {post.replyCount || 0}</span>
@@ -278,7 +279,7 @@ function PostCard({
             type="button"
             onClick={() => onToggleThread(post)}
             disabled={threadState?.loading}
-            className="text-[var(--accent)] disabled:text-[var(--muted)] hover:underline"
+            className="text-accent disabled:text-muted hover:underline"
           >
             {threadState?.loading
               ? 'Loading...'
@@ -295,7 +296,7 @@ function PostCard({
             href={postUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-[var(--accent)] hover:underline"
+            className="text-accent hover:underline"
           >
             {isReplyPost(post) ? 'View on Bluesky' : 'View Replies ->'}
           </a>
@@ -349,18 +350,17 @@ export default function App() {
 
   const { preference: themePreference, setThemePreference } = useTheme();
 
-  const minLikesRef = useRef<number>(Number.parseInt(initialUrlState.minLikes, 10) || 0);
-  const timeFilterRef = useRef<number>(Number.parseInt(initialUrlState.time, 10) || 24);
-  const searchSortRef = useRef<SearchSort>(initialUrlState.searchSort);
-  const searchTermsRef = useRef<string[]>([]);
-  const currentCursorsRef = useRef<Record<string, string | null>>({});
-  const pendingPostsRef = useRef<Post[]>([]);
-  const newPostUrisRef = useRef<Set<string>>(new Set());
-  const threadStatesRef = useRef<Record<string, ThreadState>>({});
+  const minLikesRef = useLatest(Number.parseInt(minLikesInput, 10) || 0);
+  const timeFilterRef = useLatest(Number.parseInt(timeFilter, 10) || 24);
+  const searchSortRef = useLatest(searchSort);
+  const searchTermsRef = useLatest(searchTerms);
+  const currentCursorsRef = useLatest(currentCursors);
+  const pendingPostsRef = useLatest(pendingPosts);
+  const threadStatesRef = useLatest(threadStates);
 
-  const isLoadingRef = useRef(false);
-  const isRefreshingRef = useRef(false);
-  const autoRefreshEnabledRef = useRef(false);
+  const isLoadingRef = useLatest(isLoading);
+  const isRefreshingRef = useLatest(isRefreshing);
+  const autoRefreshEnabledRef = useLatest(autoRefreshEnabled);
 
   const searchGenerationRef = useRef(0);
   const pendingSearchRef = useRef(false);
@@ -377,50 +377,6 @@ export default function App() {
 
   const performSearchRef = useRef<() => Promise<void>>(async () => {});
   const runAutoRefreshRef = useRef<() => Promise<void>>(async () => {});
-
-  useEffect(() => {
-    minLikesRef.current = Number.parseInt(minLikesInput, 10) || 0;
-  }, [minLikesInput]);
-
-  useEffect(() => {
-    timeFilterRef.current = Number.parseInt(timeFilter, 10) || 24;
-  }, [timeFilter]);
-
-  useEffect(() => {
-    searchSortRef.current = searchSort;
-  }, [searchSort]);
-
-  useEffect(() => {
-    searchTermsRef.current = searchTerms;
-  }, [searchTerms]);
-
-  useEffect(() => {
-    currentCursorsRef.current = currentCursors;
-  }, [currentCursors]);
-
-  useEffect(() => {
-    pendingPostsRef.current = pendingPosts;
-  }, [pendingPosts]);
-
-  useEffect(() => {
-    newPostUrisRef.current = newPostUris;
-  }, [newPostUris]);
-
-  useEffect(() => {
-    threadStatesRef.current = threadStates;
-  }, [threadStates]);
-
-  useEffect(() => {
-    isLoadingRef.current = isLoading;
-  }, [isLoading]);
-
-  useEffect(() => {
-    isRefreshingRef.current = isRefreshing;
-  }, [isRefreshing]);
-
-  useEffect(() => {
-    autoRefreshEnabledRef.current = autoRefreshEnabled;
-  }, [autoRefreshEnabled]);
 
   const expansionSummary = useMemo(
     () => getExpansionSummary(termsInput, expandTerms),
@@ -1217,21 +1173,21 @@ export default function App() {
   };
 
   return (
-    <div className="mx-auto min-h-screen w-full max-w-4xl px-4 py-6 text-[var(--text)]">
+    <div className="mx-auto min-h-screen w-full max-w-4xl px-4 py-6 text-text">
       <header className="mb-3 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Bluesky Term Search</h1>
-          <p className="text-sm text-[var(--muted)]">Search posts filtered by time and engagement</p>
+          <p className="text-sm text-muted">Search posts filtered by time and engagement</p>
         </div>
 
-        <label className="flex items-center gap-2 text-sm text-[var(--muted)]">
+        <label className="flex items-center gap-2 text-sm text-muted">
           <span>Theme</span>
           <select
             value={themePreference}
             onChange={(event) =>
               setThemePreference(event.target.value as 'light' | 'dark' | 'system')
             }
-            className="rounded-md border border-[var(--input-border)] bg-[var(--input-bg)] px-2 py-1 text-[var(--text)]"
+            className="rounded-md border border-input-border bg-input-bg px-2 py-1 text-text"
           >
             <option value="light">Light</option>
             <option value="dark">Dark</option>
@@ -1242,10 +1198,10 @@ export default function App() {
 
       <form
         onSubmit={onSearchSubmit}
-        className="mb-6 space-y-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4"
+        className="mb-6 space-y-3 rounded-xl border border-border bg-surface p-4"
       >
         <div>
-          <label className="mb-1 block text-sm font-medium text-[var(--muted)]" htmlFor="terms">
+          <label className="mb-1 block text-sm font-medium text-muted" htmlFor="terms">
             Search Terms (comma-separated)
           </label>
           <input
@@ -1257,13 +1213,13 @@ export default function App() {
             placeholder="Enter search terms..."
             autoComplete="off"
             spellCheck={false}
-            className="w-full rounded-md border border-[var(--input-border)] bg-[var(--input-bg)] px-3 py-2 text-base text-[var(--text)]"
+            className="w-full rounded-md border border-input-border bg-input-bg px-3 py-2 text-base text-text"
           />
         </div>
 
-        <div className="rounded-lg border border-[var(--border)] bg-[var(--card-bg)] p-3">
-          <div className="mb-2 text-sm font-medium text-[var(--muted)]">Phrase Expansion</div>
-          <label className="mb-2 flex items-center gap-2 text-sm text-[var(--text)]">
+        <div className="rounded-lg border border-border bg-card-bg p-3">
+          <div className="mb-2 text-sm font-medium text-muted">Phrase Expansion</div>
+          <label className="mb-2 flex items-center gap-2 text-sm text-text">
             <input
               type="checkbox"
               checked={expandTerms}
@@ -1271,12 +1227,12 @@ export default function App() {
             />
             <span>Also search each word in multi-word phrases</span>
           </label>
-          <p className="text-xs text-[var(--muted-2)]">{expansionSummary}</p>
+          <p className="text-xs text-muted-2">{expansionSummary}</p>
         </div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div>
-            <label className="mb-1 block text-sm font-medium text-[var(--muted)]" htmlFor="minLikes">
+            <label className="mb-1 block text-sm font-medium text-muted" htmlFor="minLikes">
               Min. Likes
             </label>
             <input
@@ -1286,19 +1242,19 @@ export default function App() {
               value={minLikesInput}
               onChange={(event) => handleMinLikesInputChange(event.target.value)}
               onKeyDown={onSearchInputKeyPress}
-              className="w-full rounded-md border border-[var(--input-border)] bg-[var(--input-bg)] px-3 py-2 text-[var(--text)]"
+              className="w-full rounded-md border border-input-border bg-input-bg px-3 py-2 text-text"
             />
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-[var(--muted)]" htmlFor="timeFilter">
+            <label className="mb-1 block text-sm font-medium text-muted" htmlFor="timeFilter">
               Time Range
             </label>
             <select
               id="timeFilter"
               value={timeFilter}
               onChange={(event) => setTimeFilter(event.target.value)}
-              className="w-full rounded-md border border-[var(--input-border)] bg-[var(--input-bg)] px-3 py-2 text-[var(--text)]"
+              className="w-full rounded-md border border-input-border bg-input-bg px-3 py-2 text-text"
             >
               {TIME_OPTIONS.map((value) => (
                 <option key={value} value={value}>
@@ -1309,7 +1265,7 @@ export default function App() {
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-[var(--muted)]" htmlFor="sortSelect">
+            <label className="mb-1 block text-sm font-medium text-muted" htmlFor="sortSelect">
               Sort
             </label>
             <select
@@ -1323,7 +1279,7 @@ export default function App() {
                   scheduleNextRefresh();
                 }
               }}
-              className="w-full rounded-md border border-[var(--input-border)] bg-[var(--input-bg)] px-3 py-2 text-[var(--text)]"
+              className="w-full rounded-md border border-input-border bg-input-bg px-3 py-2 text-text"
             >
               <option value="top">Top</option>
               <option value="latest">Latest</option>
@@ -1334,16 +1290,16 @@ export default function App() {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full rounded-md bg-[var(--accent)] px-4 py-2 font-medium text-white disabled:cursor-not-allowed disabled:bg-[var(--button-disabled)]"
+              className="w-full rounded-md bg-accent px-4 py-2 font-medium text-white disabled:cursor-not-allowed disabled:bg-button-disabled"
             >
               {isLoading ? 'Searching...' : 'Search'}
             </button>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 rounded-lg border border-[var(--border)] bg-[var(--card-bg)] p-3 md:grid-cols-[1fr_1fr_2fr_auto]">
+        <div className="grid grid-cols-1 gap-3 rounded-lg border border-border bg-card-bg p-3 md:grid-cols-[1fr_1fr_2fr_auto]">
           <div>
-            <div className="mb-1 text-sm font-medium text-[var(--muted)]">Auto-refresh</div>
+            <div className="mb-1 text-sm font-medium text-muted">Auto-refresh</div>
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
@@ -1361,14 +1317,14 @@ export default function App() {
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-[var(--muted)]" htmlFor="refreshInterval">
+            <label className="mb-1 block text-sm font-medium text-muted" htmlFor="refreshInterval">
               Interval
             </label>
             <select
               id="refreshInterval"
               value={refreshIntervalMinutes}
               onChange={(event) => setRefreshIntervalMinutes(event.target.value)}
-              className="w-full rounded-md border border-[var(--input-border)] bg-[var(--input-bg)] px-3 py-2 text-[var(--text)]"
+              className="w-full rounded-md border border-input-border bg-input-bg px-3 py-2 text-text"
             >
               <option value="2">2 min</option>
               <option value="5">5 min</option>
@@ -1377,8 +1333,8 @@ export default function App() {
             </select>
           </div>
 
-          <div className="text-sm text-[var(--muted-2)]">
-            <div className="font-semibold text-[var(--text)]">{refreshStateText}</div>
+          <div className="text-sm text-muted-2">
+            <div className="font-semibold text-text">{refreshStateText}</div>
             <div>{refreshLastText}</div>
             <div>{refreshNextText}</div>
           </div>
@@ -1387,7 +1343,7 @@ export default function App() {
             href="https://bskyfeed.vum.sh/"
             target="_blank"
             rel="noopener noreferrer"
-            className="self-end text-sm text-[var(--accent)] hover:underline"
+            className="self-end text-sm text-accent hover:underline"
           >
             Custom keyword feed
           </a>
@@ -1401,24 +1357,24 @@ export default function App() {
           role="status"
           aria-live="polite"
           aria-atomic="true"
-          className="mb-4 rounded-xl border border-[var(--accent-soft-border)] bg-[var(--accent-soft)] p-4"
+          className="mb-4 rounded-xl border border-accent-soft-border bg-accent-soft p-4"
         >
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <div className="font-semibold text-[var(--accent-text)]">
+            <div className="font-semibold text-accent-text">
               {pendingPosts.length} new post{pendingPosts.length === 1 ? '' : 's'} from auto-refresh
             </div>
             <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={mergePendingPosts}
-                className="rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm text-white"
+                className="rounded-md bg-accent px-3 py-1.5 text-sm text-white"
               >
                 Add to results
               </button>
               <button
                 type="button"
                 onClick={dismissPendingPosts}
-                className="rounded-md border border-[var(--input-border)] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--text)]"
+                className="rounded-md border border-input-border bg-surface px-3 py-1.5 text-sm text-text"
               >
                 Dismiss
               </button>
@@ -1450,13 +1406,13 @@ export default function App() {
 
       <section>
         {allPosts.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-[var(--border)] px-4 py-10 text-center text-[var(--muted)]">
+          <div className="rounded-xl border border-dashed border-border px-4 py-10 text-center text-muted">
             <p>
               {pendingPosts.length > 0
                 ? 'New posts are waiting above.'
                 : 'No posts found matching your criteria.'}
             </p>
-            <p className="mt-1 text-sm text-[var(--muted-2)]">
+            <p className="mt-1 text-sm text-muted-2">
               {pendingPosts.length > 0
                 ? 'Use "Add to results" to merge them into the main list.'
                 : 'Try different search terms or lower the minimum likes.'}
@@ -1468,14 +1424,14 @@ export default function App() {
               role="status"
               aria-live="polite"
               aria-atomic="true"
-              className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border-soft)] pb-3 text-sm"
+              className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-border-soft pb-3 text-sm"
             >
               <span className="font-medium">
                 {visibleCount < allPosts.length
                   ? `Showing ${visibleCount} of ${allPosts.length} posts`
                   : `${allPosts.length} post${allPosts.length === 1 ? '' : 's'} found`}
               </span>
-              <span className="text-[var(--muted)]">
+              <span className="text-muted">
                 {searchSort === 'latest'
                   ? 'Sorted by time (newest first)'
                   : 'Sorted by likes (high to low)'}
@@ -1507,7 +1463,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setRenderLimit((prev) => Math.min(allPosts.length, prev + RENDER_STEP))}
-                className="mt-4 w-full rounded-md border border-[var(--input-border)] bg-[var(--surface)] px-4 py-2 text-sm text-[var(--text)]"
+                className="mt-4 w-full rounded-md border border-input-border bg-surface px-4 py-2 text-sm text-text"
               >
                 {remainingLoaded <= RENDER_STEP
                   ? remainingLoaded === 1
@@ -1522,7 +1478,7 @@ export default function App() {
                 type="button"
                 onClick={() => void loadMore()}
                 disabled={isLoading}
-                className="mt-3 w-full rounded-md border border-[var(--input-border)] bg-[var(--surface)] px-4 py-2 text-sm text-[var(--text)] disabled:cursor-not-allowed"
+                className="mt-3 w-full rounded-md border border-input-border bg-surface px-4 py-2 text-sm text-text disabled:cursor-not-allowed"
               >
                 {isLoading ? 'Loading...' : 'Load More Results'}
               </button>
@@ -1531,17 +1487,17 @@ export default function App() {
         )}
       </section>
 
-      <section className="mt-10 border-t border-[var(--border-soft)] pt-4">
+      <section className="mt-10 border-t border-border-soft pt-4">
         <h2 className="text-xl font-semibold">Quote Finder</h2>
-        <p className="mb-3 text-sm text-[var(--muted)]">Find all quotes of a Bluesky post</p>
+        <p className="mb-3 text-sm text-muted">Find all quotes of a Bluesky post</p>
 
         <form
           onSubmit={onQuoteSubmit}
-          className="mb-4 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4"
+          className="mb-4 rounded-xl border border-border bg-surface p-4"
         >
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto]">
             <div>
-              <label className="mb-1 block text-sm font-medium text-[var(--muted)]" htmlFor="postUrl">
+              <label className="mb-1 block text-sm font-medium text-muted" htmlFor="postUrl">
                 Bluesky Post URL
               </label>
               <input
@@ -1553,14 +1509,14 @@ export default function App() {
                 placeholder="https://bsky.app/profile/handle/post/abc123"
                 autoComplete="off"
                 spellCheck={false}
-                className="w-full rounded-md border border-[var(--input-border)] bg-[var(--input-bg)] px-3 py-2 text-[var(--text)]"
+                className="w-full rounded-md border border-input-border bg-input-bg px-3 py-2 text-text"
               />
             </div>
 
             <button
               type="submit"
               disabled={isQuoteLoading}
-              className="self-end rounded-md bg-[var(--accent)] px-4 py-2 text-white disabled:cursor-not-allowed disabled:bg-[var(--button-disabled)]"
+              className="self-end rounded-md bg-accent px-4 py-2 text-white disabled:cursor-not-allowed disabled:bg-button-disabled"
             >
               {isQuoteLoading ? 'Loading...' : 'Find Quotes'}
             </button>
@@ -1571,7 +1527,7 @@ export default function App() {
 
         {quoteOriginalPost && (
           <>
-            <div className="mb-4 flex flex-wrap gap-2 border-b border-[var(--border-soft)]">
+            <div className="mb-4 flex flex-wrap gap-2 border-b border-border-soft">
               {QUOTE_SORT_OPTIONS.map((sortMode) => (
                 <button
                   key={sortMode}
@@ -1579,8 +1535,8 @@ export default function App() {
                   onClick={() => setQuoteSort(sortMode)}
                   className={`border-b-2 px-3 py-2 text-sm ${
                     quoteSort === sortMode
-                      ? 'border-[var(--accent)] font-semibold text-[var(--accent)]'
-                      : 'border-transparent text-[var(--muted)]'
+                      ? 'border-accent font-semibold text-accent'
+                      : 'border-transparent text-muted'
                   }`}
                 >
                   {QUOTE_TAB_LABELS[sortMode]}
@@ -1588,13 +1544,13 @@ export default function App() {
               ))}
             </div>
 
-            <article className="mb-4 rounded-xl border border-[var(--accent-soft-border)] bg-[var(--accent-soft)] p-4">
-              <div className="mb-2 text-xs uppercase tracking-wide text-[var(--muted)]">Original Post</div>
+            <article className="mb-4 rounded-xl border border-accent-soft-border bg-accent-soft p-4">
+              <div className="mb-2 text-xs uppercase tracking-wide text-muted">Original Post</div>
               <div className="mb-1 font-semibold">
                 {quoteOriginalPost.author?.displayName || quoteOriginalPost.author?.handle} (@
                 {quoteOriginalPost.author?.handle})
               </div>
-              <div className="mb-2 text-xs text-[var(--muted-2)]">
+              <div className="mb-2 text-xs text-muted-2">
                 {formatDateTime(quoteOriginalPost.record?.createdAt || quoteOriginalPost.indexedAt)}
               </div>
               {getPostUrl(quoteOriginalPost) && (
@@ -1602,7 +1558,7 @@ export default function App() {
                   href={getPostUrl(quoteOriginalPost) || undefined}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="mb-2 inline-block text-sm text-[var(--accent)] hover:underline"
+                  className="mb-2 inline-block text-sm text-accent hover:underline"
                 >
                   View on Bluesky
                 </a>
@@ -1610,7 +1566,7 @@ export default function App() {
               <p className="mb-2 whitespace-pre-wrap break-words text-sm">
                 {quoteOriginalPost.record?.text || ''}
               </p>
-              <div className="flex flex-wrap gap-4 text-xs text-[var(--muted)]">
+              <div className="flex flex-wrap gap-4 text-xs text-muted">
                 <span className="font-semibold text-pink-500">Likes {quoteOriginalPost.likeCount || 0}</span>
                 <span>Reposts {quoteOriginalPost.repostCount || 0}</span>
                 <span>Replies {quoteOriginalPost.replyCount || 0}</span>
@@ -1618,10 +1574,10 @@ export default function App() {
               </div>
             </article>
 
-            <div className="mb-3 text-sm text-[var(--muted)]">{quoteCountLabel}</div>
+            <div className="mb-3 text-sm text-muted">{quoteCountLabel}</div>
 
             {sortedQuotes.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-[var(--border)] px-4 py-8 text-center text-[var(--muted)]">
+              <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center text-muted">
                 No quotes found for this post.
               </div>
             ) : (
@@ -1630,12 +1586,12 @@ export default function App() {
                   <article
                     key={quote.uri}
                     data-depth={(index % 8) + 1}
-                    className="quote-depth-stripe rounded-xl border border-[var(--border)] bg-[var(--card-bg)] p-4"
+                    className="quote-depth-stripe rounded-xl border border-border bg-card-bg p-4"
                   >
                     <div className="mb-1 font-semibold">
                       {quote.author?.displayName || quote.author?.handle} (@{quote.author?.handle})
                     </div>
-                    <div className="mb-2 text-xs text-[var(--muted-2)]">
+                    <div className="mb-2 text-xs text-muted-2">
                       {formatDateTime(quote.record?.createdAt || quote.indexedAt)}
                     </div>
                     {getPostUrl(quote) && (
@@ -1643,7 +1599,7 @@ export default function App() {
                         href={getPostUrl(quote) || undefined}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="mb-2 inline-block text-sm text-[var(--accent)] hover:underline"
+                        className="mb-2 inline-block text-sm text-accent hover:underline"
                       >
                         View on Bluesky
                       </a>
@@ -1651,7 +1607,7 @@ export default function App() {
                     <p className="mb-2 whitespace-pre-wrap break-words text-sm">
                       {quote.record?.text || ''}
                     </p>
-                    <div className="flex flex-wrap gap-4 text-xs text-[var(--muted)]">
+                    <div className="flex flex-wrap gap-4 text-xs text-muted">
                       <span className="font-semibold text-pink-500">Likes {quote.likeCount || 0}</span>
                       <span>Reposts {quote.repostCount || 0}</span>
                       <span>Replies {quote.replyCount || 0}</span>
@@ -1666,7 +1622,7 @@ export default function App() {
                 type="button"
                 onClick={() => void loadMoreQuotes()}
                 disabled={isQuoteLoading}
-                className="mt-4 w-full rounded-md border border-[var(--input-border)] bg-[var(--surface)] px-4 py-2 text-sm text-[var(--text)] disabled:cursor-not-allowed"
+                className="mt-4 w-full rounded-md border border-input-border bg-surface px-4 py-2 text-sm text-text disabled:cursor-not-allowed"
               >
                 {isQuoteLoading ? 'Loading...' : 'Load More Quotes'}
               </button>

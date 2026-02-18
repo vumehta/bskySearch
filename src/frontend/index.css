@@ -1,26 +1,31 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
+@theme {
+  --color-bg: #ffffff;
+  --color-surface: #f8f9fa;
+  --color-card-bg: #ffffff;
+  --color-text: #333333;
+  --color-muted: #666666;
+  --color-muted-2: #888888;
+  --color-border: #e0e0e0;
+  --color-border-soft: #eeeeee;
+  --color-input-bg: #ffffff;
+  --color-input-border: #d4d4d8;
+  --color-accent: #0085ff;
+  --color-accent-soft: #f0f7ff;
+  --color-accent-soft-border: #cce0ff;
+  --color-accent-text: #1565c0;
+  --color-highlight: #fff59d;
+  --color-button-disabled: #cccccc;
+  --color-focus-ring: rgba(0, 133, 255, 0.2);
+  --color-avatar-bg: #e0e0e0;
+  --color-tag-bg: #e3f2fd;
+}
+
 :root {
   color-scheme: light;
-  --bg: #ffffff;
-  --surface: #f8f9fa;
-  --card-bg: #ffffff;
-  --text: #333333;
-  --muted: #666666;
-  --muted-2: #888888;
-  --border: #e0e0e0;
-  --border-soft: #eeeeee;
-  --input-bg: #ffffff;
-  --input-border: #d4d4d8;
-  --accent: #0085ff;
-  --accent-soft: #f0f7ff;
-  --accent-soft-border: #cce0ff;
-  --accent-text: #1565c0;
-  --highlight: #fff59d;
-  --button-disabled: #cccccc;
-  --focus-ring: rgba(0, 133, 255, 0.2);
-  --avatar-bg: #e0e0e0;
-  --tag-bg: #e3f2fd;
   --quote-depth-1: hsl(200, 70%, 45%);
   --quote-depth-2: hsl(30, 80%, 50%);
   --quote-depth-3: hsl(120, 60%, 40%);
@@ -33,25 +38,25 @@
 
 [data-theme='dark'] {
   color-scheme: dark;
-  --bg: #0a0a0a;
-  --surface: #141414;
-  --card-bg: #121212;
-  --text: #e6e9ed;
-  --muted: #b0b6bf;
-  --muted-2: #8c93a0;
-  --border: #2a2a2a;
-  --border-soft: #1f1f1f;
-  --input-bg: #0a0a0a;
-  --input-border: #2a2a2a;
-  --accent: #53a8ff;
-  --accent-soft: #12375c;
-  --accent-soft-border: #1f5a8c;
-  --accent-text: #9cc8ff;
-  --highlight: #3b3611;
-  --button-disabled: #3a3a3a;
-  --focus-ring: rgba(83, 168, 255, 0.25);
-  --avatar-bg: #2a2a2a;
-  --tag-bg: #1a1a1a;
+  --color-bg: #0a0a0a;
+  --color-surface: #141414;
+  --color-card-bg: #121212;
+  --color-text: #e6e9ed;
+  --color-muted: #b0b6bf;
+  --color-muted-2: #8c93a0;
+  --color-border: #2a2a2a;
+  --color-border-soft: #1f1f1f;
+  --color-input-bg: #0a0a0a;
+  --color-input-border: #2a2a2a;
+  --color-accent: #53a8ff;
+  --color-accent-soft: #12375c;
+  --color-accent-soft-border: #1f5a8c;
+  --color-accent-text: #9cc8ff;
+  --color-highlight: #3b3611;
+  --color-button-disabled: #3a3a3a;
+  --color-focus-ring: rgba(83, 168, 255, 0.25);
+  --color-avatar-bg: #2a2a2a;
+  --color-tag-bg: #1a1a1a;
 }
 
 html,
@@ -62,13 +67,13 @@ body,
 
 body {
   margin: 0;
-  background: var(--bg);
-  color: var(--text);
+  background: var(--color-bg);
+  color: var(--color-text);
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
 }
 
 .search-highlight {
-  background: var(--highlight);
+  background: var(--color-highlight);
   border-radius: 0.2rem;
   padding: 0 0.15rem;
 }

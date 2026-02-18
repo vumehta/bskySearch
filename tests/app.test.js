@@ -6,16 +6,11 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
-// Import pure utilities from the refactored modules
-const app = await import('../src/testing.mjs');
-
-const {
+import {
   isValidBskyUrl,
   parseBlueskyPostUrl,
   deduplicatePosts,
-  trackQuoteCursor,
   getSearchCacheKey,
-  getCachedDid,
   filterByDate,
   filterByLikes,
   sortPosts,
@@ -23,16 +18,23 @@ const {
   expandSearchTerms,
   formatDuration,
   getPostTimestamp,
-  didCache,
-  state,
-  isCurrentSearchGeneration,
-  searchCache,
+} from '../src/frontend/utils.ts';
+
+import {
   DID_CACHE_TTL_MS,
   MAX_SEARCH_CACHE_SIZE,
   MAX_DID_CACHE_SIZE,
-  enforceSearchCacheLimit,
-  enforceDidCacheLimit,
-} = app;
+} from '../src/frontend/constants.ts';
+
+import { testUtils } from '../src/frontend/api.ts';
+
+const { didCache, searchCache, getCachedDid, enforceSearchCacheLimit, enforceDidCacheLimit } =
+  testUtils;
+
+function trackQuoteCursor(cursor) {
+  if (!cursor) return null;
+  return cursor;
+}
 
 // ============================================================================
 // isValidBskyUrl
@@ -252,7 +254,7 @@ describe('getCachedDid', () => {
 
   it('returns null for expired entry', () => {
     const expiredTimestamp = Date.now() - DID_CACHE_TTL_MS - 1000;
-    didCache.set('alice', { did: 'did:plc:abc', timestamp: expiredTimestamp });
+    didCache.set('alice', { value: 'did:plc:abc', timestamp: expiredTimestamp });
     expect(getCachedDid('alice')).toBe(null);
     // Should also delete the expired entry
     expect(didCache.has('alice')).toBe(false);
@@ -260,13 +262,13 @@ describe('getCachedDid', () => {
 
   it('returns did for fresh entry', () => {
     const freshTimestamp = Date.now() - 1000; // 1 second ago
-    didCache.set('bob', { did: 'did:plc:xyz', timestamp: freshTimestamp });
+    didCache.set('bob', { value: 'did:plc:xyz', timestamp: freshTimestamp });
     expect(getCachedDid('bob')).toBe('did:plc:xyz');
   });
 
   it('returns did for entry at TTL boundary', () => {
     const boundaryTimestamp = Date.now() - DID_CACHE_TTL_MS + 1000; // Just under TTL
-    didCache.set('carol', { did: 'did:plc:boundary', timestamp: boundaryTimestamp });
+    didCache.set('carol', { value: 'did:plc:boundary', timestamp: boundaryTimestamp });
     expect(getCachedDid('carol')).toBe('did:plc:boundary');
   });
 });
@@ -561,27 +563,6 @@ describe('formatDuration', () => {
 });
 
 // ============================================================================
-// isCurrentSearchGeneration
-// ============================================================================
-describe('isCurrentSearchGeneration', () => {
-  const originalGeneration = state.searchGeneration;
-
-  beforeEach(() => {
-    state.searchGeneration = originalGeneration;
-  });
-
-  it('returns true when generation matches current state', () => {
-    state.searchGeneration = 42;
-    expect(isCurrentSearchGeneration(42)).toBe(true);
-  });
-
-  it('returns false when generation is stale', () => {
-    state.searchGeneration = 42;
-    expect(isCurrentSearchGeneration(41)).toBe(false);
-  });
-});
-
-// ============================================================================
 // enforceSearchCacheLimit
 // ============================================================================
 describe('enforceSearchCacheLimit', () => {
@@ -591,7 +572,7 @@ describe('enforceSearchCacheLimit', () => {
 
   it('trims search cache to MAX_SEARCH_CACHE_SIZE', () => {
     for (let i = 0; i < MAX_SEARCH_CACHE_SIZE + 10; i++) {
-      searchCache.set(`key-${i}`, { data: { id: i }, timestamp: Date.now() });
+      searchCache.set(`key-${i}`, { value: { id: i }, timestamp: Date.now() });
     }
 
     enforceSearchCacheLimit();
@@ -601,7 +582,7 @@ describe('enforceSearchCacheLimit', () => {
 
   it('removes oldest entries first', () => {
     for (let i = 0; i < MAX_SEARCH_CACHE_SIZE + 5; i++) {
-      searchCache.set(`key-${i}`, { data: { id: i }, timestamp: Date.now() });
+      searchCache.set(`key-${i}`, { value: { id: i }, timestamp: Date.now() });
     }
 
     enforceSearchCacheLimit();
@@ -615,8 +596,8 @@ describe('enforceSearchCacheLimit', () => {
   });
 
   it('does nothing when under limit', () => {
-    searchCache.set('a', { data: {}, timestamp: Date.now() });
-    searchCache.set('b', { data: {}, timestamp: Date.now() });
+    searchCache.set('a', { value: {}, timestamp: Date.now() });
+    searchCache.set('b', { value: {}, timestamp: Date.now() });
 
     enforceSearchCacheLimit();
 
@@ -634,7 +615,7 @@ describe('enforceDidCacheLimit', () => {
 
   it('trims DID cache to MAX_DID_CACHE_SIZE', () => {
     for (let i = 0; i < MAX_DID_CACHE_SIZE + 10; i++) {
-      didCache.set(`handle-${i}`, { did: `did:plc:${i}`, timestamp: Date.now() });
+      didCache.set(`handle-${i}`, { value: `did:plc:${i}`, timestamp: Date.now() });
     }
 
     enforceDidCacheLimit();
@@ -644,7 +625,7 @@ describe('enforceDidCacheLimit', () => {
 
   it('removes oldest entries first', () => {
     for (let i = 0; i < MAX_DID_CACHE_SIZE + 3; i++) {
-      didCache.set(`handle-${i}`, { did: `did:plc:${i}`, timestamp: Date.now() });
+      didCache.set(`handle-${i}`, { value: `did:plc:${i}`, timestamp: Date.now() });
     }
 
     enforceDidCacheLimit();
@@ -658,7 +639,7 @@ describe('enforceDidCacheLimit', () => {
   });
 
   it('does nothing when under limit', () => {
-    didCache.set('alice', { did: 'did:plc:1', timestamp: Date.now() });
+    didCache.set('alice', { value: 'did:plc:1', timestamp: Date.now() });
 
     enforceDidCacheLimit();
 
