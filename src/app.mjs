@@ -14,6 +14,7 @@ import {
   timeFilterSelect,
 } from './dom.mjs';
 import {
+  applySearchSortChange,
   cancelDebouncedSearch,
   debouncedSearch,
   disableAutoRefresh,
@@ -115,6 +116,8 @@ refreshIntervalSelect.addEventListener('change', () => {
 
 sortSelect.addEventListener('change', () => {
   state.searchSort = sortSelect.value === 'latest' ? 'latest' : 'top';
+  updateSearchURL();
+  applySearchSortChange();
   if (state.autoRefreshEnabled) {
     scheduleNextRefresh();
   }
