@@ -6,9 +6,6 @@ const mocks = vi.hoisted(() => {
     return {
       value: initial.value ?? '',
       checked: initial.checked ?? false,
-      textContent: '',
-      className: '',
-      style: {},
       addEventListener: vi.fn((eventName, handler) => {
         listeners.set(eventName, handler);
       }),
@@ -22,9 +19,6 @@ const mocks = vi.hoisted(() => {
         listeners.clear();
         this.value = nextInitial.value ?? '';
         this.checked = nextInitial.checked ?? false;
-        this.textContent = '';
-        this.className = '';
-        this.style = {};
         this.addEventListener.mockClear();
       },
     };
@@ -99,11 +93,26 @@ const mocks = vi.hoisted(() => {
     state.quoteSort = 'likes';
     state.searchSort = 'top';
 
-    Object.values(search).forEach((value) => value.mockClear());
-    Object.values(quotes).forEach((value) => value.mockClear());
-    Object.values(theme)
-      .filter((value) => typeof value?.mockClear === 'function')
-      .forEach((value) => value.mockClear());
+    search.applySearchSortChange.mockClear();
+    search.cancelDebouncedSearch.mockClear();
+    search.debouncedSearch.mockClear();
+    search.disableAutoRefresh.mockClear();
+    search.enableAutoRefresh.mockClear();
+    search.focusSearchInput.mockClear();
+    search.performSearch.mockClear();
+    search.scheduleNextRefresh.mockClear();
+    search.updateExpansionSummary.mockClear();
+    search.updateRefreshInterval.mockClear();
+    search.updateRefreshMeta.mockClear();
+    search.updateSearchURL.mockClear();
+
+    quotes.handleQuoteTabClick.mockClear();
+    quotes.performQuoteSearch.mockClear();
+    quotes.updateQuoteTabs.mockClear();
+
+    theme.handleSystemThemeChange.mockClear();
+    theme.handleThemeChange.mockClear();
+    theme.initTheme.mockClear();
     theme.prefersDarkScheme.addEventListener.mockClear();
   };
 

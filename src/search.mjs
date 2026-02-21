@@ -1204,8 +1204,10 @@ export function focusSearchInput() {
 }
 
 export function applySearchSortChange() {
-  const shouldRender = resultsDiv.childElementCount > 0;
-  flushDerivedPostsRebuild({ render: shouldRender });
+  if (state.searchTerms.length === 0) {
+    return;
+  }
+  flushDerivedPostsRebuild({ render: true });
 }
 
 export function renderSearchResults() {
