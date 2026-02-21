@@ -1203,6 +1203,13 @@ export function focusSearchInput() {
   }
 }
 
+export function applySearchSortChange() {
+  if (state.searchTerms.length === 0) {
+    return;
+  }
+  flushDerivedPostsRebuild({ render: true });
+}
+
 export function renderSearchResults() {
   renderResults();
 }
