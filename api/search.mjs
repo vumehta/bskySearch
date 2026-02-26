@@ -68,7 +68,7 @@ function getRuntimeEnv(context) {
   if (context && typeof context === 'object' && 'env' in context) {
     return context.env || {};
   }
-  return process.env;
+  return typeof process !== 'undefined' && process.env ? process.env : {};
 }
 
 function getRuntimeCredentials(context) {
@@ -353,7 +353,7 @@ export async function GET(request, context) {
 
 // Test utilities for unit/integration coverage.
 export const testUtils =
-  process.env.NODE_ENV === 'test'
+  (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test')
     ? {
         getQueryString,
         stripControlChars,

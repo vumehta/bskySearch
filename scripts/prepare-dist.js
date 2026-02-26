@@ -8,6 +8,12 @@ const files = [
   'styles.min.css',
 ];
 
+// Cloudflare Pages config files (copied if present, not required)
+const optionalFiles = [
+  '_headers',
+  '_redirects',
+];
+
 fs.mkdirSync(distDir, { recursive: true });
 
 for (const file of files) {
@@ -17,4 +23,12 @@ for (const file of files) {
     throw new Error(`Missing build artifact: ${file}`);
   }
   fs.copyFileSync(src, dest);
+}
+
+for (const file of optionalFiles) {
+  const src = path.join(__dirname, '..', file);
+  const dest = path.join(distDir, file);
+  if (fs.existsSync(src)) {
+    fs.copyFileSync(src, dest);
+  }
 }
