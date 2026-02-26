@@ -4,6 +4,13 @@
   "redirects": [
     {
       "source": "/:path*",
+      "has": [
+        {
+          "type": "header",
+          "key": "accept",
+          "value": ".*text/html.*"
+        }
+      ],
       "destination": "https://bskysearch.vum.sh/:path*",
       "permanent": true
     }
