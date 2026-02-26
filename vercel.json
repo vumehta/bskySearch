@@ -6,9 +6,8 @@
       "source": "/:path*",
       "has": [
         {
-          "type": "header",
-          "key": "accept",
-          "value": ".*text/html.*"
+          "type": "host",
+          "value": "bskysearch.vercel.app"
         }
       ],
       "destination": "https://bskysearch.vum.sh/:path*",
