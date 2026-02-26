@@ -74,8 +74,8 @@ function getRuntimeEnv(context) {
 function getRuntimeCredentials(context) {
   const env = getRuntimeEnv(context);
   return {
-    handle: env.BSKY_HANDLE,
-    appPassword: env.BSKY_APP_PASSWORD,
+    handle: normalizeHandle(env.BSKY_HANDLE),
+    appPassword: normalizeAppPassword(env.BSKY_APP_PASSWORD),
   };
 }
 
@@ -89,6 +89,25 @@ function getQueryString(value) {
 function stripControlChars(value) {
   if (typeof value !== 'string') return '';
   return value.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
+}
+
+function trimOptionalWrappingQuotes(value) {
+  const match = value.match(/^(['"])([\s\S]*)\1$/);
+  return match ? match[2] : value;
+}
+
+function normalizeCredentialValue(rawValue) {
+  if (typeof rawValue !== 'string') return '';
+  return trimOptionalWrappingQuotes(stripControlChars(rawValue).trim()).trim();
+}
+
+function normalizeHandle(rawValue) {
+  const normalized = normalizeCredentialValue(rawValue);
+  return normalized.startsWith('@') ? normalized.slice(1) : normalized;
+}
+
+function normalizeAppPassword(rawValue) {
+  return normalizeCredentialValue(rawValue).replace(/\s+/g, '');
 }
 
 function jsonNoStore(payload, status = 200, extraHeaders = {}) {
@@ -348,7 +367,7 @@ export async function GET(request, context) {
       return jsonNoStore({ error: error.message }, 504);
     }
     const errorMessage = error && typeof error.message === 'string' ? error.message : 'Unknown error';
-    return jsonNoStore({ error: `Search proxy failed: ${errorMessage}`, debugHandle: handle }, 500);
+    return jsonNoStore({ error: `Search proxy failed: ${errorMessage}` }, 500);
   }
 }
 
@@ -358,6 +377,10 @@ export const testUtils =
     ? {
         getQueryString,
         stripControlChars,
+        trimOptionalWrappingQuotes,
+        normalizeCredentialValue,
+        normalizeHandle,
+        normalizeAppPassword,
         getSearchCacheKey,
         isSessionExpired,
         getCachedSearchResult,

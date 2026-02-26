@@ -16,6 +16,10 @@ const { testUtils } = searchModule;
 const {
   getQueryString,
   stripControlChars,
+  trimOptionalWrappingQuotes,
+  normalizeCredentialValue,
+  normalizeHandle,
+  normalizeAppPassword,
   getSearchCacheKey,
   isSessionExpired,
   getCachedSearchResult,
@@ -180,6 +184,61 @@ describe('search handler request/response behavior', () => {
     expect(response.headers.get('Allow')).toBe('GET');
     await expect(response.json()).resolves.toEqual({ error: 'Method not allowed.' });
   });
+
+  it('normalizes env credentials before session creation', async () => {
+    global.fetch = vi.fn((url, options = {}) => {
+      if (url.includes('/com.atproto.server.createSession')) {
+        const body = JSON.parse(options.body);
+        expect(body.identifier).toBe('test-handle.bsky.social');
+        expect(body.password).toBe('abcd-efgh-ijkl-mnop');
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            accessJwt: 'access-token',
+            refreshJwt: 'refresh-token',
+          }),
+        });
+      }
+
+      if (url.includes('/app.bsky.feed.searchPosts')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ posts: [], cursor: null }),
+        });
+      }
+
+      throw new Error(`Unexpected fetch URL in test: ${url}`);
+    });
+
+    const response = await searchHandler(
+      new Request('https://example.com/api/search?term=meta', { method: 'GET' }),
+      {
+        env: {
+          BSKY_HANDLE: ' "  @test-handle.bsky.social\n " ',
+          BSKY_APP_PASSWORD: " 'abcd-efgh-ijkl - mnop\n' ",
+        },
+      },
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ posts: [], cursor: null });
+  });
+
+  it('returns 500 when normalized env credentials are empty', async () => {
+    const response = await searchHandler(
+      new Request('https://example.com/api/search?term=meta', { method: 'GET' }),
+      {
+        env: {
+          BSKY_HANDLE: ' "   " ',
+          BSKY_APP_PASSWORD: ' \n\t ',
+        },
+      },
+    );
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: 'Server missing BSKY_HANDLE or BSKY_APP_PASSWORD.',
+    });
+  });
 });
 
 // ============================================================================
@@ -221,6 +280,26 @@ describe('stripControlChars', () => {
   it('returns empty string for non-string input', () => {
     expect(stripControlChars(null)).toBe('');
     expect(stripControlChars(undefined)).toBe('');
+  });
+});
+
+describe('credential normalization helpers', () => {
+  it('trims optional wrapping quotes', () => {
+    expect(trimOptionalWrappingQuotes('"value"')).toBe('value');
+    expect(trimOptionalWrappingQuotes("'value'")).toBe('value');
+    expect(trimOptionalWrappingQuotes('value')).toBe('value');
+  });
+
+  it('normalizes credential values', () => {
+    expect(normalizeCredentialValue(' "\nabc\t" ')).toBe('abc');
+  });
+
+  it('normalizes handles', () => {
+    expect(normalizeHandle(' "@alice.bsky.social" ')).toBe('alice.bsky.social');
+  });
+
+  it('normalizes app passwords', () => {
+    expect(normalizeAppPassword(" 'abcd - efgh - ijkl - mnop' ")).toBe('abcd-efgh-ijkl-mnop');
   });
 });
 
