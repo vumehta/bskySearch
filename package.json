@@ -7,6 +7,9 @@
     "minify:js": "esbuild src/app.mjs --bundle --minify --platform=browser --format=iife --target=es2019 --outfile=app.min.js",
     "minify:css": "postcss styles.css --use cssnano --no-map -o styles.min.css",
     "build": "npm run minify:js && npm run minify:css && node scripts/prepare-dist.js",
+    "cf:whoami": "npx wrangler whoami",
+    "cf:dev": "npm run build && npx wrangler dev",
+    "cf:deploy": "npm run build && npx wrangler deploy",
     "perf:smoke": "node scripts/perf-smoke.mjs",
     "test": "vitest run",
     "test:watch": "vitest"

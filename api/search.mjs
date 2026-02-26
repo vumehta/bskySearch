@@ -64,15 +64,23 @@ const MAX_SEARCH_CACHE_SIZE = 500;
 const searchResultsCache = new Map();
 let lastSearchCacheCleanupAt = 0;
 
-function getRuntimeEnv(context) {
-  if (context && typeof context === 'object' && 'env' in context) {
-    return context.env || {};
+function getRuntimeEnv(contextOrEnv) {
+  if (contextOrEnv && typeof contextOrEnv === 'object') {
+    if ('BSKY_HANDLE' in contextOrEnv || 'BSKY_APP_PASSWORD' in contextOrEnv) {
+      return contextOrEnv;
+    }
+    if ('env' in contextOrEnv) {
+      return contextOrEnv.env || {};
+    }
   }
-  return process.env;
+  if (typeof process !== 'undefined' && process?.env) {
+    return process.env;
+  }
+  return {};
 }
 
-function getRuntimeCredentials(context) {
-  const env = getRuntimeEnv(context);
+function getRuntimeCredentials(contextOrEnv) {
+  const env = getRuntimeEnv(contextOrEnv);
   return {
     handle: env.BSKY_HANDLE,
     appPassword: env.BSKY_APP_PASSWORD,
@@ -280,12 +288,12 @@ async function searchPosts(term, cursor, accessJwt, sort) {
   });
 }
 
-export async function GET(request, context) {
+export async function handleSearch(request, contextOrEnv) {
   if (request.method !== 'GET') {
     return jsonNoStore({ error: 'Method not allowed.' }, 405, { Allow: 'GET' });
   }
 
-  const { handle, appPassword } = getRuntimeCredentials(context);
+  const { handle, appPassword } = getRuntimeCredentials(contextOrEnv);
   if (!handle || !appPassword) {
     return jsonNoStore({ error: 'Server missing BSKY_HANDLE or BSKY_APP_PASSWORD.' }, 500);
   }
@@ -351,9 +359,15 @@ export async function GET(request, context) {
   }
 }
 
+export async function GET(request, context) {
+  return handleSearch(request, context);
+}
+
 // Test utilities for unit/integration coverage.
+const isTestEnv = typeof process !== 'undefined' && process?.env?.NODE_ENV === 'test';
+
 export const testUtils =
-  process.env.NODE_ENV === 'test'
+  isTestEnv
     ? {
         getQueryString,
         stripControlChars,

@@ -8,6 +8,7 @@ const files = [
   'styles.min.css',
 ];
 
+fs.rmSync(distDir, { recursive: true, force: true });
 fs.mkdirSync(distDir, { recursive: true });
 
 for (const file of files) {

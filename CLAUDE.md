@@ -2,13 +2,14 @@
 
 ## Project Overview
 
-bskySearch is a full-stack web application for searching Bluesky posts with advanced filtering. Vanilla JavaScript frontend plus a Vercel API route implemented as a Web-standard handler. This is a personal-use tool with at most 2–3 total users and never more than 2 concurrent users—no rate limiting is needed.
+bskySearch is a full-stack web application for searching Bluesky posts with advanced filtering. Vanilla JavaScript frontend plus a server API route implemented as a Web-standard handler. This is a personal-use tool with at most 2–3 total users and never more than 2 concurrent users—no rate limiting is needed.
 
 ## Build & Run
 
-Deployed via Vercel—push to `main` and Vercel handles everything:
-- Runs `npm run build` to minify JS/CSS
-- Serves from `vercel.json` (routing, security headers)
+Deployed via Vercel and/or Cloudflare Workers:
+- `npm run build` to minify JS/CSS and stage deploy artifacts in `dist/`
+- Vercel uses `vercel.json` for routing and headers
+- Cloudflare Worker uses `worker.mjs` plus static assets from `dist/` via `wrangler.toml`
 
 **Local development:** Run `npm install && npm run build` once to generate minified files, then open `bluesky-term-search.html` in browser. Re-run build after editing source files.
 
@@ -43,9 +44,11 @@ Deployed via Vercel—push to `main` and Vercel handles everything:
 - Map/Set for caches and tracking (didCache, searchCache, newPostUris)
 - URL params encode search state for shareable links
 
-### Backend (api/search.mjs)
+### Backend (api/search.mjs + worker.mjs)
 - Proxies Bluesky API to handle authentication server-side
-- Uses a Web-standard handler (`GET(request) -> Response`) with WHATWG URL parsing
+- Shared Web-standard handler (`handleSearch(request, env) -> Response`) with host-specific adapters
+- Vercel adapter: `GET(request, context)` in `api/search.mjs`
+- Cloudflare Worker adapter: `fetch(request, env)` in `worker.mjs` routes `/api/search` to `handleSearch()`
 - Session tokens cached with 2-hour TTL, auto-refresh on 401
 - Session creation uses promise deduplication (`sessionPromise`) to prevent race conditions
 - Response caching with 30s TTL
@@ -76,9 +79,13 @@ IMPORTANT: This codebase prioritizes XSS prevention.
 
 ## Environment Variables
 
-Backend requires (set in Vercel dashboard):
+Backend requires:
 - `BSKY_HANDLE` - Bluesky account handle
 - `BSKY_APP_PASSWORD` - App-specific password (not main password)
+
+Set these in:
+- Vercel project environment variables
+- Cloudflare Worker environment variables/secrets
 
 ## Common Tasks
 
@@ -114,7 +121,7 @@ Run `npm test` for the Vitest suite, or `npm run test:watch` for continuous mode
 - Branch naming: `vumehta/<descriptive-name>`
 - Main branch: `main`
 - Keep commits focused on single changes
-- Minified files are gitignored—Vercel builds them
+- Minified files are gitignored—deployment build generates them
 
 ## Claude Code
 
@@ -123,7 +130,7 @@ Custom agents in `.claude/agents/`:
 
 ## Gotchas
 
-- Strict CSP in vercel.json—no inline scripts/styles, limited connect-src (self + public.api.bsky.app only)
+- Strict CSP is applied by `worker.mjs` and `vercel.json`—no inline scripts/styles, limited connect-src (self + public.api.bsky.app only)
 - The HTML references minified files, but dev changes go in source files (src/, styles.css)
 - Session refresh has race condition protection via `sessionPromise`—don't bypass this pattern
 - Auto-refresh timer uses setInterval; remember to clear on search changes
