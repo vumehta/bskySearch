@@ -366,8 +366,7 @@ export async function GET(request, context) {
     if (isUpstreamTimeoutError(error)) {
       return jsonNoStore({ error: error.message }, 504);
     }
-    const errorMessage = error && typeof error.message === 'string' ? error.message : 'Unknown error';
-    return jsonNoStore({ error: `Search proxy failed: ${errorMessage}` }, 500);
+    return jsonNoStore({ error: 'Search proxy failed.' }, 500);
   }
 }
 
