@@ -37,7 +37,7 @@ export default {
 
       const assetRequest =
         url.pathname === '/'
-          ? new Request(new URL('/bluesky-term-search.html', request.url).toString(), request)
+          ? new Request(new URL('/bluesky-term-search', request.url).toString(), request)
           : request;
 
       const assetResponse = await env.ASSETS.fetch(assetRequest);

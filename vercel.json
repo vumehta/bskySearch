@@ -1,6 +1,13 @@
 {
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
+  "redirects": [
+    {
+      "source": "/:path*",
+      "destination": "https://bskysearch.vum.sh/:path*",
+      "permanent": true
+    }
+  ],
   "rewrites": [
     {
       "source": "/",
