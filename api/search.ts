@@ -1,4 +1,19 @@
-import type { BskySession, CacheEntry, SortMode } from '../src/types';
+// All types are defined locally to keep the API route self-contained
+// (Vercel compiles API routes independently from the frontend bundle).
+
+type SortMode = 'top' | 'latest';
+
+interface BskySession {
+  accessJwt: string;
+  refreshJwt: string;
+  did?: string;
+  handle?: string;
+}
+
+interface CacheEntry<T> {
+  data: T;
+  timestamp: number;
+}
 
 interface UpstreamTimeoutError extends Error {
   code: string;
