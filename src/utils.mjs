@@ -104,6 +104,10 @@ export function filterByDate(posts, hours) {
   return posts.filter((post) => getPostTimestamp(post) >= cutoffTs);
 }
 
+export function normalizeSortValue(raw) {
+  return raw === 'latest' ? 'latest' : 'top';
+}
+
 // Sort posts by selected mode
 export function sortPosts(posts, sortMode = 'top') {
   const sorted = [...posts];

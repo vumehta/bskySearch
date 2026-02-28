@@ -1,4 +1,5 @@
 import { state } from './state.mjs';
+import { normalizeSortValue } from './utils.mjs';
 import {
   autoRefreshToggle,
   expandTermsToggle,
@@ -59,7 +60,7 @@ function initFromURL() {
       sortSelect.value = sortValue;
     }
   }
-  state.searchSort = sortSelect.value === 'latest' ? 'latest' : 'top';
+  state.searchSort = normalizeSortValue(sortSelect.value);
   if (params.get('expand') === '1') {
     expandTermsToggle.checked = true;
   }
@@ -115,7 +116,7 @@ refreshIntervalSelect.addEventListener('change', () => {
 });
 
 sortSelect.addEventListener('change', () => {
-  state.searchSort = sortSelect.value === 'latest' ? 'latest' : 'top';
+  state.searchSort = normalizeSortValue(sortSelect.value);
   updateSearchURL();
   applySearchSortChange();
   if (state.autoRefreshEnabled) {
