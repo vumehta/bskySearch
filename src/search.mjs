@@ -35,6 +35,7 @@ import {
   getPostUrl,
   getSearchCacheKey,
   isValidBskyUrl,
+  normalizeSortValue,
   normalizeTerm,
   setText,
   sortPosts,
@@ -120,7 +121,7 @@ export function updateExpansionSummary() {
 
 // Search posts for a single term (server-side proxy)
 async function searchTerm(term, cursor = null, sort = state.searchSort) {
-  const sortValue = sort === 'latest' ? 'latest' : 'top';
+  const sortValue = normalizeSortValue(sort);
   const cacheKey = getSearchCacheKey(term, cursor, sortValue);
 
   // Check cache first
@@ -1032,7 +1033,7 @@ export async function performSearch() {
   state.searchTerms = expandSearchTerms(state.rawSearchTerms, expandTermsToggle.checked);
   state.minLikes = parseInt(minLikesInput.value) || 0;
   state.timeFilterHours = parseInt(timeFilterSelect.value) || 24;
-  state.searchSort = sortSelect.value === 'latest' ? 'latest' : 'top';
+  state.searchSort = normalizeSortValue(sortSelect.value);
 
   if (state.rawSearchTerms.length === 0) {
     showStatus('Please enter at least one search term.', 'error');

@@ -1,3 +1,7 @@
+function normalizeSortValue(raw) {
+  return raw === 'latest' ? 'latest' : 'top';
+}
+
 const BSKY_SERVICE = 'https://bsky.social/xrpc';
 
 // Upstream fetch timeout (8s) keeps tail latency bounded and maps to 504.
@@ -261,7 +265,7 @@ function resetModuleStateForTests() {
 }
 
 async function searchPosts(term, cursor, accessJwt, sort) {
-  const sortValue = sort === 'latest' ? 'latest' : 'top';
+  const sortValue = normalizeSortValue(sort);
   const params = new URLSearchParams({
     q: term,
     sort: sortValue,

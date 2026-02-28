@@ -93,27 +93,12 @@ const mocks = vi.hoisted(() => {
     state.quoteSort = 'likes';
     state.searchSort = 'top';
 
-    search.applySearchSortChange.mockClear();
-    search.cancelDebouncedSearch.mockClear();
-    search.debouncedSearch.mockClear();
-    search.disableAutoRefresh.mockClear();
-    search.enableAutoRefresh.mockClear();
-    search.focusSearchInput.mockClear();
-    search.performSearch.mockClear();
-    search.scheduleNextRefresh.mockClear();
-    search.updateExpansionSummary.mockClear();
-    search.updateRefreshInterval.mockClear();
-    search.updateRefreshMeta.mockClear();
-    search.updateSearchURL.mockClear();
-
-    quotes.handleQuoteTabClick.mockClear();
-    quotes.performQuoteSearch.mockClear();
-    quotes.updateQuoteTabs.mockClear();
-
-    theme.handleSystemThemeChange.mockClear();
-    theme.handleThemeChange.mockClear();
-    theme.initTheme.mockClear();
-    theme.prefersDarkScheme.addEventListener.mockClear();
+    for (const mod of [search, quotes, theme]) {
+      for (const val of Object.values(mod)) {
+        if (typeof val?.mockClear === 'function') val.mockClear();
+        if (typeof val?.addEventListener?.mockClear === 'function') val.addEventListener.mockClear();
+      }
+    }
   };
 
   return {
@@ -128,6 +113,9 @@ const mocks = vi.hoisted(() => {
 
 vi.mock('../src/state.mjs', () => ({ state: mocks.state }));
 vi.mock('../src/dom.mjs', () => mocks.dom);
+vi.mock('../src/utils.mjs', () => ({
+  normalizeSortValue: (raw) => (raw === 'latest' ? 'latest' : 'top'),
+}));
 vi.mock('../src/search.mjs', () => mocks.search);
 vi.mock('../src/quotes.mjs', () => mocks.quotes);
 vi.mock('../src/theme.mjs', () => mocks.theme);
