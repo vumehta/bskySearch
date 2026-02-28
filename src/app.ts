@@ -1,5 +1,5 @@
-import { state } from './state.mjs';
-import { normalizeSortValue } from './utils.mjs';
+import { state } from './state';
+import { normalizeSortValue } from './utils';
 import {
   autoRefreshToggle,
   expandTermsToggle,
@@ -13,7 +13,7 @@ import {
   termsInput,
   themeSelect,
   timeFilterSelect,
-} from './dom.mjs';
+} from './dom';
 import {
   applySearchSortChange,
   cancelDebouncedSearch,
@@ -27,35 +27,36 @@ import {
   updateRefreshInterval,
   updateRefreshMeta,
   updateSearchURL,
-} from './search.mjs';
+} from './search';
 import {
   handleQuoteTabClick,
   performQuoteSearch,
   updateQuoteTabs,
-} from './quotes.mjs';
+} from './quotes';
 import {
   handleSystemThemeChange,
   handleThemeChange,
   initTheme,
   prefersDarkScheme,
-} from './theme.mjs';
+} from './theme';
+import type { ThemePreference } from './types';
 
-function initFromURL() {
+function initFromURL(): void {
   const params = new URLSearchParams(window.location.search);
   if (params.get('terms')) {
-    termsInput.value = params.get('terms');
+    termsInput.value = params.get('terms')!;
   }
   if (params.get('minLikes')) {
-    minLikesInput.value = params.get('minLikes');
+    minLikesInput.value = params.get('minLikes')!;
   }
   if (params.get('time')) {
-    const timeValue = params.get('time');
+    const timeValue = params.get('time')!;
     if (['1', '6', '12', '24', '48', '168'].includes(timeValue)) {
       timeFilterSelect.value = timeValue;
     }
   }
   if (params.get('sort')) {
-    const sortValue = params.get('sort');
+    const sortValue = params.get('sort')!;
     if (['top', 'latest'].includes(sortValue)) {
       sortSelect.value = sortValue;
     }
@@ -68,7 +69,7 @@ function initFromURL() {
   const postParam = params.get('post');
   const sortParam = params.get('sort');
   if (sortParam && ['likes', 'recent', 'oldest'].includes(sortParam)) {
-    state.quoteSort = sortParam;
+    state.quoteSort = sortParam as 'likes' | 'recent' | 'oldest';
     updateQuoteTabs();
   }
   if (postParam) {
@@ -85,21 +86,21 @@ searchBtn.addEventListener('click', () => {
   performSearch();
 });
 
-quoteForm.addEventListener('submit', (event) => {
+quoteForm.addEventListener('submit', (event: Event) => {
   event.preventDefault();
   performQuoteSearch();
 });
 
-themeSelect.addEventListener('change', (event) => {
-  handleThemeChange(event.target.value);
+themeSelect.addEventListener('change', (event: Event) => {
+  handleThemeChange((event.target as HTMLSelectElement).value as ThemePreference);
 });
 
 prefersDarkScheme.addEventListener('change', () => {
   handleSystemThemeChange();
 });
 
-autoRefreshToggle.addEventListener('change', (event) => {
-  if (event.target.checked) {
+autoRefreshToggle.addEventListener('change', (event: Event) => {
+  if ((event.target as HTMLInputElement).checked) {
     enableAutoRefresh();
   } else {
     disableAutoRefresh();
@@ -124,11 +125,11 @@ sortSelect.addEventListener('change', () => {
   }
 });
 
-quoteTabs.addEventListener('click', (event) => {
+quoteTabs.addEventListener('click', (event: Event) => {
   handleQuoteTabClick(event);
 });
 
-termsInput.addEventListener('keypress', (event) => {
+termsInput.addEventListener('keypress', (event: KeyboardEvent) => {
   if (event.key === 'Enter') {
     cancelDebouncedSearch();
     performSearch();
@@ -145,7 +146,7 @@ termsInput.addEventListener('input', () => {
   debouncedSearch();
 });
 
-minLikesInput.addEventListener('keypress', (event) => {
+minLikesInput.addEventListener('keypress', (event: KeyboardEvent) => {
   if (event.key === 'Enter') {
     cancelDebouncedSearch();
     performSearch();

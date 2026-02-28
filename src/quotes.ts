@@ -1,5 +1,5 @@
-import { PUBLIC_API } from './constants.mjs';
-import { didCache, state } from './state.mjs';
+import { PUBLIC_API } from './constants';
+import { didCache, state } from './state';
 import {
   postUrlInput,
   quoteSearchBtn,
@@ -9,29 +9,41 @@ import {
   quoteCountDiv,
   quoteResultsDiv,
   quoteLoadMoreDiv,
-} from './dom.mjs';
+} from './dom';
 import {
   formatDateTime,
   getPostTimestamp,
   getPostUrl,
   parseBlueskyPostUrl,
   setText,
-} from './utils.mjs';
-import { enforceDidCacheLimit, getCachedDid } from './cache.mjs';
-import { setQueryParam, updateURLWithParams } from './url.mjs';
-import { trackQuoteCursor } from './quotes-state.mjs';
+} from './utils';
+import { enforceDidCacheLimit, getCachedDid } from './cache';
+import { setQueryParam, updateURLWithParams } from './url';
+import { trackQuoteCursor } from './quotes-state';
+import type { BskyPost, QuoteSortMode } from './types';
 
-let quoteSortCache = { quotesRef: null, sortMode: '', sorted: [] };
-let lastRenderedQuoteSort = null;
-let lastRenderedQuoteUris = [];
+interface QuoteSortCache {
+  quotesRef: BskyPost[] | null;
+  sortMode: string;
+  sorted: BskyPost[];
+}
 
-function resetQuoteRenderCache() {
+interface QuotesPageResult {
+  posts: BskyPost[];
+  cursor: string | null;
+}
+
+let quoteSortCache: QuoteSortCache = { quotesRef: null, sortMode: '', sorted: [] };
+let lastRenderedQuoteSort: string | null = null;
+let lastRenderedQuoteUris: string[] = [];
+
+function resetQuoteRenderCache(): void {
   quoteSortCache = { quotesRef: null, sortMode: '', sorted: [] };
   lastRenderedQuoteSort = null;
   lastRenderedQuoteUris = [];
 }
 
-export function updateQuoteURL() {
+export function updateQuoteURL(): void {
   const params = new URLSearchParams(window.location.search);
   const postValue = postUrlInput.value.trim();
   setQueryParam(params, 'post', postValue);
@@ -43,32 +55,33 @@ export function updateQuoteURL() {
   updateURLWithParams(params);
 }
 
-export function updateQuoteTabs() {
+export function updateQuoteTabs(): void {
   quoteTabs.querySelectorAll('.quote-tab').forEach((tab) => {
-    tab.classList.toggle('active', tab.dataset.sort === state.quoteSort);
+    const tabEl = tab as HTMLElement;
+    tabEl.classList.toggle('active', tabEl.dataset.sort === state.quoteSort);
   });
 }
 
-function showQuoteStatus(message, type = 'info') {
+function showQuoteStatus(message: string, type: string = 'info'): void {
   quoteStatusDiv.className = `status ${type}`;
   setText(quoteStatusDiv, message);
   quoteStatusDiv.style.display = 'block';
 }
 
-function hideQuoteStatus() {
+function hideQuoteStatus(): void {
   quoteStatusDiv.style.display = 'none';
 }
 
-function updateQuoteCount() {
+function updateQuoteCount(): void {
   if (Number.isFinite(state.quoteTotalCount)) {
-    const total = state.quoteTotalCount;
+    const total = state.quoteTotalCount!;
     quoteCountDiv.textContent = `Loaded ${state.allQuotes.length} of ${total} quote${total !== 1 ? 's' : ''}`;
     return;
   }
   quoteCountDiv.textContent = `Loaded ${state.allQuotes.length} quote${state.allQuotes.length !== 1 ? 's' : ''}`;
 }
 
-function sortQuotes(quotes, sortMode) {
+function sortQuotes(quotes: BskyPost[], sortMode: QuoteSortMode): BskyPost[] {
   const sorted = [...quotes];
   switch (sortMode) {
     case 'likes':
@@ -86,7 +99,7 @@ function sortQuotes(quotes, sortMode) {
   return sorted;
 }
 
-function getSortedQuotes(quotes, sortMode) {
+function getSortedQuotes(quotes: BskyPost[], sortMode: QuoteSortMode): BskyPost[] {
   if (quoteSortCache.quotesRef === quotes && quoteSortCache.sortMode === sortMode) {
     return quoteSortCache.sorted;
   }
@@ -99,7 +112,7 @@ function getSortedQuotes(quotes, sortMode) {
   return sorted;
 }
 
-function canAppendQuotes(sortedQuotes, sortMode) {
+function canAppendQuotes(sortedQuotes: BskyPost[], sortMode: string): boolean {
   if (sortMode !== lastRenderedQuoteSort) {
     return false;
   }
@@ -119,7 +132,7 @@ function canAppendQuotes(sortedQuotes, sortMode) {
   return true;
 }
 
-function createQuoteOriginalElement(post) {
+function createQuoteOriginalElement(post: BskyPost): HTMLDivElement {
   const wrapper = document.createElement('div');
   wrapper.className = 'quote-original';
 
@@ -172,7 +185,7 @@ function createQuoteOriginalElement(post) {
   likeIcon.setAttribute('aria-hidden', 'true');
   likeIcon.textContent = '\u2665 ';
   likeStat.appendChild(likeIcon);
-  likeStat.appendChild(document.createTextNode(post.likeCount || 0));
+  likeStat.appendChild(document.createTextNode(String(post.likeCount || 0)));
   stats.appendChild(likeStat);
 
   const repostStat = document.createElement('span');
@@ -182,7 +195,7 @@ function createQuoteOriginalElement(post) {
   repostIcon.setAttribute('aria-hidden', 'true');
   repostIcon.textContent = '\u21bb ';
   repostStat.appendChild(repostIcon);
-  repostStat.appendChild(document.createTextNode(post.repostCount || 0));
+  repostStat.appendChild(document.createTextNode(String(post.repostCount || 0)));
   stats.appendChild(repostStat);
 
   const replyStat = document.createElement('span');
@@ -192,7 +205,7 @@ function createQuoteOriginalElement(post) {
   replyIcon.setAttribute('aria-hidden', 'true');
   replyIcon.textContent = '\ud83d\udcac ';
   replyStat.appendChild(replyIcon);
-  replyStat.appendChild(document.createTextNode(post.replyCount || 0));
+  replyStat.appendChild(document.createTextNode(String(post.replyCount || 0)));
   stats.appendChild(replyStat);
 
   const quoteStat = document.createElement('span');
@@ -204,7 +217,7 @@ function createQuoteOriginalElement(post) {
   return wrapper;
 }
 
-function createQuotePostElement(post, index) {
+function createQuotePostElement(post: BskyPost, index: number): HTMLDivElement {
   const wrapper = document.createElement('div');
   wrapper.className = `quote-post depth-${(index % 8) + 1}`;
 
@@ -252,7 +265,7 @@ function createQuotePostElement(post, index) {
   likeIcon.setAttribute('aria-hidden', 'true');
   likeIcon.textContent = '\u2665 ';
   likeStat.appendChild(likeIcon);
-  likeStat.appendChild(document.createTextNode(post.likeCount || 0));
+  likeStat.appendChild(document.createTextNode(String(post.likeCount || 0)));
   stats.appendChild(likeStat);
 
   const repostStat = document.createElement('span');
@@ -262,7 +275,7 @@ function createQuotePostElement(post, index) {
   repostIcon.setAttribute('aria-hidden', 'true');
   repostIcon.textContent = '\u21bb ';
   repostStat.appendChild(repostIcon);
-  repostStat.appendChild(document.createTextNode(post.repostCount || 0));
+  repostStat.appendChild(document.createTextNode(String(post.repostCount || 0)));
   stats.appendChild(repostStat);
 
   const replyStat = document.createElement('span');
@@ -272,14 +285,14 @@ function createQuotePostElement(post, index) {
   replyIcon.setAttribute('aria-hidden', 'true');
   replyIcon.textContent = '\ud83d\udcac ';
   replyStat.appendChild(replyIcon);
-  replyStat.appendChild(document.createTextNode(post.replyCount || 0));
+  replyStat.appendChild(document.createTextNode(String(post.replyCount || 0)));
   stats.appendChild(replyStat);
 
   wrapper.appendChild(stats);
   return wrapper;
 }
 
-function renderQuoteLoadMore() {
+function renderQuoteLoadMore(): void {
   quoteLoadMoreDiv.textContent = '';
   if (!state.quoteCursor) {
     return;
@@ -295,7 +308,7 @@ function renderQuoteLoadMore() {
   quoteLoadMoreDiv.appendChild(button);
 }
 
-export function renderQuoteResults({ allowAppend = false } = {}) {
+export function renderQuoteResults({ allowAppend = false } = {}): void {
   if (state.allQuotes.length === 0) {
     quoteResultsDiv.textContent = '';
     const empty = document.createElement('div');
@@ -325,7 +338,7 @@ export function renderQuoteResults({ allowAppend = false } = {}) {
   lastRenderedQuoteUris = sorted.map((quote) => quote.uri);
 }
 
-async function fetchDid(actor) {
+async function fetchDid(actor: string): Promise<string> {
   const cacheKey = actor.toLowerCase();
   const cached = getCachedDid(cacheKey);
   if (cached) {
@@ -339,7 +352,7 @@ async function fetchDid(actor) {
     throw new Error(`Profile fetch failed: ${response.status}`);
   }
   const data = await response.json();
-  const did = data.did || data.profile?.did;
+  const did: string | undefined = data.did || data.profile?.did;
   if (!did) {
     throw new Error('Could not resolve DID for that handle.');
   }
@@ -349,7 +362,7 @@ async function fetchDid(actor) {
   return did;
 }
 
-async function fetchOriginalPost(atUri) {
+async function fetchOriginalPost(atUri: string): Promise<BskyPost> {
   const response = await fetch(
     `${PUBLIC_API}/app.bsky.feed.getPosts?uris=${encodeURIComponent(atUri)}`
   );
@@ -360,10 +373,10 @@ async function fetchOriginalPost(atUri) {
   if (!data.posts || data.posts.length === 0) {
     throw new Error('Post not found.');
   }
-  return data.posts[0];
+  return data.posts[0] as BskyPost;
 }
 
-async function fetchQuotesPage(atUri, cursor = null) {
+async function fetchQuotesPage(atUri: string, cursor: string | null = null): Promise<QuotesPageResult> {
   let url = `${PUBLIC_API}/app.bsky.feed.getQuotes?uri=${encodeURIComponent(atUri)}&limit=100`;
   if (cursor) {
     url += `&cursor=${encodeURIComponent(cursor)}`;
@@ -380,16 +393,16 @@ async function fetchQuotesPage(atUri, cursor = null) {
   };
 }
 
-async function loadMoreQuotes() {
+async function loadMoreQuotes(): Promise<void> {
   if (state.isQuoteLoading || !state.activeQuoteUri || !state.quoteCursor) {
     return;
   }
 
   state.isQuoteLoading = true;
-  const loadMoreBtn = document.getElementById('quoteLoadMoreBtn');
+  const loadMoreBtn = document.getElementById('quoteLoadMoreBtn') as HTMLButtonElement | null;
   if (loadMoreBtn) {
     loadMoreBtn.disabled = true;
-    loadMoreBtn.textContent = 'Loading…';
+    loadMoreBtn.textContent = 'Loading\u2026';
   }
 
   try {
@@ -406,14 +419,14 @@ async function loadMoreQuotes() {
     hideQuoteStatus();
   } catch (error) {
     console.error('Load more quotes error:', error);
-    showQuoteStatus(`Error loading more quotes: ${error.message}`, 'error');
+    showQuoteStatus(`Error loading more quotes: ${(error as Error).message}`, 'error');
   } finally {
     state.isQuoteLoading = false;
     renderQuoteLoadMore();
   }
 }
 
-export async function performQuoteSearch() {
+export async function performQuoteSearch(): Promise<void> {
   if (state.isQuoteLoading) return;
 
   const urlValue = postUrlInput.value.trim();
@@ -424,7 +437,7 @@ export async function performQuoteSearch() {
 
   state.isQuoteLoading = true;
   quoteSearchBtn.disabled = true;
-  showQuoteStatus('Loading quotes…', 'loading');
+  showQuoteStatus('Loading quotes\u2026', 'loading');
   quoteTabs.style.display = 'none';
   quoteResultsDiv.textContent = '';
   quoteOriginalDiv.textContent = '';
@@ -453,8 +466,8 @@ export async function performQuoteSearch() {
 
     state.allQuotes = quotePage.posts;
     state.quoteCursor = trackQuoteCursor(quotePage.cursor);
-    if (Number.isFinite(post.quoteCount) && post.quoteCount >= state.allQuotes.length) {
-      state.quoteTotalCount = post.quoteCount;
+    if (Number.isFinite(post.quoteCount) && post.quoteCount! >= state.allQuotes.length) {
+      state.quoteTotalCount = post.quoteCount!;
     }
 
     quoteOriginalDiv.appendChild(createQuoteOriginalElement(post));
@@ -464,7 +477,7 @@ export async function performQuoteSearch() {
     renderQuoteResults();
   } catch (error) {
     console.error('Quote search error:', error);
-    showQuoteStatus(`Error: ${error.message}`, 'error');
+    showQuoteStatus(`Error: ${(error as Error).message}`, 'error');
   } finally {
     state.isQuoteLoading = false;
     quoteSearchBtn.disabled = false;
@@ -472,9 +485,10 @@ export async function performQuoteSearch() {
   }
 }
 
-export function handleQuoteTabClick(event) {
-  if (!event.target.classList.contains('quote-tab')) return;
-  const nextSort = event.target.dataset.sort;
+export function handleQuoteTabClick(event: Event): void {
+  const target = event.target as HTMLElement;
+  if (!target.classList.contains('quote-tab')) return;
+  const nextSort = target.dataset.sort as QuoteSortMode | undefined;
   if (nextSort && nextSort !== state.quoteSort) {
     state.quoteSort = nextSort;
     updateQuoteTabs();

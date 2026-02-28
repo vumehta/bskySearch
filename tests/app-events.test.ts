@@ -1,15 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Mock } from 'vitest';
+
+interface MockControl {
+  value: string;
+  checked: boolean;
+  addEventListener: Mock;
+  dispatch(eventName: string, event?: Record<string, unknown>): void;
+  reset(nextInitial?: { value?: string; checked?: boolean }): void;
+}
 
 const mocks = vi.hoisted(() => {
-  const createControl = (initial = {}) => {
-    const listeners = new Map();
+  const createControl = (initial: { value?: string; checked?: boolean } = {}): MockControl => {
+    const listeners = new Map<string, Function>();
     return {
       value: initial.value ?? '',
       checked: initial.checked ?? false,
-      addEventListener: vi.fn((eventName, handler) => {
+      addEventListener: vi.fn((eventName: string, handler: Function) => {
         listeners.set(eventName, handler);
       }),
-      dispatch(eventName, event = {}) {
+      dispatch(eventName: string, event: Record<string, unknown> = {}) {
         const handler = listeners.get(eventName);
         if (handler) {
           handler({ target: this, ...event });
@@ -74,7 +83,7 @@ const mocks = vi.hoisted(() => {
     prefersDarkScheme: { addEventListener: vi.fn() },
   };
 
-  const reset = () => {
+  const reset = (): void => {
     dom.autoRefreshToggle.reset({ checked: false });
     dom.expandTermsToggle.reset({ checked: false });
     dom.minLikesInput.reset({ value: '' });
@@ -95,8 +104,8 @@ const mocks = vi.hoisted(() => {
 
     for (const mod of [search, quotes, theme]) {
       for (const val of Object.values(mod)) {
-        if (typeof val?.mockClear === 'function') val.mockClear();
-        if (typeof val?.addEventListener?.mockClear === 'function') val.addEventListener.mockClear();
+        if (typeof (val as Mock)?.mockClear === 'function') (val as Mock).mockClear();
+        if (typeof (val as { addEventListener?: Mock })?.addEventListener?.mockClear === 'function') (val as { addEventListener: Mock }).addEventListener.mockClear();
       }
     }
   };
@@ -111,32 +120,32 @@ const mocks = vi.hoisted(() => {
   };
 });
 
-vi.mock('../src/state.mjs', () => ({ state: mocks.state }));
-vi.mock('../src/dom.mjs', () => mocks.dom);
-vi.mock('../src/utils.mjs', () => ({
-  normalizeSortValue: (raw) => (raw === 'latest' ? 'latest' : 'top'),
+vi.mock('../src/state', () => ({ state: mocks.state }));
+vi.mock('../src/dom', () => mocks.dom);
+vi.mock('../src/utils', () => ({
+  normalizeSortValue: (raw: string) => (raw === 'latest' ? 'latest' : 'top'),
 }));
-vi.mock('../src/search.mjs', () => mocks.search);
-vi.mock('../src/quotes.mjs', () => mocks.quotes);
-vi.mock('../src/theme.mjs', () => mocks.theme);
+vi.mock('../src/search', () => mocks.search);
+vi.mock('../src/quotes', () => mocks.quotes);
+vi.mock('../src/theme', () => mocks.theme);
 
-async function bootApp() {
-  await import('../src/app.mjs');
+async function bootApp(): Promise<void> {
+  await import('../src/app');
 }
 
 describe('app sort change handler', () => {
-  let originalWindow;
+  let originalWindow: typeof globalThis.window;
 
   beforeEach(() => {
     vi.resetModules();
     mocks.reset();
     originalWindow = globalThis.window;
-    globalThis.window = { location: { search: '' } };
+    globalThis.window = { location: { search: '' } } as unknown as typeof globalThis.window;
   });
 
   afterEach(() => {
     if (originalWindow === undefined) {
-      delete globalThis.window;
+      delete (globalThis as { window?: typeof globalThis.window }).window;
       return;
     }
     globalThis.window = originalWindow;

@@ -1,26 +1,27 @@
-import { deduplicatePosts, filterByDate, filterByLikes, sortPosts } from '../src/utils.mjs';
+import { deduplicatePosts, filterByDate, filterByLikes, sortPosts } from '../src/utils';
+import type { BskyPost, SortMode } from '../src/types';
 import { performance } from 'node:perf_hooks';
 
-function createPost(uri, term, likeCount, indexedAtOffsetHours) {
+function createPost(uri: string, term: string, likeCount: number, indexedAtOffsetHours: number): BskyPost {
   const indexedAt = new Date(Date.now() - indexedAtOffsetHours * 3600000).toISOString();
   return {
     uri,
     matchedTerm: term,
     likeCount,
     indexedAt,
-    author: { handle: 'perf-user' },
+    author: { did: '', handle: 'perf-user' },
     record: { text: `text for ${term}` },
   };
 }
 
-function buildTermResults(termCount = 10, postsPerTerm = 160, overlapFactor = 0.35) {
-  const results = [];
+function buildTermResults(termCount: number = 10, postsPerTerm: number = 160, overlapFactor: number = 0.35): BskyPost[][] {
+  const results: BskyPost[][] = [];
   const sharedCount = Math.floor(postsPerTerm * overlapFactor);
   const sharedUris = Array.from({ length: sharedCount }, (_, i) => `at://shared/${i}`);
 
   for (let termIndex = 0; termIndex < termCount; termIndex += 1) {
     const term = `term-${termIndex}`;
-    const posts = [];
+    const posts: BskyPost[] = [];
 
     for (let postIndex = 0; postIndex < postsPerTerm; postIndex += 1) {
       const usesShared = postIndex < sharedCount;
@@ -34,7 +35,7 @@ function buildTermResults(termCount = 10, postsPerTerm = 160, overlapFactor = 0.
   return results;
 }
 
-function cloneResults(results) {
+function cloneResults(results: BskyPost[][]): BskyPost[][] {
   return results.map((posts) =>
     posts.map((post) => ({
       ...post,
@@ -44,8 +45,8 @@ function cloneResults(results) {
   );
 }
 
-function legacyProgressiveMerge(results, hours = 24, minLikes = 10, sortMode = 'top') {
-  let allPosts = [];
+function legacyProgressiveMerge(results: BskyPost[][], hours: number = 24, minLikes: number = 10, sortMode: SortMode = 'top'): BskyPost[] {
+  let allPosts: BskyPost[] = [];
 
   for (const termPosts of results) {
     let combined = deduplicatePosts([...allPosts, ...termPosts]);
@@ -57,11 +58,11 @@ function legacyProgressiveMerge(results, hours = 24, minLikes = 10, sortMode = '
   return allPosts;
 }
 
-function mergeTermArrays(existingTerms, incomingTerms) {
-  const seen = new Set();
-  const merged = [];
+function mergeTermArrays(existingTerms: string[], incomingTerms: string[]): string[] {
+  const seen = new Set<string>();
+  const merged: string[] = [];
 
-  const add = (value) => {
+  const add = (value: string): void => {
     if (!value) return;
     const normalized = value.toLowerCase();
     if (seen.has(normalized)) return;
@@ -74,8 +75,8 @@ function mergeTermArrays(existingTerms, incomingTerms) {
   return merged;
 }
 
-function optimizedIngestThenDerive(results, hours = 24, minLikes = 10, sortMode = 'top') {
-  const store = new Map();
+function optimizedIngestThenDerive(results: BskyPost[][], hours: number = 24, minLikes: number = 10, sortMode: SortMode = 'top'): BskyPost[] {
+  const store = new Map<string, BskyPost>();
 
   for (const termPosts of results) {
     for (const post of termPosts) {
@@ -99,12 +100,12 @@ function optimizedIngestThenDerive(results, hours = 24, minLikes = 10, sortMode 
   return sortPosts(derived, sortMode);
 }
 
-function createCachedHighlightMatcher(terms) {
+function createCachedHighlightMatcher(terms: string[]): (text: string) => number {
   const escapedTerms = terms.map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   const regex = new RegExp(`(${escapedTerms.join('|')})`, 'gi');
   const termSet = new Set(terms.map((term) => term.toLowerCase()));
 
-  return (text) => {
+  return (text: string): number => {
     const parts = text.split(regex);
     let hits = 0;
     for (const part of parts) {
@@ -116,7 +117,7 @@ function createCachedHighlightMatcher(terms) {
   };
 }
 
-function legacyHighlightMatch(text, terms) {
+function legacyHighlightMatch(text: string, terms: string[]): number {
   const escapedTerms = terms.map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   const regex = new RegExp(`(${escapedTerms.join('|')})`, 'gi');
   const parts = text.split(regex);
@@ -129,7 +130,7 @@ function legacyHighlightMatch(text, terms) {
   return hits;
 }
 
-function runOrderedPair(runIndex, legacyFn, optimizedFn) {
+function runOrderedPair(runIndex: number, legacyFn: () => void, optimizedFn: () => void): { legacyDuration: number; optimizedDuration: number } {
   let legacyDuration = 0;
   let optimizedDuration = 0;
 
@@ -154,7 +155,7 @@ function runOrderedPair(runIndex, legacyFn, optimizedFn) {
   return { legacyDuration, optimizedDuration };
 }
 
-function benchmarkSearchMerge() {
+function benchmarkSearchMerge(): { runs: number; avgLegacyMs: number; avgOptimizedMs: number; speedup: number } {
   const warmupRuns = 8;
   const runs = 50;
   const baseResults = buildTermResults();
@@ -191,7 +192,7 @@ function benchmarkSearchMerge() {
   };
 }
 
-function benchmarkHighlighting() {
+function benchmarkHighlighting(): { runs: number; avgLegacyMs: number; avgCurrentMs: number; speedup: number } {
   const warmupRuns = 40;
   const runs = 500;
   const terms = Array.from({ length: 28 }, (_, index) => `term${index}`);
@@ -228,11 +229,11 @@ function benchmarkHighlighting() {
   };
 }
 
-function formatMs(value) {
+function formatMs(value: number): string {
   return `${value.toFixed(3)}ms`;
 }
 
-function runSmokeCheck() {
+function runSmokeCheck(): void {
   const searchMerge = benchmarkSearchMerge();
   const highlighting = benchmarkHighlighting();
 
@@ -249,7 +250,7 @@ function runSmokeCheck() {
     )} (speedup ${highlighting.speedup.toFixed(2)}x)`
   );
 
-  const regressions = [];
+  const regressions: string[] = [];
   if (searchMerge.speedup < 1.1) {
     regressions.push('Search merge optimization is below expected speedup threshold (1.10x).');
   }

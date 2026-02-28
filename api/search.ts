@@ -1,4 +1,40 @@
-function normalizeSortValue(raw) {
+import type { BskySession, CacheEntry, SortMode } from '../src/types';
+
+interface UpstreamTimeoutError extends Error {
+  code: string;
+}
+
+interface SearchPayload {
+  posts?: unknown[];
+  cursor?: string;
+  message?: string;
+  error?: string;
+  [key: string]: unknown;
+}
+
+interface RuntimeContext {
+  env?: Record<string, string | undefined>;
+}
+
+interface TestUtils {
+  getQueryString: typeof getQueryString;
+  stripControlChars: typeof stripControlChars;
+  getSearchCacheKey: typeof getSearchCacheKey;
+  isSessionExpired: typeof isSessionExpired;
+  getCachedSearchResult: typeof getCachedSearchResult;
+  cleanupSearchCache: typeof cleanupSearchCache;
+  enforceSearchCacheLimit: typeof enforceSearchCacheLimit;
+  searchResultsCache: Map<string, CacheEntry<SearchPayload>>;
+  SEARCH_CACHE_TTL_MS: number;
+  MAX_SEARCH_CACHE_SIZE: number;
+  UPSTREAM_TIMEOUT_MS: number;
+  UPSTREAM_TIMEOUT_ERROR_CODE: string;
+  fetchWithTimeout: typeof fetchWithTimeout;
+  isUpstreamTimeoutError: typeof isUpstreamTimeoutError;
+  resetModuleStateForTests: typeof resetModuleStateForTests;
+}
+
+function normalizeSortValue(raw: string): SortMode {
   return raw === 'latest' ? 'latest' : 'top';
 }
 
@@ -8,17 +44,17 @@ const BSKY_SERVICE = 'https://bsky.social/xrpc';
 const UPSTREAM_TIMEOUT_MS = 8000;
 const UPSTREAM_TIMEOUT_ERROR_CODE = 'UPSTREAM_TIMEOUT';
 
-function createUpstreamTimeoutError() {
-  const error = new Error('Upstream request timed out.');
+function createUpstreamTimeoutError(): UpstreamTimeoutError {
+  const error = new Error('Upstream request timed out.') as UpstreamTimeoutError;
   error.code = UPSTREAM_TIMEOUT_ERROR_CODE;
   return error;
 }
 
-function isUpstreamTimeoutError(error) {
-  return Boolean(error && error.code === UPSTREAM_TIMEOUT_ERROR_CODE);
+function isUpstreamTimeoutError(error: unknown): error is UpstreamTimeoutError {
+  return Boolean(error && typeof error === 'object' && 'code' in error && (error as UpstreamTimeoutError).code === UPSTREAM_TIMEOUT_ERROR_CODE);
 }
 
-function mergeAbortSignals(primarySignal, secondarySignal) {
+function mergeAbortSignals(primarySignal: AbortSignal | undefined | null, secondarySignal: AbortSignal): AbortSignal {
   if (!primarySignal) return secondarySignal;
   if (!secondarySignal) return primarySignal;
 
@@ -27,7 +63,7 @@ function mergeAbortSignals(primarySignal, secondarySignal) {
   }
 
   const mergedController = new AbortController();
-  const abortMerged = () => mergedController.abort();
+  const abortMerged = (): void => mergedController.abort();
   primarySignal.addEventListener('abort', abortMerged, { once: true });
   secondarySignal.addEventListener('abort', abortMerged, { once: true });
   if (primarySignal.aborted || secondarySignal.aborted) {
@@ -37,16 +73,16 @@ function mergeAbortSignals(primarySignal, secondarySignal) {
   return mergedController.signal;
 }
 
-async function fetchWithTimeout(url, options, timeoutMs = UPSTREAM_TIMEOUT_MS) {
+async function fetchWithTimeout(url: string, options?: RequestInit, timeoutMs: number = UPSTREAM_TIMEOUT_MS): Promise<Response> {
   const timeoutController = new AbortController();
   const timer = setTimeout(() => timeoutController.abort(), timeoutMs);
-  const fetchOptions = { ...(options || {}) };
+  const fetchOptions: RequestInit = { ...(options || {}) };
   fetchOptions.signal = mergeAbortSignals(fetchOptions.signal, timeoutController.signal);
 
   try {
     return await fetch(url, fetchOptions);
   } catch (error) {
-    if (error?.name === 'AbortError' && timeoutController.signal.aborted) {
+    if ((error as Error)?.name === 'AbortError' && timeoutController.signal.aborted) {
       throw createUpstreamTimeoutError();
     }
     throw error;
@@ -57,25 +93,25 @@ async function fetchWithTimeout(url, options, timeoutMs = UPSTREAM_TIMEOUT_MS) {
 
 // Session cache with TTL (2 hours, refresh tokens last longer)
 const SESSION_TTL_MS = 2 * 60 * 60 * 1000;
-let cachedSession = null;
-let sessionCreatedAt = null;
-let sessionPromise = null;
+let cachedSession: BskySession | null = null;
+let sessionCreatedAt: number | null = null;
+let sessionPromise: Promise<BskySession> | null = null;
 
 // Search results cache with 30s TTL and size cap
 const SEARCH_CACHE_TTL_MS = 30000;
 const SEARCH_CACHE_CLEANUP_INTERVAL_MS = 5000;
 const MAX_SEARCH_CACHE_SIZE = 500;
-const searchResultsCache = new Map();
+const searchResultsCache = new Map<string, CacheEntry<SearchPayload>>();
 let lastSearchCacheCleanupAt = 0;
 
-function getRuntimeEnv(context) {
+function getRuntimeEnv(context: RuntimeContext | undefined): Record<string, string | undefined> {
   if (context && typeof context === 'object' && 'env' in context) {
     return context.env || {};
   }
-  return process.env;
+  return process.env as Record<string, string | undefined>;
 }
 
-function getRuntimeCredentials(context) {
+function getRuntimeCredentials(context: RuntimeContext | undefined): { handle: string | undefined; appPassword: string | undefined } {
   const env = getRuntimeEnv(context);
   return {
     handle: env.BSKY_HANDLE,
@@ -83,19 +119,19 @@ function getRuntimeCredentials(context) {
   };
 }
 
-function getQueryString(value) {
+function getQueryString(value: unknown): string | undefined {
   if (Array.isArray(value)) {
     return value[0];
   }
   return typeof value === 'string' ? value : '';
 }
 
-function stripControlChars(value) {
+function stripControlChars(value: unknown): string {
   if (typeof value !== 'string') return '';
   return value.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
 }
 
-function jsonNoStore(payload, status = 200, extraHeaders = {}) {
+function jsonNoStore(payload: unknown, status: number = 200, extraHeaders: Record<string, string> = {}): Response {
   return Response.json(payload, {
     status,
     headers: {
@@ -105,7 +141,7 @@ function jsonNoStore(payload, status = 200, extraHeaders = {}) {
   });
 }
 
-function parseSearchInput(request) {
+function parseSearchInput(request: Request): { term: string; cursor: string; sort: string } {
   const url = new URL(request.url);
   const term = stripControlChars(getQueryString(url.searchParams.get('term'))).trim();
   const cursor = stripControlChars(getQueryString(url.searchParams.get('cursor')));
@@ -113,7 +149,7 @@ function parseSearchInput(request) {
   return { term, cursor, sort };
 }
 
-async function createSession(handle, appPassword) {
+async function createSession(handle: string, appPassword: string): Promise<BskySession> {
   const response = await fetchWithTimeout(`${BSKY_SERVICE}/com.atproto.server.createSession`, {
     method: 'POST',
     headers: {
@@ -127,14 +163,14 @@ async function createSession(handle, appPassword) {
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    const message = errorData.message || `Create session failed: ${response.status}`;
+    const message = (errorData as { message?: string }).message || `Create session failed: ${response.status}`;
     throw new Error(message);
   }
 
   return response.json();
 }
 
-async function refreshSession() {
+async function refreshSession(): Promise<BskySession> {
   if (!cachedSession?.refreshJwt) {
     throw new Error('Missing refresh token.');
   }
@@ -148,19 +184,19 @@ async function refreshSession() {
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    const message = errorData.message || `Refresh session failed: ${response.status}`;
+    const message = (errorData as { message?: string }).message || `Refresh session failed: ${response.status}`;
     throw new Error(message);
   }
 
   return response.json();
 }
 
-function isSessionExpired() {
+function isSessionExpired(): boolean {
   if (!cachedSession || !sessionCreatedAt) return true;
   return Date.now() - sessionCreatedAt > SESSION_TTL_MS;
 }
 
-async function ensureSession(handle, appPassword) {
+async function ensureSession(handle: string, appPassword: string): Promise<BskySession> {
   if (cachedSession && !isSessionExpired()) {
     return cachedSession;
   }
@@ -180,7 +216,7 @@ async function ensureSession(handle, appPassword) {
   return sessionPromise;
 }
 
-async function refreshOrCreateSession(handle, appPassword) {
+async function refreshOrCreateSession(handle: string, appPassword: string): Promise<BskySession> {
   if (sessionPromise) {
     return sessionPromise;
   }
@@ -194,8 +230,8 @@ async function refreshOrCreateSession(handle, appPassword) {
         return refreshed;
       } catch (refreshError) {
         const refreshMessage =
-          refreshError && typeof refreshError.message === 'string'
-            ? refreshError.message
+          refreshError && typeof (refreshError as Error).message === 'string'
+            ? (refreshError as Error).message
             : 'Unknown refresh error';
         console.error('Session refresh failed:', refreshMessage);
         cachedSession = null;
@@ -218,11 +254,11 @@ async function refreshOrCreateSession(handle, appPassword) {
   return sessionPromise;
 }
 
-function getSearchCacheKey(term, cursor, sort) {
+function getSearchCacheKey(term: string, cursor: string, sort: string): string {
   return JSON.stringify([term, cursor || '', sort]);
 }
 
-function getCachedSearchResult(cacheKey) {
+function getCachedSearchResult(cacheKey: string): SearchPayload | null {
   const cached = searchResultsCache.get(cacheKey);
   if (!cached) return null;
   if (Date.now() - cached.timestamp > SEARCH_CACHE_TTL_MS) {
@@ -236,7 +272,7 @@ function getCachedSearchResult(cacheKey) {
   return cached.data;
 }
 
-function enforceSearchCacheLimit() {
+function enforceSearchCacheLimit(): void {
   while (searchResultsCache.size > MAX_SEARCH_CACHE_SIZE) {
     const oldestKey = searchResultsCache.keys().next().value;
     if (oldestKey === undefined) {
@@ -246,7 +282,7 @@ function enforceSearchCacheLimit() {
   }
 }
 
-function cleanupSearchCache() {
+function cleanupSearchCache(): void {
   const now = Date.now();
   for (const [key, value] of searchResultsCache.entries()) {
     if (now - value.timestamp > SEARCH_CACHE_TTL_MS) {
@@ -256,7 +292,7 @@ function cleanupSearchCache() {
   enforceSearchCacheLimit();
 }
 
-function resetModuleStateForTests() {
+function resetModuleStateForTests(): void {
   cachedSession = null;
   sessionCreatedAt = null;
   sessionPromise = null;
@@ -264,7 +300,7 @@ function resetModuleStateForTests() {
   lastSearchCacheCleanupAt = 0;
 }
 
-async function searchPosts(term, cursor, accessJwt, sort) {
+async function searchPosts(term: string, cursor: string, accessJwt: string, sort: string): Promise<Response> {
   const sortValue = normalizeSortValue(sort);
   const params = new URLSearchParams({
     q: term,
@@ -284,7 +320,7 @@ async function searchPosts(term, cursor, accessJwt, sort) {
   });
 }
 
-export async function GET(request, context) {
+export async function GET(request: Request, context?: RuntimeContext): Promise<Response> {
   if (request.method !== 'GET') {
     return jsonNoStore({ error: 'Method not allowed.' }, 405, { Allow: 'GET' });
   }
@@ -337,26 +373,26 @@ export async function GET(request, context) {
       response = await searchPosts(term, cursor, session.accessJwt, sortValue);
     }
 
-    const payload = await response.json().catch(() => null);
+    const payload = await response.json().catch(() => null) as SearchPayload | null;
     if (!response.ok) {
       const message = payload?.message || payload?.error || `Search failed: ${response.status}`;
       return jsonNoStore({ error: message }, response.status);
     }
 
-    searchResultsCache.set(cacheKey, { data: payload, timestamp: Date.now() });
+    searchResultsCache.set(cacheKey, { data: payload!, timestamp: Date.now() });
     enforceSearchCacheLimit();
     return jsonNoStore(payload, 200);
   } catch (error) {
-    console.error('Search proxy error:', error.message || 'Unknown error');
+    console.error('Search proxy error:', (error as Error).message || 'Unknown error');
     if (isUpstreamTimeoutError(error)) {
-      return jsonNoStore({ error: error.message }, 504);
+      return jsonNoStore({ error: (error as Error).message }, 504);
     }
     return jsonNoStore({ error: 'Search proxy failed.' }, 500);
   }
 }
 
 // Test utilities for unit/integration coverage.
-export const testUtils =
+export const testUtils: TestUtils | undefined =
   process.env.NODE_ENV === 'test'
     ? {
         getQueryString,

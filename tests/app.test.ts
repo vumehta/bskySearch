@@ -5,9 +5,10 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import type { BskyPost, CacheEntry, DidCacheEntry } from '../src/types';
 
 // Import pure utilities from the refactored modules
-const app = await import('../src/testing.mjs');
+const app = await import('../src/testing');
 
 const {
   isValidBskyUrl,
@@ -137,7 +138,7 @@ describe('deduplicatePosts', () => {
     const posts = [
       { uri: 'at://1', matchedTerm: 'term1' },
       { uri: 'at://2', matchedTerm: 'term2' },
-    ];
+    ] as BskyPost[];
     const result = deduplicatePosts(posts);
     expect(result).toHaveLength(2);
     expect(result[0].matchedTerms).toEqual(['term1']);
@@ -149,7 +150,7 @@ describe('deduplicatePosts', () => {
       { uri: 'at://1', matchedTerm: 'term1' },
       { uri: 'at://1', matchedTerm: 'term1' },
       { uri: 'at://2', matchedTerm: 'term2' },
-    ];
+    ] as BskyPost[];
     const result = deduplicatePosts(posts);
     expect(result).toHaveLength(2);
   });
@@ -159,7 +160,7 @@ describe('deduplicatePosts', () => {
       { uri: 'at://1', matchedTerm: 'term1' },
       { uri: 'at://1', matchedTerm: 'term2' },
       { uri: 'at://1', matchedTerm: 'term3' },
-    ];
+    ] as BskyPost[];
     const result = deduplicatePosts(posts);
     expect(result).toHaveLength(1);
     expect(result[0].matchedTerms).toContain('term1');
@@ -171,7 +172,7 @@ describe('deduplicatePosts', () => {
     const posts = [
       { uri: 'at://1', matchedTerm: 'term1' },
       { uri: 'at://1', matchedTerm: 'term1' },
-    ];
+    ] as BskyPost[];
     const result = deduplicatePosts(posts);
     expect(result[0].matchedTerms).toEqual(['term1']);
   });
@@ -179,7 +180,7 @@ describe('deduplicatePosts', () => {
   it('preserves other post properties', () => {
     const posts = [
       { uri: 'at://1', matchedTerm: 'term1', likeCount: 42, author: { handle: 'alice' } },
-    ];
+    ] as BskyPost[];
     const result = deduplicatePosts(posts);
     expect(result[0].likeCount).toBe(42);
     expect(result[0].author.handle).toBe('alice');
@@ -324,7 +325,7 @@ describe('filterByLikes', () => {
       { uri: 'at://1', likeCount: 5 },
       { uri: 'at://2', likeCount: 15 },
       { uri: 'at://3', likeCount: 10 },
-    ];
+    ] as BskyPost[];
     const result = filterByLikes(posts, 10);
     expect(result).toHaveLength(2);
     expect(result.map(p => p.uri)).toEqual(['at://2', 'at://3']);
@@ -334,7 +335,7 @@ describe('filterByLikes', () => {
     const posts = [
       { uri: 'at://1' },
       { uri: 'at://2', likeCount: 10 },
-    ];
+    ] as BskyPost[];
     const result = filterByLikes(posts, 5);
     expect(result).toHaveLength(1);
     expect(result[0].uri).toBe('at://2');
@@ -344,7 +345,7 @@ describe('filterByLikes', () => {
     const posts = [
       { uri: 'at://1', likeCount: 0 },
       { uri: 'at://2' },
-    ];
+    ] as BskyPost[];
     const result = filterByLikes(posts, 0);
     expect(result).toHaveLength(2);
   });
@@ -354,7 +355,7 @@ describe('filterByLikes', () => {
   });
 
   it('includes posts with exactly the minimum likes', () => {
-    const posts = [{ uri: 'at://1', likeCount: 10 }];
+    const posts = [{ uri: 'at://1', likeCount: 10 }] as BskyPost[];
     const result = filterByLikes(posts, 10);
     expect(result).toHaveLength(1);
   });
@@ -384,15 +385,15 @@ describe('filterByDate', () => {
         uri: 'at://stale',
         indexedAt: '2025-12-31T10:00:00.000Z', // 26h before fixedNow
       },
-    ];
+    ] as BskyPost[];
 
     const zeroHours = filterByDate(posts, 0);
     const negativeHours = filterByDate(posts, -6);
     const nanHours = filterByDate(posts, Number.NaN);
 
-    expect(zeroHours.map((post) => post.uri)).toEqual(['at://fresh']);
-    expect(negativeHours.map((post) => post.uri)).toEqual(['at://fresh']);
-    expect(nanHours.map((post) => post.uri)).toEqual(['at://fresh']);
+    expect(zeroHours.map((post: BskyPost) => post.uri)).toEqual(['at://fresh']);
+    expect(negativeHours.map((post: BskyPost) => post.uri)).toEqual(['at://fresh']);
+    expect(nanHours.map((post: BskyPost) => post.uri)).toEqual(['at://fresh']);
   });
 
   it('uses getPostTimestamp fallback to record.createdAt', () => {
@@ -406,10 +407,10 @@ describe('filterByDate', () => {
         uri: 'at://stale',
         indexedAt: '2025-12-31T07:00:00.000Z',
       },
-    ];
+    ] as BskyPost[];
 
     const result = filterByDate(posts, 24);
-    expect(result.map((post) => post.uri)).toEqual(['at://fallback-recent']);
+    expect(result.map((post: BskyPost) => post.uri)).toEqual(['at://fallback-recent']);
   });
 });
 
@@ -421,12 +422,12 @@ describe('getPostTimestamp', () => {
     const post = {
       indexedAt: '2025-01-01T00:00:00.000Z',
       record: { createdAt: '2026-01-01T00:00:00.000Z' },
-    };
+    } as BskyPost;
     expect(getPostTimestamp(post)).toBe(Date.parse('2026-01-01T00:00:00.000Z'));
   });
 
   it('falls back to indexedAt when createdAt is missing', () => {
-    const post = { indexedAt: '2026-01-02T00:00:00.000Z' };
+    const post = { indexedAt: '2026-01-02T00:00:00.000Z' } as BskyPost;
     expect(getPostTimestamp(post)).toBe(Date.parse('2026-01-02T00:00:00.000Z'));
   });
 
@@ -434,7 +435,7 @@ describe('getPostTimestamp', () => {
     const post = {
       indexedAt: 'not-a-date',
       record: { createdAt: 'also-not-a-date' },
-    };
+    } as BskyPost;
     expect(getPostTimestamp(post)).toBe(0);
   });
 });
@@ -447,7 +448,7 @@ describe('sortPosts', () => {
     { uri: 'at://1', likeCount: 10, indexedAt: '2024-01-03T00:00:00Z', record: { createdAt: '2024-01-03T00:00:00Z' } },
     { uri: 'at://2', likeCount: 50, indexedAt: '2024-01-01T00:00:00Z', record: { createdAt: '2024-01-01T00:00:00Z' } },
     { uri: 'at://3', likeCount: 25, indexedAt: '2024-01-02T00:00:00Z', record: { createdAt: '2024-01-02T00:00:00Z' } },
-  ];
+  ] as BskyPost[];
 
   it('sorts by likes (high to low) for top mode', () => {
     const result = sortPosts(posts, 'top');
@@ -478,7 +479,7 @@ describe('sortPosts', () => {
     const postsWithMissing = [
       { uri: 'at://1' },
       { uri: 'at://2', likeCount: 10 },
-    ];
+    ] as BskyPost[];
     const result = sortPosts(postsWithMissing, 'top');
     expect(result[0].likeCount).toBe(10);
   });

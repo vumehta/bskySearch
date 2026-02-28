@@ -4,8 +4,8 @@ import {
   RENDER_STEP,
   SEARCH_API,
   SEARCH_DEBOUNCE_MS,
-} from './constants.mjs';
-import { isCurrentSearchGeneration, searchCache, state } from './state.mjs';
+} from './constants';
+import { isCurrentSearchGeneration, searchCache, state } from './state';
 import {
   autoRefreshToggle,
   expandSummary,
@@ -22,7 +22,7 @@ import {
   statusDiv,
   termsInput,
   timeFilterSelect,
-} from './dom.mjs';
+} from './dom';
 import {
   deduplicatePosts,
   expandSearchTerms,
@@ -39,47 +39,54 @@ import {
   normalizeTerm,
   setText,
   sortPosts,
-} from './utils.mjs';
-import { enforceSearchCacheLimit, getCachedSearch } from './cache.mjs';
-import { setQueryParam, updateURLWithParams } from './url.mjs';
-import { isReplyPost, toggleThread } from './thread.mjs';
+} from './utils';
+import { enforceSearchCacheLimit, getCachedSearch } from './cache';
+import { setQueryParam, updateURLWithParams } from './url';
+import { isReplyPost, toggleThread } from './thread';
+import type { BskyPost, SearchResponse, SortMode } from './types';
+
+interface HighlightMatcherCache {
+  key: string;
+  regex: RegExp | null;
+  termSet: Set<string> | null;
+}
 
 const DERIVE_THROTTLE_MS = 120;
 
-let ingestedPostsByUri = new Map();
-let deriveTimerId = null;
+let ingestedPostsByUri = new Map<string, BskyPost>();
+let deriveTimerId: ReturnType<typeof setTimeout> | null = null;
 
 // Coalesce render updates into a single frame.
-let pendingRenderFrame = null;
+let pendingRenderFrame: number | null = null;
 
 // Search results rendering cache.
-let resultsHeaderEl = null;
-let resultsCountEl = null;
-let resultsSortEl = null;
-let resultsEmptyEl = null;
-let resultsEmptyPrimaryEl = null;
-let resultsEmptySecondaryEl = null;
-let resultsListEl = null;
-let showMoreBtnEl = null;
-let loadMoreBtnEl = null;
-const renderedPostElements = new Map();
-const renderedPostFingerprints = new Map();
+let resultsHeaderEl: HTMLDivElement | null = null;
+let resultsCountEl: HTMLSpanElement | null = null;
+let resultsSortEl: HTMLSpanElement | null = null;
+let resultsEmptyEl: HTMLDivElement | null = null;
+let resultsEmptyPrimaryEl: HTMLParagraphElement | null = null;
+let resultsEmptySecondaryEl: HTMLParagraphElement | null = null;
+let resultsListEl: HTMLDivElement | null = null;
+let showMoreBtnEl: HTMLButtonElement | null = null;
+let loadMoreBtnEl: HTMLButtonElement | null = null;
+const renderedPostElements = new Map<string, HTMLElement>();
+const renderedPostFingerprints = new Map<string, string>();
 
 // Highlight matcher cache for a single active term set.
-let highlightMatcherCache = { key: '', regex: null, termSet: null };
+let highlightMatcherCache: HighlightMatcherCache = { key: '', regex: null, termSet: null };
 
 // Show status message
-function showStatus(message, type = 'info') {
+function showStatus(message: string, type: string = 'info'): void {
   statusDiv.className = `status ${type}`;
   setText(statusDiv, message);
   statusDiv.style.display = 'block';
 }
 
-function hideStatus() {
+function hideStatus(): void {
   statusDiv.style.display = 'none';
 }
 
-export function updateSearchURL() {
+export function updateSearchURL(): void {
   const params = new URLSearchParams(window.location.search);
   setQueryParam(params, 'terms', termsInput.value.trim());
   setQueryParam(params, 'minLikes', minLikesInput.value);
@@ -89,7 +96,7 @@ export function updateSearchURL() {
   updateURLWithParams(params);
 }
 
-export function updateExpansionSummary() {
+export function updateExpansionSummary(): void {
   const inputValue = termsInput.value.trim();
   if (!inputValue) {
     expandSummary.textContent = 'Enter terms to preview expansion.';
@@ -120,14 +127,14 @@ export function updateExpansionSummary() {
 }
 
 // Search posts for a single term (server-side proxy)
-async function searchTerm(term, cursor = null, sort = state.searchSort) {
+async function searchTerm(term: string, cursor: string | null = null, sort: SortMode = state.searchSort): Promise<SearchResponse> {
   const sortValue = normalizeSortValue(sort);
   const cacheKey = getSearchCacheKey(term, cursor, sortValue);
 
   // Check cache first
   const cached = getCachedSearch(cacheKey);
   if (cached) {
-    return cached;
+    return cached as SearchResponse;
   }
 
   const params = new URLSearchParams({ term, sort: sortValue });
@@ -147,7 +154,7 @@ async function searchTerm(term, cursor = null, sort = state.searchSort) {
     throw new Error(errorMsg);
   }
 
-  const data = await response.json();
+  const data: SearchResponse = await response.json();
 
   // Cache the result
   searchCache.set(cacheKey, { data, timestamp: Date.now() });
@@ -157,16 +164,16 @@ async function searchTerm(term, cursor = null, sort = state.searchSort) {
 }
 
 // Fetch all posts for a term (with pagination)
-async function fetchAllPostsForTerm(term, maxPages = INITIAL_MAX_PAGES, sort = state.searchSort) {
-  let allTermPosts = [];
-  let cursor = null;
+async function fetchAllPostsForTerm(term: string, maxPages: number = INITIAL_MAX_PAGES, sort: SortMode = state.searchSort): Promise<BskyPost[]> {
+  let allTermPosts: BskyPost[] = [];
+  let cursor: string | null = null;
   let pages = 0;
 
   while (pages < maxPages) {
     const data = await searchTerm(term, cursor, sort);
 
     if (data.posts && data.posts.length > 0) {
-      const taggedPosts = data.posts.map((post) => ({
+      const taggedPosts: BskyPost[] = data.posts.map((post) => ({
         ...post,
         matchedTerm: term,
       }));
@@ -182,7 +189,7 @@ async function fetchAllPostsForTerm(term, maxPages = INITIAL_MAX_PAGES, sort = s
   return allTermPosts;
 }
 
-async function fetchLatestPostsForTerm(term, sort = state.searchSort) {
+async function fetchLatestPostsForTerm(term: string, sort: SortMode = state.searchSort): Promise<BskyPost[]> {
   const data = await searchTerm(term, null, sort);
   if (data.posts && data.posts.length > 0) {
     return data.posts.map((post) => ({
@@ -193,22 +200,22 @@ async function fetchLatestPostsForTerm(term, sort = state.searchSort) {
   return [];
 }
 
-function resetRenderLimit() {
+function resetRenderLimit(): void {
   state.renderLimit = INITIAL_RENDER_LIMIT;
 }
 
-function increaseRenderLimit(step = RENDER_STEP) {
+function increaseRenderLimit(step: number = RENDER_STEP): void {
   state.renderLimit = Math.min(state.allPosts.length, state.renderLimit + step);
 }
 
-function cancelScheduledRender() {
+function cancelScheduledRender(): void {
   if (pendingRenderFrame !== null) {
     cancelAnimationFrame(pendingRenderFrame);
     pendingRenderFrame = null;
   }
 }
 
-function scheduleRender() {
+function scheduleRender(): void {
   if (pendingRenderFrame !== null) return;
   pendingRenderFrame = requestAnimationFrame(() => {
     pendingRenderFrame = null;
@@ -216,14 +223,14 @@ function scheduleRender() {
   });
 }
 
-function clearDerivedPostsTimer() {
+function clearDerivedPostsTimer(): void {
   if (deriveTimerId) {
     clearTimeout(deriveTimerId);
     deriveTimerId = null;
   }
 }
 
-function getMatchedTermsForPost(post) {
+function getMatchedTermsForPost(post: BskyPost): string[] {
   if (Array.isArray(post.matchedTerms) && post.matchedTerms.length > 0) {
     return post.matchedTerms.filter(Boolean);
   }
@@ -233,11 +240,11 @@ function getMatchedTermsForPost(post) {
   return [];
 }
 
-function mergeMatchedTerms(existingTerms, incomingTerms) {
-  const merged = [];
-  const seen = new Set();
+function mergeMatchedTerms(existingTerms: string[], incomingTerms: string[]): string[] {
+  const merged: string[] = [];
+  const seen = new Set<string>();
 
-  const add = (term) => {
+  const add = (term: string): void => {
     if (!term) return;
     const normalized = term.toLowerCase();
     if (seen.has(normalized)) return;
@@ -250,7 +257,7 @@ function mergeMatchedTerms(existingTerms, incomingTerms) {
   return merged;
 }
 
-function ingestPosts(posts) {
+function ingestPosts(posts: BskyPost[]): void {
   for (const post of posts) {
     if (!post?.uri) continue;
 
@@ -258,7 +265,7 @@ function ingestPosts(posts) {
     const existing = ingestedPostsByUri.get(post.uri);
 
     if (!existing) {
-      const normalized = { ...post };
+      const normalized: BskyPost = { ...post };
       normalized.matchedTerms = incomingTerms;
       normalized.matchedTerm = normalized.matchedTerms[0] || '';
       ingestedPostsByUri.set(post.uri, normalized);
@@ -272,14 +279,14 @@ function ingestPosts(posts) {
   }
 }
 
-function recomputeDerivedPosts() {
+function recomputeDerivedPosts(): void {
   let derived = Array.from(ingestedPostsByUri.values());
   derived = filterByDate(derived, state.timeFilterHours);
   derived = filterByLikes(derived, state.minLikes);
   state.allPosts = sortPosts(derived, state.searchSort);
 }
 
-function scheduleDerivedPostsRebuild() {
+function scheduleDerivedPostsRebuild(): void {
   if (deriveTimerId) {
     return;
   }
@@ -290,7 +297,7 @@ function scheduleDerivedPostsRebuild() {
   }, DERIVE_THROTTLE_MS);
 }
 
-function flushDerivedPostsRebuild({ render = false } = {}) {
+function flushDerivedPostsRebuild({ render = false } = {}): void {
   clearDerivedPostsTimer();
   recomputeDerivedPosts();
   if (render) {
@@ -299,14 +306,14 @@ function flushDerivedPostsRebuild({ render = false } = {}) {
   }
 }
 
-function pruneIngestedPostsByCurrentFilters() {
+function pruneIngestedPostsByCurrentFilters(): BskyPost[] {
   const hours =
     Number.isFinite(state.timeFilterHours) && state.timeFilterHours > 0 ? state.timeFilterHours : 24;
   const cutoffTs = Date.now() - hours * 3600000;
   const minLikes = Number.isFinite(state.minLikes) && state.minLikes > 0 ? state.minLikes : 0;
 
-  const retainedPosts = [];
-  const prunedStore = new Map();
+  const retainedPosts: BskyPost[] = [];
+  const prunedStore = new Map<string, BskyPost>();
 
   for (const [uri, post] of ingestedPostsByUri.entries()) {
     if (getPostTimestamp(post) < cutoffTs) {
@@ -324,11 +331,11 @@ function pruneIngestedPostsByCurrentFilters() {
   return retainedPosts;
 }
 
-function clearIngestedPosts() {
+function clearIngestedPosts(): void {
   ingestedPostsByUri.clear();
 }
 
-function clearRefreshTimers() {
+function clearRefreshTimers(): void {
   if (state.refreshTimerId) {
     clearTimeout(state.refreshTimerId);
     state.refreshTimerId = null;
@@ -339,14 +346,14 @@ function clearRefreshTimers() {
   }
 }
 
-export function updateRefreshInterval() {
+export function updateRefreshInterval(): void {
   const minutes = parseInt(refreshIntervalSelect.value, 10);
   state.refreshIntervalMs = Number.isFinite(minutes) && minutes > 0 ? minutes * 60000 : 5 * 60000;
 }
 
-export function updateRefreshMeta() {
+export function updateRefreshMeta(): void {
   if (state.autoRefreshEnabled) {
-    refreshStateDiv.textContent = state.isRefreshing ? 'Refreshing…' : 'Auto-refresh on';
+    refreshStateDiv.textContent = state.isRefreshing ? 'Refreshing\u2026' : 'Auto-refresh on';
   } else {
     refreshStateDiv.textContent = 'Auto-refresh off';
   }
@@ -369,7 +376,7 @@ export function updateRefreshMeta() {
   }
 }
 
-export function scheduleNextRefresh() {
+export function scheduleNextRefresh(): void {
   clearRefreshTimers();
   if (!state.autoRefreshEnabled) {
     state.nextRefreshAt = null;
@@ -382,7 +389,7 @@ export function scheduleNextRefresh() {
   updateRefreshMeta();
 }
 
-function clearNewPostHighlights() {
+function clearNewPostHighlights(): void {
   state.newPostUris.clear();
   if (state.clearHighlightsTimeout) {
     clearTimeout(state.clearHighlightsTimeout);
@@ -390,7 +397,7 @@ function clearNewPostHighlights() {
   }
 }
 
-function scheduleNewPostHighlightClear() {
+function scheduleNewPostHighlightClear(): void {
   if (state.clearHighlightsTimeout) {
     clearTimeout(state.clearHighlightsTimeout);
   }
@@ -401,7 +408,7 @@ function scheduleNewPostHighlightClear() {
   }, 8000);
 }
 
-function getHighlightMatcher(terms) {
+function getHighlightMatcher(terms: string[]): HighlightMatcherCache {
   const key = terms.map((term) => term.toLowerCase()).join('\u0001');
   if (key === highlightMatcherCache.key) {
     return highlightMatcherCache;
@@ -420,7 +427,7 @@ function getHighlightMatcher(terms) {
 }
 
 // Create text with highlighted search terms using DOM methods (safe)
-function createHighlightedText(text, terms) {
+function createHighlightedText(text: string, terms: string[]): DocumentFragment {
   const fragment = document.createDocumentFragment();
   if (!text) return fragment;
 
@@ -433,7 +440,7 @@ function createHighlightedText(text, terms) {
   const parts = text.split(regex);
 
   parts.forEach((part) => {
-    if (termSet.has(part.toLowerCase())) {
+    if (termSet!.has(part.toLowerCase())) {
       const span = document.createElement('span');
       span.className = 'highlight';
       span.textContent = part;
@@ -447,7 +454,7 @@ function createHighlightedText(text, terms) {
 }
 
 // Create a post element using safe DOM methods
-function createPostElement(post) {
+function createPostElement(post: BskyPost): HTMLDivElement {
   const postUrl = getPostUrl(post);
   const handle = post.author.handle;
   const displayName = post.author.displayName || handle;
@@ -573,7 +580,7 @@ function createPostElement(post) {
   likeIcon.setAttribute('aria-hidden', 'true');
   likeIcon.textContent = '\u2665 ';
   likeStat.appendChild(likeIcon);
-  likeStat.appendChild(document.createTextNode(post.likeCount || 0));
+  likeStat.appendChild(document.createTextNode(String(post.likeCount || 0)));
   statsDiv.appendChild(likeStat);
 
   const repostStat = document.createElement('span');
@@ -583,7 +590,7 @@ function createPostElement(post) {
   repostIcon.setAttribute('aria-hidden', 'true');
   repostIcon.textContent = '\u21bb ';
   repostStat.appendChild(repostIcon);
-  repostStat.appendChild(document.createTextNode(post.repostCount || 0));
+  repostStat.appendChild(document.createTextNode(String(post.repostCount || 0)));
   statsDiv.appendChild(repostStat);
 
   const replyStat = document.createElement('span');
@@ -593,7 +600,7 @@ function createPostElement(post) {
   replyIcon.setAttribute('aria-hidden', 'true');
   replyIcon.textContent = '\ud83d\udcac ';
   replyStat.appendChild(replyIcon);
-  replyStat.appendChild(document.createTextNode(post.replyCount || 0));
+  replyStat.appendChild(document.createTextNode(String(post.replyCount || 0)));
   statsDiv.appendChild(replyStat);
 
   postDiv.appendChild(statsDiv);
@@ -634,7 +641,7 @@ function createPostElement(post) {
   return postDiv;
 }
 
-function resetResultsRenderCache() {
+function resetResultsRenderCache(): void {
   cancelScheduledRender();
   resultsHeaderEl = null;
   resultsCountEl = null;
@@ -650,7 +657,7 @@ function resetResultsRenderCache() {
   resultsDiv.textContent = '';
 }
 
-function ensureResultsShell() {
+function ensureResultsShell(): void {
   if (resultsHeaderEl) {
     return;
   }
@@ -703,7 +710,7 @@ function ensureResultsShell() {
   resultsDiv.appendChild(loadMoreBtnEl);
 }
 
-function getPostRenderFingerprint(post) {
+function getPostRenderFingerprint(post: BskyPost): string {
   const matchedTerms = getMatchedTermsForPost(post).join('\u0001');
   return [
     post.uri || '',
@@ -720,8 +727,8 @@ function getPostRenderFingerprint(post) {
   ].join('\u0002');
 }
 
-function syncVisibleResultPosts(visiblePosts) {
-  const visibleUris = new Set();
+function syncVisibleResultPosts(visiblePosts: BskyPost[]): void {
+  const visibleUris = new Set<string>();
   let renderedCount = 0;
 
   visiblePosts.forEach((post) => {
@@ -738,7 +745,7 @@ function syncVisibleResultPosts(visiblePosts) {
       nextElement.dataset.uri = uri;
 
       if (postElement?.parentNode === resultsListEl) {
-        resultsListEl.replaceChild(nextElement, postElement);
+        resultsListEl!.replaceChild(nextElement, postElement);
       }
 
       postElement = nextElement;
@@ -746,9 +753,9 @@ function syncVisibleResultPosts(visiblePosts) {
       renderedPostFingerprints.set(uri, nextFingerprint);
     }
 
-    const currentAtIndex = resultsListEl.children[renderedCount];
+    const currentAtIndex = resultsListEl!.children[renderedCount];
     if (currentAtIndex !== postElement) {
-      resultsListEl.insertBefore(postElement, currentAtIndex || null);
+      resultsListEl!.insertBefore(postElement, currentAtIndex || null);
     }
     renderedCount += 1;
   });
@@ -764,50 +771,50 @@ function syncVisibleResultPosts(visiblePosts) {
     renderedPostFingerprints.delete(uri);
   }
 
-  while (resultsListEl.children.length > renderedCount) {
-    resultsListEl.lastElementChild?.remove();
+  while (resultsListEl!.children.length > renderedCount) {
+    resultsListEl!.lastElementChild?.remove();
   }
 }
 
 // Render all results using safe DOM methods
-function renderResults() {
+function renderResults(): void {
   ensureResultsShell();
 
   const totalCount = state.allPosts.length;
   const visibleCount = Math.min(state.renderLimit, totalCount);
 
   if (totalCount === 0) {
-    resultsHeaderEl.style.display = 'none';
-    resultsListEl.style.display = 'none';
-    showMoreBtnEl.style.display = 'none';
-    loadMoreBtnEl.style.display = 'none';
-    resultsEmptyEl.style.display = 'block';
-    resultsEmptyPrimaryEl.textContent =
+    resultsHeaderEl!.style.display = 'none';
+    resultsListEl!.style.display = 'none';
+    showMoreBtnEl!.style.display = 'none';
+    loadMoreBtnEl!.style.display = 'none';
+    resultsEmptyEl!.style.display = 'block';
+    resultsEmptyPrimaryEl!.textContent =
       state.pendingPosts.length > 0
         ? 'New posts are waiting above.'
         : 'No posts found matching your criteria.';
-    resultsEmptySecondaryEl.textContent =
+    resultsEmptySecondaryEl!.textContent =
       state.pendingPosts.length > 0
         ? 'Use "Add to results" to merge them into the main list.'
         : 'Try different search terms or lower the minimum likes.';
-    if (resultsListEl.children.length > 0) {
-      resultsListEl.textContent = '';
+    if (resultsListEl!.children.length > 0) {
+      resultsListEl!.textContent = '';
       renderedPostElements.clear();
       renderedPostFingerprints.clear();
     }
     return;
   }
 
-  resultsEmptyEl.style.display = 'none';
-  resultsHeaderEl.style.display = '';
-  resultsListEl.style.display = '';
+  resultsEmptyEl!.style.display = 'none';
+  resultsHeaderEl!.style.display = '';
+  resultsListEl!.style.display = '';
 
   const totalLabel = totalCount === 1 ? 'post' : 'posts';
-  resultsCountEl.textContent =
+  resultsCountEl!.textContent =
     visibleCount < totalCount
       ? `Showing ${visibleCount} of ${totalCount} ${totalLabel}`
       : `${totalCount} ${totalLabel} found`;
-  resultsSortEl.textContent =
+  resultsSortEl!.textContent =
     state.searchSort === 'latest'
       ? 'Sorted by time (newest first)'
       : 'Sorted by likes (high to low)';
@@ -817,37 +824,37 @@ function renderResults() {
 
   const remaining = totalCount - visibleCount;
   if (remaining > 0) {
-    showMoreBtnEl.style.display = '';
-    showMoreBtnEl.textContent =
+    showMoreBtnEl!.style.display = '';
+    showMoreBtnEl!.textContent =
       remaining <= RENDER_STEP
         ? remaining === 1
           ? 'Show 1 more loaded result'
           : `Show ${remaining} more loaded results`
         : `Show ${RENDER_STEP} more loaded results`;
   } else {
-    showMoreBtnEl.style.display = 'none';
+    showMoreBtnEl!.style.display = 'none';
   }
 
   const hasMoreResults = Object.values(state.currentCursors).some((cursor) => cursor !== null);
   if (hasMoreResults) {
-    loadMoreBtnEl.style.display = '';
+    loadMoreBtnEl!.style.display = '';
     if (state.isLoading) {
-      loadMoreBtnEl.disabled = true;
-      if (!loadMoreBtnEl.textContent || loadMoreBtnEl.textContent === 'Load More Results') {
-        loadMoreBtnEl.textContent = 'Loading…';
+      loadMoreBtnEl!.disabled = true;
+      if (!loadMoreBtnEl!.textContent || loadMoreBtnEl!.textContent === 'Load More Results') {
+        loadMoreBtnEl!.textContent = 'Loading\u2026';
       }
     } else {
-      loadMoreBtnEl.disabled = false;
-      loadMoreBtnEl.textContent = 'Load More Results';
+      loadMoreBtnEl!.disabled = false;
+      loadMoreBtnEl!.textContent = 'Load More Results';
     }
   } else {
-    loadMoreBtnEl.style.display = 'none';
-    loadMoreBtnEl.disabled = false;
-    loadMoreBtnEl.textContent = 'Load More Results';
+    loadMoreBtnEl!.style.display = 'none';
+    loadMoreBtnEl!.disabled = false;
+    loadMoreBtnEl!.textContent = 'Load More Results';
   }
 }
 
-function renderNewPosts() {
+function renderNewPosts(): void {
   newPostsDiv.textContent = '';
   if (state.pendingPosts.length === 0) {
     newPostsDiv.classList.add('hidden');
@@ -893,7 +900,7 @@ function renderNewPosts() {
   newPostsDiv.appendChild(list);
 }
 
-function mergePendingPosts() {
+function mergePendingPosts(): void {
   if (state.pendingPosts.length === 0) {
     return;
   }
@@ -909,7 +916,7 @@ function mergePendingPosts() {
   renderResults();
 }
 
-function dismissPendingPosts() {
+function dismissPendingPosts(): void {
   if (state.pendingPosts.length === 0) {
     return;
   }
@@ -919,7 +926,7 @@ function dismissPendingPosts() {
   renderResults();
 }
 
-async function refreshSearch() {
+async function refreshSearch(): Promise<number> {
   if (state.searchTerms.length === 0) {
     return 0;
   }
@@ -958,7 +965,7 @@ async function refreshSearch() {
   return newPosts.length;
 }
 
-async function runAutoRefresh() {
+async function runAutoRefresh(): Promise<void> {
   if (!state.autoRefreshEnabled) {
     return;
   }
@@ -987,14 +994,14 @@ async function runAutoRefresh() {
     state.lastRefreshNewCount = newCount;
   } catch (error) {
     console.error('Auto-refresh error:', error);
-    state.lastRefreshError = error.message || 'Refresh failed.';
+    state.lastRefreshError = (error as Error).message || 'Refresh failed.';
   } finally {
     state.isRefreshing = false;
     scheduleNextRefresh();
   }
 }
 
-export function enableAutoRefresh() {
+export function enableAutoRefresh(): void {
   if (state.searchTerms.length === 0) {
     autoRefreshToggle.checked = false;
     state.lastRefreshError = 'Run a search first.';
@@ -1007,7 +1014,7 @@ export function enableAutoRefresh() {
   scheduleNextRefresh();
 }
 
-export function disableAutoRefresh() {
+export function disableAutoRefresh(): void {
   state.autoRefreshEnabled = false;
   clearRefreshTimers();
   state.nextRefreshAt = null;
@@ -1015,7 +1022,7 @@ export function disableAutoRefresh() {
 }
 
 // Main search function
-export async function performSearch() {
+export async function performSearch(): Promise<void> {
   if (state.isLoading) {
     state.pendingSearch = true;
     return;
@@ -1057,7 +1064,7 @@ export async function performSearch() {
   updateSearchURL();
 
   try {
-    showStatus(`Searching for: ${state.rawSearchTerms.join(', ')}…`, 'loading');
+    showStatus(`Searching for: ${state.rawSearchTerms.join(', ')}\u2026`, 'loading');
 
     // Track progress for progressive rendering
     let completedTerms = 0;
@@ -1076,7 +1083,7 @@ export async function performSearch() {
 
       // Update status and render immediately
       if (completedTerms < totalTerms) {
-        showStatus(`Loaded ${completedTerms}/${totalTerms} terms…`, 'loading');
+        showStatus(`Loaded ${completedTerms}/${totalTerms} terms\u2026`, 'loading');
       }
       scheduleDerivedPostsRebuild();
 
@@ -1096,7 +1103,7 @@ export async function performSearch() {
     if (failures.length > 0) {
       const errorMsg =
         failures.length === totalTerms
-          ? `Search failed: ${failures[0].reason.message}`
+          ? `Search failed: ${(failures[0] as PromiseRejectedResult).reason.message}`
           : `${failures.length}/${totalTerms} terms failed to load`;
       showStatus(errorMsg, 'error');
       // Continue - we may have partial results from successful terms
@@ -1112,7 +1119,7 @@ export async function performSearch() {
     updateRefreshMeta();
   } catch (error) {
     console.error('Search error:', error);
-    showStatus(`Error: ${error.message}`, 'error');
+    showStatus(`Error: ${(error as Error).message}`, 'error');
   } finally {
     state.isLoading = false;
     searchBtn.disabled = false;
@@ -1127,15 +1134,15 @@ export async function performSearch() {
 }
 
 // Load more results
-export async function loadMore() {
+export async function loadMore(): Promise<void> {
   if (state.isLoading) return;
 
   const prevCount = state.allPosts.length;
   state.isLoading = true;
-  const loadMoreBtn = loadMoreBtnEl || document.getElementById('loadMoreBtn');
+  const loadMoreBtn = loadMoreBtnEl || document.getElementById('loadMoreBtn') as HTMLButtonElement | null;
   if (loadMoreBtn) {
     loadMoreBtn.disabled = true;
-    loadMoreBtn.textContent = 'Loading…';
+    loadMoreBtn.textContent = 'Loading\u2026';
   }
 
   try {
@@ -1167,7 +1174,7 @@ export async function loadMore() {
     renderResults();
   } catch (error) {
     console.error('Load more error:', error);
-    showStatus(`Error loading more: ${error.message}`, 'error');
+    showStatus(`Error loading more: ${(error as Error).message}`, 'error');
   } finally {
     state.isLoading = false;
     if (loadMoreBtn) {
@@ -1177,7 +1184,7 @@ export async function loadMore() {
   }
 }
 
-export function debouncedSearch() {
+export function debouncedSearch(): void {
   if (state.searchDebounceTimer) {
     clearTimeout(state.searchDebounceTimer);
   }
@@ -1187,14 +1194,14 @@ export function debouncedSearch() {
   }, SEARCH_DEBOUNCE_MS);
 }
 
-export function cancelDebouncedSearch() {
+export function cancelDebouncedSearch(): void {
   if (state.searchDebounceTimer) {
     clearTimeout(state.searchDebounceTimer);
     state.searchDebounceTimer = null;
   }
 }
 
-export function focusSearchInput() {
+export function focusSearchInput(): void {
   if (!termsInput) return;
   if (typeof termsInput.focus === 'function') {
     termsInput.focus();
@@ -1204,17 +1211,17 @@ export function focusSearchInput() {
   }
 }
 
-export function applySearchSortChange() {
+export function applySearchSortChange(): void {
   if (state.searchTerms.length === 0) {
     return;
   }
   flushDerivedPostsRebuild({ render: true });
 }
 
-export function renderSearchResults() {
+export function renderSearchResults(): void {
   renderResults();
 }
 
-export function renderPendingPosts() {
+export function renderPendingPosts(): void {
   renderNewPosts();
 }

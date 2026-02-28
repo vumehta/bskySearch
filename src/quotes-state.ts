@@ -1,6 +1,6 @@
-import { state } from './state.mjs';
+import { state } from './state';
 
-export function trackQuoteCursor(nextCursor) {
+export function trackQuoteCursor(nextCursor: string | null | undefined): string | null {
   if (!nextCursor) {
     return null;
   }

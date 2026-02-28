@@ -1,10 +1,12 @@
+import type { BskyPost, ParsedPostUrl, SortMode } from './types';
+
 // Safe text content setter (prevents XSS)
-export function setText(element, text) {
+export function setText(element: HTMLElement, text: string): void {
   element.textContent = text;
 }
 
 // Validate URL is from allowed domains
-export function isValidBskyUrl(url) {
+export function isValidBskyUrl(url: string | null | undefined): boolean {
   if (!url) return false;
   try {
     const parsed = new URL(url);
@@ -20,7 +22,7 @@ export function isValidBskyUrl(url) {
   }
 }
 
-export function normalizeTerm(raw) {
+export function normalizeTerm(raw: string): string {
   const sanitized = raw.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
   let term = sanitized.trim();
   if (
@@ -32,11 +34,11 @@ export function normalizeTerm(raw) {
   return term;
 }
 
-export function expandSearchTerms(terms, shouldExpandWords) {
-  const expanded = [];
-  const seen = new Set();
+export function expandSearchTerms(terms: string[], shouldExpandWords: boolean): string[] {
+  const expanded: string[] = [];
+  const seen = new Set<string>();
 
-  const addTerm = (value) => {
+  const addTerm = (value: string): void => {
     const cleaned = value.trim();
     if (!cleaned) return;
     const key = cleaned.toLowerCase();
@@ -61,55 +63,55 @@ export function expandSearchTerms(terms, shouldExpandWords) {
 }
 
 // Generate cache key for search requests
-export function getSearchCacheKey(term, cursor, sort) {
+export function getSearchCacheKey(term: string, cursor: string | null | undefined, sort: string): string {
   return JSON.stringify([term, cursor || '', sort]);
 }
 
 // Deduplicate posts by URI
-export function deduplicatePosts(posts) {
-  const seen = new Map();
+export function deduplicatePosts(posts: BskyPost[]): BskyPost[] {
+  const seen = new Map<string, BskyPost>();
 
   for (const post of posts) {
     const uri = post.uri;
     if (!seen.has(uri)) {
       seen.set(uri, post);
     } else {
-      const existing = seen.get(uri);
+      const existing = seen.get(uri)!;
       if (!existing.matchedTerms) {
-        existing.matchedTerms = [existing.matchedTerm];
+        existing.matchedTerms = [existing.matchedTerm!];
       }
-      if (!existing.matchedTerms.includes(post.matchedTerm)) {
-        existing.matchedTerms.push(post.matchedTerm);
+      if (!existing.matchedTerms.includes(post.matchedTerm!)) {
+        existing.matchedTerms.push(post.matchedTerm!);
       }
     }
   }
 
   return Array.from(seen.values()).map((post) => {
     if (!post.matchedTerms) {
-      post.matchedTerms = [post.matchedTerm];
+      post.matchedTerms = [post.matchedTerm!];
     }
     return post;
   });
 }
 
 // Filter posts by minimum likes
-export function filterByLikes(posts, minLikes) {
+export function filterByLikes(posts: BskyPost[], minLikes: number): BskyPost[] {
   return posts.filter((post) => (post.likeCount || 0) >= minLikes);
 }
 
 // Filter posts by date (configurable hours)
-export function filterByDate(posts, hours) {
+export function filterByDate(posts: BskyPost[], hours: number): BskyPost[] {
   const normalizedHours = Number.isFinite(hours) && hours > 0 ? hours : 24;
   const cutoffTs = Date.now() - normalizedHours * 3600000;
   return posts.filter((post) => getPostTimestamp(post) >= cutoffTs);
 }
 
-export function normalizeSortValue(raw) {
+export function normalizeSortValue(raw: string): SortMode {
   return raw === 'latest' ? 'latest' : 'top';
 }
 
 // Sort posts by selected mode
-export function sortPosts(posts, sortMode = 'top') {
+export function sortPosts(posts: BskyPost[], sortMode: SortMode = 'top'): BskyPost[] {
   const sorted = [...posts];
   if (sortMode === 'latest') {
     sorted.sort((a, b) => getPostTimestamp(b) - getPostTimestamp(a));
@@ -120,10 +122,10 @@ export function sortPosts(posts, sortMode = 'top') {
 }
 
 // Format relative time
-export function formatRelativeTime(dateString) {
+export function formatRelativeTime(dateString: string): string {
   const date = new Date(dateString);
   const now = new Date();
-  const diffMs = now - date;
+  const diffMs = now.getTime() - date.getTime();
   const diffMins = Math.floor(diffMs / 60000);
   const diffHours = Math.floor(diffMs / 3600000);
 
@@ -134,7 +136,7 @@ export function formatRelativeTime(dateString) {
 }
 
 // Extract post URL from URI
-export function getPostUrl(post) {
+export function getPostUrl(post: BskyPost): string | null {
   const parts = post.uri.split('/');
   const postId = parts[parts.length - 1];
   const handle = post.author.handle;
@@ -144,26 +146,26 @@ export function getPostUrl(post) {
   return `https://bsky.app/profile/${encodeURIComponent(handle)}/post/${encodeURIComponent(postId)}`;
 }
 
-export function formatDateTime(dateString) {
+export function formatDateTime(dateString: string | undefined): string {
   if (!dateString) return '';
   const date = new Date(dateString);
   if (Number.isNaN(date.getTime())) return '';
   return date.toLocaleString();
 }
 
-export function getPostTimestamp(post) {
+export function getPostTimestamp(post: BskyPost): number {
   const candidate = post.record?.createdAt || post.indexedAt;
   const time = new Date(candidate).getTime();
   return Number.isNaN(time) ? 0 : time;
 }
 
-export function formatTime(value) {
+export function formatTime(value: Date | string | number): string {
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return '';
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-export function formatDuration(ms) {
+export function formatDuration(ms: number): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
@@ -175,8 +177,8 @@ export function formatDuration(ms) {
   return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
-export function parseBlueskyPostUrl(urlString) {
-  let parsedUrl;
+export function parseBlueskyPostUrl(urlString: string): ParsedPostUrl {
+  let parsedUrl: URL;
   try {
     parsedUrl = new URL(urlString);
   } catch (e) {

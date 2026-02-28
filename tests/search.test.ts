@@ -10,7 +10,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 process.env.BSKY_HANDLE = process.env.BSKY_HANDLE || 'test-handle';
 process.env.BSKY_APP_PASSWORD = process.env.BSKY_APP_PASSWORD || 'test-app-password';
 
-const searchModule = await import('../api/search.mjs');
+const searchModule = await import('../api/search');
 const searchHandler = searchModule.GET;
 const { testUtils } = searchModule;
 const {
@@ -29,7 +29,7 @@ const {
   fetchWithTimeout,
   isUpstreamTimeoutError,
   resetModuleStateForTests,
-} = testUtils;
+} = testUtils!;
 
 const originalFetch = global.fetch;
 
@@ -64,9 +64,9 @@ describe('fetchWithTimeout', () => {
   it('throws a tagged timeout error when request times out', async () => {
     vi.useFakeTimers();
 
-    global.fetch = vi.fn((_url, options) => {
-      return new Promise((_resolve, reject) => {
-        options.signal.addEventListener(
+    global.fetch = vi.fn((_url: string | URL | Request, options?: RequestInit) => {
+      return new Promise<Response>((_resolve, reject) => {
+        options!.signal!.addEventListener(
           'abort',
           () => {
             const abortError = new Error('Aborted');
@@ -76,22 +76,22 @@ describe('fetchWithTimeout', () => {
           { once: true },
         );
       });
-    });
+    }) as typeof global.fetch;
 
     const requestPromise = fetchWithTimeout('https://example.com/resource', {}, 10);
-    const capturedErrorPromise = requestPromise.catch((requestError) => requestError);
+    const capturedErrorPromise = requestPromise.catch((requestError: Error) => requestError);
     await vi.advanceTimersByTimeAsync(11);
 
-    const error = await capturedErrorPromise;
+    const error = await capturedErrorPromise as Error;
     expect(isUpstreamTimeoutError(error)).toBe(true);
-    expect(error.code).toBe(UPSTREAM_TIMEOUT_ERROR_CODE);
+    expect((error as Error & { code: string }).code).toBe(UPSTREAM_TIMEOUT_ERROR_CODE);
     expect(error.message).toBe('Upstream request timed out.');
   });
 
   it('preserves caller abort signals as non-timeout aborts', async () => {
-    global.fetch = vi.fn((_url, options) => {
-      return new Promise((_resolve, reject) => {
-        options.signal.addEventListener(
+    global.fetch = vi.fn((_url: string | URL | Request, options?: RequestInit) => {
+      return new Promise<Response>((_resolve, reject) => {
+        options!.signal!.addEventListener(
           'abort',
           () => {
             const abortError = new Error('Aborted');
@@ -101,7 +101,7 @@ describe('fetchWithTimeout', () => {
           { once: true },
         );
       });
-    });
+    }) as typeof global.fetch;
 
     const callerController = new AbortController();
     const requestPromise = fetchWithTimeout(
@@ -111,7 +111,7 @@ describe('fetchWithTimeout', () => {
     );
     callerController.abort();
 
-    const error = await requestPromise.catch((requestError) => requestError);
+    const error = await requestPromise.catch((requestError: Error) => requestError) as Error;
     expect(error.name).toBe('AbortError');
     expect(isUpstreamTimeoutError(error)).toBe(false);
   });
@@ -124,20 +124,21 @@ describe('search handler timeout mapping', () => {
   it('returns 504 when upstream search times out', async () => {
     vi.useFakeTimers();
 
-    global.fetch = vi.fn((url, options = {}) => {
-      if (url.includes('/com.atproto.server.createSession')) {
+    global.fetch = vi.fn((url: string | URL | Request, options: RequestInit = {}) => {
+      const urlStr = typeof url === 'string' ? url : url instanceof URL ? url.toString() : url.url;
+      if (urlStr.includes('/com.atproto.server.createSession')) {
         return Promise.resolve({
           ok: true,
           json: async () => ({
             accessJwt: 'access-token',
             refreshJwt: 'refresh-token',
           }),
-        });
+        } as Response);
       }
 
-      if (url.includes('/app.bsky.feed.searchPosts')) {
-        return new Promise((_resolve, reject) => {
-          options.signal.addEventListener(
+      if (urlStr.includes('/app.bsky.feed.searchPosts')) {
+        return new Promise<Response>((_resolve, reject) => {
+          options.signal!.addEventListener(
             'abort',
             () => {
               const abortError = new Error('Aborted');
@@ -149,8 +150,8 @@ describe('search handler timeout mapping', () => {
         });
       }
 
-      throw new Error(`Unexpected fetch URL in test: ${url}`);
-    });
+      throw new Error(`Unexpected fetch URL in test: ${urlStr}`);
+    }) as typeof global.fetch;
 
     const request = new Request('https://example.com/api/search?term=timeout-test', {
       method: 'GET',
@@ -235,8 +236,8 @@ describe('getSearchCacheKey', () => {
   });
 
   it('generates different keys for different terms', () => {
-    const key1 = getSearchCacheKey('term1', null, 'top');
-    const key2 = getSearchCacheKey('term2', null, 'top');
+    const key1 = getSearchCacheKey('term1', null as unknown as string, 'top');
+    const key2 = getSearchCacheKey('term2', null as unknown as string, 'top');
     expect(key1).not.toBe(key2);
   });
 
@@ -247,13 +248,13 @@ describe('getSearchCacheKey', () => {
   });
 
   it('generates different keys for different sort modes', () => {
-    const key1 = getSearchCacheKey('term', null, 'top');
-    const key2 = getSearchCacheKey('term', null, 'latest');
+    const key1 = getSearchCacheKey('term', null as unknown as string, 'top');
+    const key2 = getSearchCacheKey('term', null as unknown as string, 'latest');
     expect(key1).not.toBe(key2);
   });
 
   it('treats null cursor as empty string', () => {
-    const key1 = getSearchCacheKey('term', null, 'top');
+    const key1 = getSearchCacheKey('term', null as unknown as string, 'top');
     const key2 = getSearchCacheKey('term', '', 'top');
     expect(key1).toBe(key2);
   });

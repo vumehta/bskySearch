@@ -1,12 +1,22 @@
-import { PUBLIC_API } from './constants.mjs';
-import { formatRelativeTime, isValidBskyUrl } from './utils.mjs';
+import { PUBLIC_API } from './constants';
+import { formatRelativeTime, isValidBskyUrl } from './utils';
+import type { BskyPost } from './types';
+
+interface ThreadNode {
+  post?: BskyPost;
+  parent?: ThreadNode;
+}
+
+interface ThreadResponse {
+  thread?: ThreadNode;
+}
 
 // Thread Explorer functions
-export function isReplyPost(post) {
+export function isReplyPost(post: BskyPost): boolean {
   return !!post.record?.reply;
 }
 
-async function fetchPostThread(atUri) {
+async function fetchPostThread(atUri: string): Promise<ThreadResponse> {
   const params = new URLSearchParams({
     uri: atUri,
     depth: '0',
@@ -19,8 +29,8 @@ async function fetchPostThread(atUri) {
   return response.json();
 }
 
-function extractParentChain(thread) {
-  const parents = [];
+function extractParentChain(thread: ThreadResponse): BskyPost[] {
+  const parents: BskyPost[] = [];
   let current = thread.thread?.parent;
   while (current?.post) {
     parents.unshift(current.post);
@@ -29,7 +39,7 @@ function extractParentChain(thread) {
   return parents;
 }
 
-function createThreadParentElement(post) {
+function createThreadParentElement(post: BskyPost): HTMLDivElement {
   const wrapper = document.createElement('div');
   wrapper.className = 'thread-parent';
 
@@ -74,7 +84,7 @@ function createThreadParentElement(post) {
   return wrapper;
 }
 
-function createThreadContextElement(parents) {
+function createThreadContextElement(parents: BskyPost[]): HTMLDivElement {
   const container = document.createElement('div');
   container.className = 'thread-context thread-context-inline';
 
@@ -90,12 +100,12 @@ function createThreadContextElement(parents) {
   return container;
 }
 
-function removeThreadContexts(postElement) {
+function removeThreadContexts(postElement: HTMLElement): boolean {
   const directChildren = Array.from(postElement.children);
   let removed = false;
 
   for (const child of directChildren) {
-    if (!child.classList.contains('thread-context')) {
+    if (!(child instanceof HTMLElement) || !child.classList.contains('thread-context')) {
       continue;
     }
     child.remove();
@@ -105,8 +115,8 @@ function removeThreadContexts(postElement) {
   return removed;
 }
 
-export async function toggleThread(post, postElement) {
-  const link = postElement.querySelector('.thread-link');
+export async function toggleThread(post: BskyPost, postElement: HTMLElement): Promise<void> {
+  const link = postElement.querySelector('.thread-link') as HTMLButtonElement | null;
   if (!link) return;
 
   if (link.dataset.loading === 'true') {
@@ -120,7 +130,7 @@ export async function toggleThread(post, postElement) {
 
   link.dataset.loading = 'true';
   link.disabled = true;
-  link.textContent = 'Loading…';
+  link.textContent = 'Loading\u2026';
 
   try {
     const threadData = await fetchPostThread(post.uri);
