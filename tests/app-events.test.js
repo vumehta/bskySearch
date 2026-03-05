@@ -74,6 +74,10 @@ const mocks = vi.hoisted(() => {
     prefersDarkScheme: { addEventListener: vi.fn() },
   };
 
+  const url = {
+    updateURLWithParams: vi.fn(),
+  };
+
   const reset = () => {
     dom.autoRefreshToggle.reset({ checked: false });
     dom.expandTermsToggle.reset({ checked: false });
@@ -93,7 +97,7 @@ const mocks = vi.hoisted(() => {
     state.quoteSort = 'likes';
     state.searchSort = 'top';
 
-    for (const mod of [search, quotes, theme]) {
+    for (const mod of [search, quotes, theme, url]) {
       for (const val of Object.values(mod)) {
         if (typeof val?.mockClear === 'function') val.mockClear();
         if (typeof val?.addEventListener?.mockClear === 'function') val.addEventListener.mockClear();
@@ -108,6 +112,7 @@ const mocks = vi.hoisted(() => {
     search,
     state,
     theme,
+    url,
   };
 });
 
@@ -119,6 +124,7 @@ vi.mock('../src/utils.mjs', () => ({
 vi.mock('../src/search.mjs', () => mocks.search);
 vi.mock('../src/quotes.mjs', () => mocks.quotes);
 vi.mock('../src/theme.mjs', () => mocks.theme);
+vi.mock('../src/url.mjs', () => mocks.url);
 
 async function bootApp() {
   await import('../src/app.mjs');
@@ -175,5 +181,79 @@ describe('app sort change handler', () => {
     mocks.dom.sortSelect.dispatch('change');
 
     expect(mocks.search.scheduleNextRefresh).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('app URL initialization', () => {
+  let originalWindow;
+
+  beforeEach(() => {
+    vi.resetModules();
+    mocks.reset();
+    originalWindow = globalThis.window;
+  });
+
+  afterEach(() => {
+    if (originalWindow === undefined) {
+      delete globalThis.window;
+      return;
+    }
+    globalThis.window = originalWindow;
+  });
+
+  it('reads distinct searchSort and quoteSort params without collisions', async () => {
+    globalThis.window = {
+      location: {
+        search:
+          '?searchSort=latest&post=https%3A%2F%2Fbsky.app%2Fprofile%2Falice%2Fpost%2F123&quoteSort=recent',
+      },
+    };
+
+    await bootApp();
+
+    expect(mocks.dom.sortSelect.value).toBe('latest');
+    expect(mocks.state.searchSort).toBe('latest');
+    expect(mocks.state.quoteSort).toBe('recent');
+    expect(mocks.quotes.updateQuoteTabs).toHaveBeenCalledTimes(1);
+    expect(mocks.quotes.performQuoteSearch).toHaveBeenCalledTimes(1);
+    expect(mocks.url.updateURLWithParams).not.toHaveBeenCalled();
+  });
+
+  it('migrates legacy search sort links to searchSort', async () => {
+    globalThis.window = {
+      location: {
+        search: '?sort=latest',
+      },
+    };
+
+    await bootApp();
+
+    expect(mocks.dom.sortSelect.value).toBe('latest');
+    expect(mocks.state.searchSort).toBe('latest');
+    expect(mocks.state.quoteSort).toBe('likes');
+    expect(mocks.url.updateURLWithParams).toHaveBeenCalledTimes(1);
+    const params = mocks.url.updateURLWithParams.mock.calls[0][0];
+    expect(params.get('searchSort')).toBe('latest');
+    expect(params.get('sort')).toBe(null);
+  });
+
+  it('migrates legacy quote sort links to quoteSort', async () => {
+    globalThis.window = {
+      location: {
+        search:
+          '?post=https%3A%2F%2Fbsky.app%2Fprofile%2Falice%2Fpost%2F123&sort=recent',
+      },
+    };
+
+    await bootApp();
+
+    expect(mocks.state.quoteSort).toBe('recent');
+    expect(mocks.quotes.updateQuoteTabs).toHaveBeenCalledTimes(1);
+    expect(mocks.quotes.performQuoteSearch).toHaveBeenCalledTimes(1);
+    expect(mocks.url.updateURLWithParams).toHaveBeenCalledTimes(1);
+    const params = mocks.url.updateURLWithParams.mock.calls[0][0];
+    expect(params.get('post')).toBe('https://bsky.app/profile/alice/post/123');
+    expect(params.get('quoteSort')).toBe('recent');
+    expect(params.get('sort')).toBe(null);
   });
 });

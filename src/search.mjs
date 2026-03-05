@@ -84,8 +84,9 @@ export function updateSearchURL() {
   setQueryParam(params, 'terms', termsInput.value.trim());
   setQueryParam(params, 'minLikes', minLikesInput.value);
   setQueryParam(params, 'time', timeFilterSelect.value !== '24' ? timeFilterSelect.value : '');
-  setQueryParam(params, 'sort', state.searchSort !== 'top' ? state.searchSort : '');
+  setQueryParam(params, 'searchSort', state.searchSort !== 'top' ? state.searchSort : '');
   setQueryParam(params, 'expand', expandTermsToggle.checked ? '1' : '');
+  params.delete('sort');
   updateURLWithParams(params);
 }
 

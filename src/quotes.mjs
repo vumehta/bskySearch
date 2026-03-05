@@ -36,10 +36,11 @@ export function updateQuoteURL() {
   const postValue = postUrlInput.value.trim();
   setQueryParam(params, 'post', postValue);
   if (postValue && state.quoteSort !== 'likes') {
-    params.set('sort', state.quoteSort);
+    params.set('quoteSort', state.quoteSort);
   } else {
-    params.delete('sort');
+    params.delete('quoteSort');
   }
+  params.delete('sort');
   updateURLWithParams(params);
 }
 

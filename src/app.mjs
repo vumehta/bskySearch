@@ -39,6 +39,10 @@ import {
   initTheme,
   prefersDarkScheme,
 } from './theme.mjs';
+import { updateURLWithParams } from './url.mjs';
+
+const SEARCH_SORT_VALUES = ['top', 'latest'];
+const QUOTE_SORT_VALUES = ['likes', 'recent', 'oldest'];
 
 function initFromURL() {
   const params = new URLSearchParams(window.location.search);
@@ -54,11 +58,17 @@ function initFromURL() {
       timeFilterSelect.value = timeValue;
     }
   }
-  if (params.get('sort')) {
-    const sortValue = params.get('sort');
-    if (['top', 'latest'].includes(sortValue)) {
-      sortSelect.value = sortValue;
-    }
+  const searchSortParam = params.get('searchSort');
+  const legacySortParam = params.get('sort');
+  const hasValidSearchSort = SEARCH_SORT_VALUES.includes(searchSortParam);
+  const hasValidLegacySearchSort = SEARCH_SORT_VALUES.includes(legacySortParam);
+  const resolvedSearchSort = hasValidSearchSort
+    ? searchSortParam
+    : hasValidLegacySearchSort
+      ? legacySortParam
+      : null;
+  if (resolvedSearchSort) {
+    sortSelect.value = resolvedSearchSort;
   }
   state.searchSort = normalizeSortValue(sortSelect.value);
   if (params.get('expand') === '1') {
@@ -66,14 +76,32 @@ function initFromURL() {
   }
 
   const postParam = params.get('post');
-  const sortParam = params.get('sort');
-  if (sortParam && ['likes', 'recent', 'oldest'].includes(sortParam)) {
-    state.quoteSort = sortParam;
+  const quoteSortParam = params.get('quoteSort');
+  const hasValidQuoteSort = QUOTE_SORT_VALUES.includes(quoteSortParam);
+  const hasValidLegacyQuoteSort = QUOTE_SORT_VALUES.includes(legacySortParam);
+  const resolvedQuoteSort = hasValidQuoteSort
+    ? quoteSortParam
+    : hasValidLegacyQuoteSort
+      ? legacySortParam
+      : null;
+  if (resolvedQuoteSort) {
+    state.quoteSort = resolvedQuoteSort;
     updateQuoteTabs();
   }
   if (postParam) {
     postUrlInput.value = postParam;
     performQuoteSearch();
+  }
+
+  if (!hasValidSearchSort && hasValidLegacySearchSort) {
+    params.set('searchSort', legacySortParam);
+  }
+  if (!hasValidQuoteSort && hasValidLegacyQuoteSort) {
+    params.set('quoteSort', legacySortParam);
+  }
+  if ((!hasValidSearchSort && hasValidLegacySearchSort) || (!hasValidQuoteSort && hasValidLegacyQuoteSort)) {
+    params.delete('sort');
+    updateURLWithParams(params);
   }
 
   updateExpansionSummary();
