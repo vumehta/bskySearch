@@ -41,6 +41,7 @@ import {
   sortPosts,
 } from './utils.mjs';
 import { enforceSearchCacheLimit, getCachedSearch } from './cache.mjs';
+import { consumePendingSearch } from './search-state.mjs';
 import { setQueryParam, updateURLWithParams } from './url.mjs';
 import { isReplyPost, toggleThread } from './thread.mjs';
 
@@ -1120,8 +1121,7 @@ export async function performSearch() {
     if (state.autoRefreshEnabled && searchCompleted) {
       scheduleNextRefresh();
     }
-    if (state.pendingSearch) {
-      state.pendingSearch = false;
+    if (consumePendingSearch(state)) {
       performSearch();
     }
   }
@@ -1174,6 +1174,9 @@ export async function loadMore() {
     if (loadMoreBtn) {
       loadMoreBtn.disabled = false;
       loadMoreBtn.textContent = 'Load More Results';
+    }
+    if (consumePendingSearch(state)) {
+      performSearch();
     }
   }
 }
