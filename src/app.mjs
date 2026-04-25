@@ -17,6 +17,7 @@ import {
 import {
   applySearchSortChange,
   cancelDebouncedSearch,
+  clearSearchResults,
   debouncedSearch,
   disableAutoRefresh,
   enableAutoRefresh,
@@ -167,7 +168,7 @@ termsInput.addEventListener('input', () => {
   updateExpansionSummary();
   if (!termsInput.value.trim()) {
     cancelDebouncedSearch();
-    state.pendingSearch = false;
+    clearSearchResults();
     return;
   }
   debouncedSearch();
