@@ -1238,7 +1238,7 @@ export function clearSearchResults() {
   state.rawSearchTerms = [];
   state.searchTerms = [];
   state.pendingPosts = [];
-  state.newPostUris.clear();
+  clearNewPostHighlights();
   clearDerivedPostsTimer();
   clearIngestedPosts();
   resetRenderLimit();

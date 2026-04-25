@@ -80,12 +80,14 @@ describe('search result race guards', () => {
     state.nextRefreshAt = null;
     state.pendingPosts = [];
     state.newPostUris = new Set();
+    state.clearHighlightsTimeout = null;
     mocks.dom.autoRefreshToggle.checked = false;
   });
 
   afterEach(() => {
     if (state?.refreshTimerId) clearTimeout(state.refreshTimerId);
     if (state?.refreshCountdownId) clearInterval(state.refreshCountdownId);
+    if (state?.clearHighlightsTimeout) clearTimeout(state.clearHighlightsTimeout);
     globalThis.document = originalDocument;
     globalThis.fetch = originalFetch;
     delete globalThis.window;
@@ -136,5 +138,15 @@ describe('search result race guards', () => {
     expect(state.refreshCountdownId).toBe(null);
     expect(mocks.dom.refreshStateDiv.textContent).toBe('Auto-refresh off');
     expect(mocks.dom.refreshNextDiv.textContent).toBe('');
+  });
+
+  it('cancels pending highlight clear timers when clearing search results', () => {
+    state.newPostUris = new Set(['at://highlighted']);
+    state.clearHighlightsTimeout = setTimeout(() => {}, 8000);
+
+    search.clearSearchResults();
+
+    expect(state.newPostUris.size).toBe(0);
+    expect(state.clearHighlightsTimeout).toBe(null);
   });
 });
