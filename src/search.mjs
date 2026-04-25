@@ -926,22 +926,31 @@ async function refreshSearch() {
     return 0;
   }
 
+  const currentGeneration = state.searchGeneration;
+  const searchTerms = [...state.searchTerms];
+  const searchSort = state.searchSort;
+  const minLikes = state.minLikes;
+  const timeFilterHours = state.timeFilterHours;
   const retainedPosts = pruneIngestedPostsByCurrentFilters();
-  state.allPosts = sortPosts(retainedPosts, state.searchSort);
+  state.allPosts = sortPosts(retainedPosts, searchSort);
 
-  state.pendingPosts = filterByDate(state.pendingPosts, state.timeFilterHours);
-  state.pendingPosts = filterByLikes(state.pendingPosts, state.minLikes);
+  state.pendingPosts = filterByDate(state.pendingPosts, timeFilterHours);
+  state.pendingPosts = filterByLikes(state.pendingPosts, minLikes);
 
   const existingUris = new Set([
     ...Array.from(ingestedPostsByUri.keys()),
     ...state.pendingPosts.map((post) => post.uri),
   ]);
   const results = await Promise.all(
-    state.searchTerms.map((term) => fetchLatestPostsForTerm(term, state.searchSort))
+    searchTerms.map((term) => fetchLatestPostsForTerm(term, searchSort))
   );
+  if (!isCurrentSearchGeneration(currentGeneration)) {
+    return null;
+  }
+
   let latestPosts = deduplicatePosts(results.flat());
-  latestPosts = filterByDate(latestPosts, state.timeFilterHours);
-  latestPosts = filterByLikes(latestPosts, state.minLikes);
+  latestPosts = filterByDate(latestPosts, timeFilterHours);
+  latestPosts = filterByLikes(latestPosts, minLikes);
 
   const newPosts = latestPosts.filter((post) => !existingUris.has(post.uri));
 
@@ -984,7 +993,11 @@ async function runAutoRefresh() {
   updateRefreshMeta();
 
   try {
+    const currentGeneration = state.searchGeneration;
     const newCount = await refreshSearch();
+    if (newCount === null || !isCurrentSearchGeneration(currentGeneration)) {
+      return;
+    }
     state.lastRefreshAt = new Date();
     state.lastRefreshNewCount = newCount;
   } catch (error) {
@@ -1131,6 +1144,7 @@ export async function performSearch() {
 export async function loadMore() {
   if (state.isLoading) return;
 
+  const currentGeneration = state.searchGeneration;
   const prevCount = state.allPosts.length;
   state.isLoading = true;
   const loadMoreBtn = loadMoreBtnEl || document.getElementById('loadMoreBtn');
@@ -1140,23 +1154,37 @@ export async function loadMore() {
   }
 
   try {
-    const promises = state.searchTerms
-      .filter((term) => state.currentCursors[term])
-      .map(async (term) => {
-        const data = await searchTerm(term, state.currentCursors[term], state.searchSort);
-        state.currentCursors[term] = data.cursor || null;
+    const searchSort = state.searchSort;
+    const requests = state.searchTerms
+      .map((term) => ({ term, cursor: state.currentCursors[term] }))
+      .filter((request) => request.cursor);
+    const promises = requests
+      .map(async ({ term, cursor }) => {
+        const data = await searchTerm(term, cursor, searchSort);
 
         if (data.posts && data.posts.length > 0) {
-          return data.posts.map((post) => ({
-            ...post,
-            matchedTerm: term,
-          }));
+          return {
+            cursor: data.cursor || null,
+            posts: data.posts.map((post) => ({
+              ...post,
+              matchedTerm: term,
+            })),
+            term,
+          };
         }
-        return [];
+        return { cursor: data.cursor || null, posts: [], term };
       });
 
     const results = await Promise.all(promises);
-    const newPosts = results.flat();
+    if (!isCurrentSearchGeneration(currentGeneration)) {
+      return;
+    }
+
+    results.forEach((result) => {
+      state.currentCursors[result.term] = result.cursor;
+    });
+
+    const newPosts = results.flatMap((result) => result.posts);
 
     if (newPosts.length > 0) {
       ingestPosts(newPosts);
