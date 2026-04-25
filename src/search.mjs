@@ -1198,6 +1198,25 @@ export function cancelDebouncedSearch() {
   }
 }
 
+export function clearSearchResults() {
+  state.pendingSearch = false;
+  state.searchGeneration++;
+  state.allPosts = [];
+  state.currentCursors = {};
+  state.rawSearchTerms = [];
+  state.searchTerms = [];
+  state.pendingPosts = [];
+  state.newPostUris.clear();
+  clearDerivedPostsTimer();
+  clearIngestedPosts();
+  resetRenderLimit();
+  resetResultsRenderCache();
+  renderNewPosts();
+  hideStatus();
+  updateSearchURL();
+  updateRefreshMeta();
+}
+
 export function focusSearchInput() {
   if (!termsInput) return;
   if (typeof termsInput.focus === 'function') {

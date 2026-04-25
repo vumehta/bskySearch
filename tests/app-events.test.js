@@ -49,6 +49,7 @@ const mocks = vi.hoisted(() => {
   const search = {
     applySearchSortChange: vi.fn(),
     cancelDebouncedSearch: vi.fn(),
+    clearSearchResults: vi.fn(),
     debouncedSearch: vi.fn(),
     disableAutoRefresh: vi.fn(),
     enableAutoRefresh: vi.fn(),
@@ -181,6 +182,51 @@ describe('app sort change handler', () => {
     mocks.dom.sortSelect.dispatch('change');
 
     expect(mocks.search.scheduleNextRefresh).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('app search input handler', () => {
+  let originalWindow;
+
+  beforeEach(() => {
+    vi.resetModules();
+    mocks.reset();
+    originalWindow = globalThis.window;
+    globalThis.window = { location: { search: '' } };
+  });
+
+  afterEach(() => {
+    if (originalWindow === undefined) {
+      delete globalThis.window;
+      return;
+    }
+    globalThis.window = originalWindow;
+  });
+
+  it('clears stale results when the terms field is emptied', async () => {
+    await bootApp();
+
+    const expansionCallsBeforeInput = mocks.search.updateExpansionSummary.mock.calls.length;
+    mocks.dom.termsInput.value = '';
+    mocks.state.pendingSearch = true;
+    mocks.dom.termsInput.dispatch('input');
+
+    expect(mocks.search.updateExpansionSummary).toHaveBeenCalledTimes(expansionCallsBeforeInput + 1);
+    expect(mocks.search.cancelDebouncedSearch).toHaveBeenCalledTimes(1);
+    expect(mocks.search.clearSearchResults).toHaveBeenCalledTimes(1);
+    expect(mocks.search.debouncedSearch).not.toHaveBeenCalled();
+  });
+
+  it('debounces search when the terms field has content', async () => {
+    await bootApp();
+
+    const expansionCallsBeforeInput = mocks.search.updateExpansionSummary.mock.calls.length;
+    mocks.dom.termsInput.value = 'apple';
+    mocks.dom.termsInput.dispatch('input');
+
+    expect(mocks.search.updateExpansionSummary).toHaveBeenCalledTimes(expansionCallsBeforeInput + 1);
+    expect(mocks.search.clearSearchResults).not.toHaveBeenCalled();
+    expect(mocks.search.debouncedSearch).toHaveBeenCalledTimes(1);
   });
 });
 
