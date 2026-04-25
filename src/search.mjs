@@ -1229,6 +1229,10 @@ export function cancelDebouncedSearch() {
 export function clearSearchResults() {
   state.pendingSearch = false;
   state.searchGeneration++;
+  state.autoRefreshEnabled = false;
+  autoRefreshToggle.checked = false;
+  clearRefreshTimers();
+  state.nextRefreshAt = null;
   state.allPosts = [];
   state.currentCursors = {};
   state.rawSearchTerms = [];

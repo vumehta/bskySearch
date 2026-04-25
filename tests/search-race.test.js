@@ -74,11 +74,18 @@ describe('search result race guards', () => {
     state.searchTerms = [];
     state.searchGeneration = 0;
     state.isLoading = false;
+    state.autoRefreshEnabled = false;
+    state.refreshTimerId = null;
+    state.refreshCountdownId = null;
+    state.nextRefreshAt = null;
     state.pendingPosts = [];
     state.newPostUris = new Set();
+    mocks.dom.autoRefreshToggle.checked = false;
   });
 
   afterEach(() => {
+    if (state?.refreshTimerId) clearTimeout(state.refreshTimerId);
+    if (state?.refreshCountdownId) clearInterval(state.refreshCountdownId);
     globalThis.document = originalDocument;
     globalThis.fetch = originalFetch;
     delete globalThis.window;
@@ -111,5 +118,23 @@ describe('search result race guards', () => {
     expect(state.allPosts).toEqual([]);
     expect(state.currentCursors).toEqual({});
     expect(state.searchTerms).toEqual([]);
+  });
+
+  it('turns off auto-refresh immediately when clearing search results', () => {
+    state.autoRefreshEnabled = true;
+    state.nextRefreshAt = Date.now() + 300000;
+    state.refreshTimerId = setTimeout(() => {}, 300000);
+    state.refreshCountdownId = setInterval(() => {}, 1000);
+    mocks.dom.autoRefreshToggle.checked = true;
+
+    search.clearSearchResults();
+
+    expect(state.autoRefreshEnabled).toBe(false);
+    expect(mocks.dom.autoRefreshToggle.checked).toBe(false);
+    expect(state.nextRefreshAt).toBe(null);
+    expect(state.refreshTimerId).toBe(null);
+    expect(state.refreshCountdownId).toBe(null);
+    expect(mocks.dom.refreshStateDiv.textContent).toBe('Auto-refresh off');
+    expect(mocks.dom.refreshNextDiv.textContent).toBe('');
   });
 });
