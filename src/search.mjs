@@ -40,6 +40,7 @@ import {
   setText,
   sortPosts,
 } from './utils.mjs';
+import { appendEngagementStats, SEARCH_STAT_CLASSES } from './post-stats.mjs';
 import { enforceSearchCacheLimit, getCachedSearch } from './cache.mjs';
 import { consumePendingSearch } from './search-state.mjs';
 import { setQueryParam, updateURLWithParams } from './url.mjs';
@@ -567,37 +568,7 @@ function createPostElement(post) {
   // Stats
   const statsDiv = document.createElement('div');
   statsDiv.className = 'post-stats';
-
-  const likeStat = document.createElement('span');
-  likeStat.className = 'stat likes';
-  likeStat.setAttribute('aria-label', `${post.likeCount || 0} likes`);
-  const likeIcon = document.createElement('span');
-  likeIcon.setAttribute('aria-hidden', 'true');
-  likeIcon.textContent = '\u2665 ';
-  likeStat.appendChild(likeIcon);
-  likeStat.appendChild(document.createTextNode(post.likeCount || 0));
-  statsDiv.appendChild(likeStat);
-
-  const repostStat = document.createElement('span');
-  repostStat.className = 'stat';
-  repostStat.setAttribute('aria-label', `${post.repostCount || 0} reposts`);
-  const repostIcon = document.createElement('span');
-  repostIcon.setAttribute('aria-hidden', 'true');
-  repostIcon.textContent = '\u21bb ';
-  repostStat.appendChild(repostIcon);
-  repostStat.appendChild(document.createTextNode(post.repostCount || 0));
-  statsDiv.appendChild(repostStat);
-
-  const replyStat = document.createElement('span');
-  replyStat.className = 'stat';
-  replyStat.setAttribute('aria-label', `${post.replyCount || 0} replies`);
-  const replyIcon = document.createElement('span');
-  replyIcon.setAttribute('aria-hidden', 'true');
-  replyIcon.textContent = '\ud83d\udcac ';
-  replyStat.appendChild(replyIcon);
-  replyStat.appendChild(document.createTextNode(post.replyCount || 0));
-  statsDiv.appendChild(replyStat);
-
+  appendEngagementStats(statsDiv, post, SEARCH_STAT_CLASSES);
   postDiv.appendChild(statsDiv);
 
   // Links container
