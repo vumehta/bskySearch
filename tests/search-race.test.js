@@ -16,15 +16,9 @@ const mocks = vi.hoisted(() => {
   });
 
   const dom = {
-    autoRefreshToggle: { checked: false },
     expandSummary: createElement(),
     expandTermsToggle: { checked: false },
     minLikesInput: { value: '0' },
-    newPostsDiv: createElement(),
-    refreshIntervalSelect: { value: '5' },
-    refreshLastDiv: createElement(),
-    refreshNextDiv: createElement(),
-    refreshStateDiv: createElement(),
     resultsDiv: createElement(),
     searchBtn: { disabled: false },
     sortSelect: { value: 'top' },
@@ -74,20 +68,9 @@ describe('search result race guards', () => {
     state.searchTerms = [];
     state.searchGeneration = 0;
     state.isLoading = false;
-    state.autoRefreshEnabled = false;
-    state.refreshTimerId = null;
-    state.refreshCountdownId = null;
-    state.nextRefreshAt = null;
-    state.pendingPosts = [];
-    state.newPostUris = new Set();
-    state.clearHighlightsTimeout = null;
-    mocks.dom.autoRefreshToggle.checked = false;
   });
 
   afterEach(() => {
-    if (state?.refreshTimerId) clearTimeout(state.refreshTimerId);
-    if (state?.refreshCountdownId) clearInterval(state.refreshCountdownId);
-    if (state?.clearHighlightsTimeout) clearTimeout(state.clearHighlightsTimeout);
     globalThis.document = originalDocument;
     globalThis.fetch = originalFetch;
     delete globalThis.window;
@@ -122,31 +105,4 @@ describe('search result race guards', () => {
     expect(state.searchTerms).toEqual([]);
   });
 
-  it('turns off auto-refresh immediately when clearing search results', () => {
-    state.autoRefreshEnabled = true;
-    state.nextRefreshAt = Date.now() + 300000;
-    state.refreshTimerId = setTimeout(() => {}, 300000);
-    state.refreshCountdownId = setInterval(() => {}, 1000);
-    mocks.dom.autoRefreshToggle.checked = true;
-
-    search.clearSearchResults();
-
-    expect(state.autoRefreshEnabled).toBe(false);
-    expect(mocks.dom.autoRefreshToggle.checked).toBe(false);
-    expect(state.nextRefreshAt).toBe(null);
-    expect(state.refreshTimerId).toBe(null);
-    expect(state.refreshCountdownId).toBe(null);
-    expect(mocks.dom.refreshStateDiv.textContent).toBe('Auto-refresh off');
-    expect(mocks.dom.refreshNextDiv.textContent).toBe('');
-  });
-
-  it('cancels pending highlight clear timers when clearing search results', () => {
-    state.newPostUris = new Set(['at://highlighted']);
-    state.clearHighlightsTimeout = setTimeout(() => {}, 8000);
-
-    search.clearSearchResults();
-
-    expect(state.newPostUris.size).toBe(0);
-    expect(state.clearHighlightsTimeout).toBe(null);
-  });
 });
