@@ -236,14 +236,6 @@ body {
     color: var(--text);
 }
 
-.refresh-link {
-    align-self: flex-end;
-}
-
-.refresh-link .thread-link {
-    font-size: 13px;
-}
-
 label {
     font-size: 14px;
     font-weight: 500;
