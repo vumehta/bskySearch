@@ -6,6 +6,7 @@ export {
   formatDuration,
   getPostTimestamp,
   getSearchCacheKey,
+  getSearchSince,
   isValidBskyUrl,
   normalizeTerm,
   parseBlueskyPostUrl,
