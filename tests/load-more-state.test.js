@@ -117,15 +117,9 @@ const mocks = vi.hoisted(() => {
   };
 
   const dom = {
-    autoRefreshToggle: { checked: false },
     expandSummary: createElement('span'),
     expandTermsToggle: { checked: false },
     minLikesInput: { value: '0' },
-    newPostsDiv: createElement('div'),
-    refreshIntervalSelect: { value: '5' },
-    refreshLastDiv: createElement('div'),
-    refreshNextDiv: createElement('div'),
-    refreshStateDiv: createElement('div'),
     resultsDiv: createElement('div'),
     searchBtn: { disabled: false },
     sortSelect: { value: 'top' },
@@ -133,7 +127,7 @@ const mocks = vi.hoisted(() => {
     termsInput: { value: '' },
     timeFilterSelect: { value: '24' },
   };
-  roots.push(dom.resultsDiv, dom.newPostsDiv, dom.statusDiv);
+  roots.push(dom.resultsDiv, dom.statusDiv);
 
   return { document, dom };
 });
@@ -219,17 +213,11 @@ describe('load more button state', () => {
     state.searchGeneration = 0;
     state.isLoading = false;
     state.pendingSearch = false;
-    state.autoRefreshEnabled = false;
-    state.pendingPosts = [];
-    state.newPostUris = new Set();
     mocks.dom.termsInput.value = 'apple';
     mocks.dom.minLikesInput.value = '0';
   });
 
   afterEach(() => {
-    if (state?.refreshTimerId) clearTimeout(state.refreshTimerId);
-    if (state?.refreshCountdownId) clearInterval(state.refreshCountdownId);
-    if (state?.clearHighlightsTimeout) clearTimeout(state.clearHighlightsTimeout);
     globalThis.document = originalDocument;
     globalThis.fetch = originalFetch;
     globalThis.requestAnimationFrame = originalRaf;

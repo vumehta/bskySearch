@@ -167,24 +167,6 @@ export function getPostTimestamp(post) {
   return Number.isNaN(time) ? 0 : time;
 }
 
-export function formatTime(value) {
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
-
-export function formatDuration(ms) {
-  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  if (minutes >= 60) {
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-    return `${hours}h ${mins}m`;
-  }
-  return `${minutes}:${String(seconds).padStart(2, '0')}`;
-}
-
 export function parseBlueskyPostUrl(urlString) {
   let parsedUrl;
   try {

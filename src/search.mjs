@@ -7,15 +7,9 @@ import {
 } from './constants.mjs';
 import { isCurrentSearchGeneration, searchCache, state } from './state.mjs';
 import {
-  autoRefreshToggle,
   expandSummary,
   expandTermsToggle,
   minLikesInput,
-  newPostsDiv,
-  refreshIntervalSelect,
-  refreshLastDiv,
-  refreshNextDiv,
-  refreshStateDiv,
   resultsDiv,
   searchBtn,
   sortSelect,
@@ -24,14 +18,10 @@ import {
   timeFilterSelect,
 } from './dom.mjs';
 import {
-  deduplicatePosts,
   expandSearchTerms,
   filterByDate,
   filterByLikes,
-  formatDuration,
   formatRelativeTime,
-  formatTime,
-  getPostTimestamp,
   getPostUrl,
   getSearchCacheKey,
   getSearchSince,
@@ -194,17 +184,6 @@ async function fetchAllPostsForTerm(
   return allTermPosts;
 }
 
-async function fetchLatestPostsForTerm(term, sort = state.searchSort, since = state.searchSince) {
-  const data = await searchTerm(term, null, sort, since);
-  if (data.posts && data.posts.length > 0) {
-    return data.posts.map((post) => ({
-      ...post,
-      matchedTerm: term,
-    }));
-  }
-  return [];
-}
-
 function resetRenderLimit() {
   state.renderLimit = INITIAL_RENDER_LIMIT;
 }
@@ -311,106 +290,8 @@ function flushDerivedPostsRebuild({ render = false } = {}) {
   }
 }
 
-function pruneIngestedPostsByCurrentFilters() {
-  const hours =
-    Number.isFinite(state.timeFilterHours) && state.timeFilterHours > 0 ? state.timeFilterHours : 24;
-  const cutoffTs = Date.now() - hours * 3600000;
-  const minLikes = Number.isFinite(state.minLikes) && state.minLikes > 0 ? state.minLikes : 0;
-
-  const retainedPosts = [];
-  const prunedStore = new Map();
-
-  for (const [uri, post] of ingestedPostsByUri.entries()) {
-    if (getPostTimestamp(post) < cutoffTs) {
-      continue;
-    }
-    if ((post.likeCount || 0) < minLikes) {
-      continue;
-    }
-
-    prunedStore.set(uri, post);
-    retainedPosts.push(post);
-  }
-
-  ingestedPostsByUri = prunedStore;
-  return retainedPosts;
-}
-
 function clearIngestedPosts() {
   ingestedPostsByUri.clear();
-}
-
-function clearRefreshTimers() {
-  if (state.refreshTimerId) {
-    clearTimeout(state.refreshTimerId);
-    state.refreshTimerId = null;
-  }
-  if (state.refreshCountdownId) {
-    clearInterval(state.refreshCountdownId);
-    state.refreshCountdownId = null;
-  }
-}
-
-export function updateRefreshInterval() {
-  const minutes = parseInt(refreshIntervalSelect.value, 10);
-  state.refreshIntervalMs = Number.isFinite(minutes) && minutes > 0 ? minutes * 60000 : 5 * 60000;
-}
-
-export function updateRefreshMeta() {
-  if (state.autoRefreshEnabled) {
-    refreshStateDiv.textContent = state.isRefreshing ? 'Refreshing…' : 'Auto-refresh on';
-  } else {
-    refreshStateDiv.textContent = 'Auto-refresh off';
-  }
-
-  if (state.lastRefreshError) {
-    refreshLastDiv.textContent = `Last update failed: ${state.lastRefreshError}`;
-  } else if (state.lastRefreshAt) {
-    const suffix = Number.isFinite(state.lastRefreshNewCount)
-      ? ` (+${state.lastRefreshNewCount} new)`
-      : '';
-    refreshLastDiv.textContent = `Last updated: ${formatTime(state.lastRefreshAt)}${suffix}`;
-  } else {
-    refreshLastDiv.textContent = 'Last updated: --';
-  }
-
-  if (state.autoRefreshEnabled && state.nextRefreshAt) {
-    refreshNextDiv.textContent = `Next refresh in ${formatDuration(state.nextRefreshAt - Date.now())}`;
-  } else {
-    refreshNextDiv.textContent = '';
-  }
-}
-
-export function scheduleNextRefresh() {
-  clearRefreshTimers();
-  if (!state.autoRefreshEnabled) {
-    state.nextRefreshAt = null;
-    updateRefreshMeta();
-    return;
-  }
-  state.nextRefreshAt = Date.now() + state.refreshIntervalMs;
-  state.refreshTimerId = setTimeout(runAutoRefresh, state.refreshIntervalMs);
-  state.refreshCountdownId = setInterval(updateRefreshMeta, 1000);
-  updateRefreshMeta();
-}
-
-function clearNewPostHighlights() {
-  state.newPostUris.clear();
-  if (state.clearHighlightsTimeout) {
-    clearTimeout(state.clearHighlightsTimeout);
-    state.clearHighlightsTimeout = null;
-  }
-}
-
-function scheduleNewPostHighlightClear() {
-  if (state.clearHighlightsTimeout) {
-    clearTimeout(state.clearHighlightsTimeout);
-  }
-  state.clearHighlightsTimeout = setTimeout(() => {
-    state.newPostUris.clear();
-    state.clearHighlightsTimeout = null;
-    renderResults();
-  }, 8000);
 }
 
 function getHighlightMatcher(terms) {
@@ -467,9 +348,6 @@ function createPostElement(post) {
 
   const postDiv = document.createElement('div');
   postDiv.className = 'post';
-  if (state.newPostUris.has(post.uri)) {
-    postDiv.classList.add('new-post');
-  }
 
   // Search terms tags
   const termsDiv = document.createElement('div');
@@ -698,7 +576,6 @@ function getPostRenderFingerprint(post) {
     post.repostCount || 0,
     post.replyCount || 0,
     matchedTerms,
-    state.newPostUris.has(post.uri) ? '1' : '0',
   ].join('\u0002');
 }
 
@@ -785,14 +662,8 @@ function renderResults() {
     showMoreBtnEl.style.display = 'none';
     syncLoadMoreButton();
     resultsEmptyEl.style.display = 'block';
-    resultsEmptyPrimaryEl.textContent =
-      state.pendingPosts.length > 0
-        ? 'New posts are waiting above.'
-        : 'No posts found matching your criteria.';
-    resultsEmptySecondaryEl.textContent =
-      state.pendingPosts.length > 0
-        ? 'Use "Add to results" to merge them into the main list.'
-        : 'Try different search terms or lower the minimum likes.';
+    resultsEmptyPrimaryEl.textContent = 'No posts found matching your criteria.';
+    resultsEmptySecondaryEl.textContent = 'Try different search terms or lower the minimum likes.';
     if (resultsListEl.children.length > 0) {
       resultsListEl.textContent = '';
       renderedPostElements.clear();
@@ -834,188 +705,6 @@ function renderResults() {
   syncLoadMoreButton();
 }
 
-function renderNewPosts() {
-  newPostsDiv.textContent = '';
-  if (state.pendingPosts.length === 0) {
-    newPostsDiv.classList.add('hidden');
-    return;
-  }
-
-  newPostsDiv.classList.remove('hidden');
-
-  const header = document.createElement('div');
-  header.className = 'new-posts-header';
-
-  const title = document.createElement('div');
-  title.className = 'new-posts-title';
-  title.textContent = `${state.pendingPosts.length} new post${state.pendingPosts.length !== 1 ? 's' : ''} from auto-refresh`;
-  header.appendChild(title);
-
-  const actions = document.createElement('div');
-  actions.className = 'new-posts-actions';
-
-  const addBtn = document.createElement('button');
-  addBtn.type = 'button';
-  addBtn.className = 'button-small';
-  addBtn.textContent = 'Add to results';
-  addBtn.addEventListener('click', mergePendingPosts);
-  actions.appendChild(addBtn);
-
-  const dismissBtn = document.createElement('button');
-  dismissBtn.type = 'button';
-  dismissBtn.className = 'button-secondary button-small';
-  dismissBtn.textContent = 'Dismiss';
-  dismissBtn.addEventListener('click', dismissPendingPosts);
-  actions.appendChild(dismissBtn);
-
-  header.appendChild(actions);
-  newPostsDiv.appendChild(header);
-
-  const list = document.createElement('div');
-  list.className = 'new-posts-list';
-  const sorted = [...state.pendingPosts].sort((a, b) => getPostTimestamp(b) - getPostTimestamp(a));
-  sorted.forEach((post) => {
-    list.appendChild(createPostElement(post));
-  });
-  newPostsDiv.appendChild(list);
-}
-
-function mergePendingPosts() {
-  if (state.pendingPosts.length === 0) {
-    return;
-  }
-
-  ingestPosts(state.pendingPosts);
-  flushDerivedPostsRebuild();
-
-  clearNewPostHighlights();
-  state.newPostUris = new Set(state.pendingPosts.map((post) => post.uri));
-  scheduleNewPostHighlightClear();
-  state.pendingPosts = [];
-  renderNewPosts();
-  renderResults();
-}
-
-function dismissPendingPosts() {
-  if (state.pendingPosts.length === 0) {
-    return;
-  }
-  state.pendingPosts = [];
-  clearNewPostHighlights();
-  renderNewPosts();
-  renderResults();
-}
-
-async function refreshSearch() {
-  if (state.searchTerms.length === 0) {
-    return 0;
-  }
-
-  const currentGeneration = state.searchGeneration;
-  const searchTerms = [...state.searchTerms];
-  const searchSort = state.searchSort;
-  const minLikes = state.minLikes;
-  const timeFilterHours = state.timeFilterHours;
-  // The window has moved on since the search started; ask for the current one.
-  const searchSince = getSearchSince(timeFilterHours);
-  const retainedPosts = pruneIngestedPostsByCurrentFilters();
-  state.allPosts = sortPosts(retainedPosts, searchSort);
-
-  state.pendingPosts = filterByDate(state.pendingPosts, timeFilterHours);
-  state.pendingPosts = filterByLikes(state.pendingPosts, minLikes);
-
-  const existingUris = new Set([
-    ...Array.from(ingestedPostsByUri.keys()),
-    ...state.pendingPosts.map((post) => post.uri),
-  ]);
-  const results = await Promise.all(
-    searchTerms.map((term) => fetchLatestPostsForTerm(term, searchSort, searchSince))
-  );
-  if (!isCurrentSearchGeneration(currentGeneration)) {
-    return null;
-  }
-
-  let latestPosts = deduplicatePosts(results.flat());
-  latestPosts = filterByDate(latestPosts, timeFilterHours);
-  latestPosts = filterByLikes(latestPosts, minLikes);
-
-  const newPosts = latestPosts.filter((post) => !existingUris.has(post.uri));
-
-  if (newPosts.length > 0) {
-    state.pendingPosts = deduplicatePosts([...state.pendingPosts, ...newPosts]);
-  }
-
-  clearNewPostHighlights();
-  if (newPosts.length > 0) {
-    state.newPostUris = new Set(newPosts.map((post) => post.uri));
-    scheduleNewPostHighlightClear();
-  }
-
-  renderNewPosts();
-  renderResults();
-  return newPosts.length;
-}
-
-async function runAutoRefresh() {
-  if (!state.autoRefreshEnabled) {
-    return;
-  }
-  if (state.isLoading || state.isRefreshing) {
-    scheduleNextRefresh();
-    return;
-  }
-  if (state.searchTerms.length === 0) {
-    state.autoRefreshEnabled = false;
-    autoRefreshToggle.checked = false;
-    state.nextRefreshAt = null;
-    state.lastRefreshError = 'Run a search first.';
-    updateRefreshMeta();
-    clearRefreshTimers();
-    return;
-  }
-
-  state.isRefreshing = true;
-  state.lastRefreshError = null;
-  state.lastRefreshNewCount = null;
-  updateRefreshMeta();
-
-  try {
-    const currentGeneration = state.searchGeneration;
-    const newCount = await refreshSearch();
-    if (newCount === null || !isCurrentSearchGeneration(currentGeneration)) {
-      return;
-    }
-    state.lastRefreshAt = new Date();
-    state.lastRefreshNewCount = newCount;
-  } catch (error) {
-    console.error('Auto-refresh error:', error);
-    state.lastRefreshError = error.message || 'Refresh failed.';
-  } finally {
-    state.isRefreshing = false;
-    scheduleNextRefresh();
-  }
-}
-
-export function enableAutoRefresh() {
-  if (state.searchTerms.length === 0) {
-    autoRefreshToggle.checked = false;
-    state.lastRefreshError = 'Run a search first.';
-    updateRefreshMeta();
-    return;
-  }
-  state.autoRefreshEnabled = true;
-  state.lastRefreshError = null;
-  updateRefreshInterval();
-  scheduleNextRefresh();
-}
-
-export function disableAutoRefresh() {
-  state.autoRefreshEnabled = false;
-  clearRefreshTimers();
-  state.nextRefreshAt = null;
-  updateRefreshMeta();
-}
-
 // Main search function
 export async function performSearch() {
   if (state.isLoading) {
@@ -1046,16 +735,12 @@ export async function performSearch() {
 
   state.isLoading = true;
   searchBtn.disabled = true;
-  let searchCompleted = false;
   state.allPosts = [];
   state.currentCursors = {};
   clearDerivedPostsTimer();
   clearIngestedPosts();
   resetResultsRenderCache();
   highlightMatcherCache = { key: '', regex: null, termSet: null };
-  clearNewPostHighlights();
-  state.pendingPosts = [];
-  renderNewPosts();
   resetRenderLimit();
 
   updateSearchURL();
@@ -1110,11 +795,6 @@ export async function performSearch() {
     }
 
     flushDerivedPostsRebuild({ render: true });
-    state.lastRefreshAt = new Date();
-    state.lastRefreshNewCount = null;
-    state.lastRefreshError = null;
-    searchCompleted = true;
-    updateRefreshMeta();
   } catch (error) {
     console.error('Search error:', error);
     showStatus(`Error: ${error.message}`, 'error');
@@ -1124,9 +804,6 @@ export async function performSearch() {
     // The final render above ran while isLoading was still true, which left
     // the "Load More" button disabled with "Loading…"; bring it back in sync.
     syncLoadMoreButton();
-    if (state.autoRefreshEnabled && searchCompleted) {
-      scheduleNextRefresh();
-    }
     if (consumePendingSearch(state)) {
       performSearch();
     }
@@ -1216,25 +893,17 @@ export function cancelDebouncedSearch() {
 export function clearSearchResults() {
   state.pendingSearch = false;
   state.searchGeneration++;
-  state.autoRefreshEnabled = false;
-  autoRefreshToggle.checked = false;
-  clearRefreshTimers();
-  state.nextRefreshAt = null;
   state.allPosts = [];
   state.currentCursors = {};
   state.rawSearchTerms = [];
   state.searchTerms = [];
   state.searchSince = null;
-  state.pendingPosts = [];
-  clearNewPostHighlights();
   clearDerivedPostsTimer();
   clearIngestedPosts();
   resetRenderLimit();
   resetResultsRenderCache();
-  renderNewPosts();
   hideStatus();
   updateSearchURL();
-  updateRefreshMeta();
 }
 
 export function focusSearchInput() {
@@ -1256,8 +925,4 @@ export function applySearchSortChange() {
 
 export function renderSearchResults() {
   renderResults();
-}
-
-export function renderPendingPosts() {
-  renderNewPosts();
 }
