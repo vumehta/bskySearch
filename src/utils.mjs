@@ -61,8 +61,18 @@ export function expandSearchTerms(terms, shouldExpandWords) {
 }
 
 // Generate cache key for search requests
-export function getSearchCacheKey(term, cursor, sort) {
-  return JSON.stringify([term, cursor || '', sort]);
+export function getSearchCacheKey(term, cursor, sort, since = '') {
+  return JSON.stringify([term, cursor || '', sort, since || '']);
+}
+
+// Start of the search window as a UTC timestamp for the API's `since` filter.
+// Rounded down to the minute so searches repeated within the cache TTL share
+// a cache key, and without fractional seconds to keep the value compact.
+export function getSearchSince(hours, now = Date.now()) {
+  const normalizedHours = Number.isFinite(hours) && hours > 0 ? hours : 24;
+  const cutoffTs = now - normalizedHours * 3600000;
+  const roundedTs = Math.floor(cutoffTs / 60000) * 60000;
+  return new Date(roundedTs).toISOString().replace(/\.\d{3}Z$/, 'Z');
 }
 
 // Deduplicate posts by URI

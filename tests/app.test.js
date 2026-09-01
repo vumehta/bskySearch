@@ -15,6 +15,7 @@ const {
   deduplicatePosts,
   trackQuoteCursor,
   getSearchCacheKey,
+  getSearchSince,
   getCachedDid,
   filterByDate,
   filterByLikes,
@@ -253,6 +254,37 @@ describe('getSearchCacheKey', () => {
     const key1 = getSearchCacheKey('term', null, 'top');
     const key2 = getSearchCacheKey('term', '', 'top');
     expect(key1).toBe(key2);
+  });
+
+  it('generates different keys for different since windows', () => {
+    const key1 = getSearchCacheKey('term', null, 'top', '2026-08-31T00:00:00Z');
+    const key2 = getSearchCacheKey('term', null, 'top', '2026-08-30T00:00:00Z');
+    expect(key1).not.toBe(key2);
+    expect(getSearchCacheKey('term', null, 'top')).toBe(getSearchCacheKey('term', null, 'top', ''));
+  });
+});
+
+// ============================================================================
+// getSearchSince
+// ============================================================================
+describe('getSearchSince', () => {
+  const now = Date.UTC(2026, 8, 1, 18, 34, 56, 789); // 2026-09-01T18:34:56.789Z
+
+  it('returns the window start rounded down to the minute in UTC', () => {
+    expect(getSearchSince(24, now)).toBe('2026-08-31T18:34:00Z');
+    expect(getSearchSince(1, now)).toBe('2026-09-01T17:34:00Z');
+    expect(getSearchSince(168, now)).toBe('2026-08-25T18:34:00Z');
+  });
+
+  it('falls back to 24 hours for invalid windows', () => {
+    expect(getSearchSince(0, now)).toBe('2026-08-31T18:34:00Z');
+    expect(getSearchSince(NaN, now)).toBe('2026-08-31T18:34:00Z');
+    expect(getSearchSince(-5, now)).toBe('2026-08-31T18:34:00Z');
+  });
+
+  it('is stable within a minute so cache keys can be shared', () => {
+    expect(getSearchSince(24, now)).toBe(getSearchSince(24, now + 3000));
+    expect(getSearchSince(24, now)).not.toBe(getSearchSince(24, now + 60000));
   });
 });
 

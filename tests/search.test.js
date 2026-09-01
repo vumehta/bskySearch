@@ -17,6 +17,7 @@ const {
   getQueryString,
   stripControlChars,
   getSearchCacheKey,
+  isValidSince,
   isSessionExpired,
   getCachedSearchResult,
   cleanupSearchCache,
@@ -261,6 +262,94 @@ describe('getSearchCacheKey', () => {
   it('returns valid JSON string', () => {
     const key = getSearchCacheKey('term', 'cursor', 'top');
     expect(() => JSON.parse(key)).not.toThrow();
+  });
+
+  it('generates different keys for different since windows', () => {
+    const key1 = getSearchCacheKey('term', null, 'top', '2026-08-31T00:00:00Z');
+    const key2 = getSearchCacheKey('term', null, 'top', '2026-08-30T00:00:00Z');
+    const key3 = getSearchCacheKey('term', null, 'top');
+    expect(key1).not.toBe(key2);
+    expect(key1).not.toBe(key3);
+  });
+});
+
+// ============================================================================
+// since parameter
+// ============================================================================
+describe('isValidSince', () => {
+  it('accepts ISO dates and UTC datetimes', () => {
+    expect(isValidSince('2026-08-31')).toBe(true);
+    expect(isValidSince('2026-08-31T18:00:00Z')).toBe(true);
+    expect(isValidSince('2026-08-31T18:00:00.123Z')).toBe(true);
+  });
+
+  it('rejects free-form, offset, and impossible values', () => {
+    expect(isValidSince('yesterday')).toBe(false);
+    expect(isValidSince('2026-08-31T18:00:00+02:00')).toBe(false);
+    expect(isValidSince('2026-13-45')).toBe(false);
+    expect(isValidSince('2026-08-31T18:00:00Z; DROP')).toBe(false);
+  });
+});
+
+describe('search handler since forwarding', () => {
+  function mockUpstream() {
+    const searchUrls = [];
+    global.fetch = vi.fn((url) => {
+      if (url.includes('/com.atproto.server.createSession')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ accessJwt: 'access-token', refreshJwt: 'refresh-token' }),
+        });
+      }
+      if (url.includes('/app.bsky.feed.searchPosts')) {
+        searchUrls.push(new URL(url));
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ posts: [] }) });
+      }
+      throw new Error(`Unexpected fetch URL in test: ${url}`);
+    });
+    return searchUrls;
+  }
+
+  it('returns 400 for a malformed since value without calling upstream', async () => {
+    const searchUrls = mockUpstream();
+    const response = await searchHandler(
+      new Request('https://example.com/api/search?term=trump&since=yesterday', { method: 'GET' }),
+    );
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: 'Invalid since parameter.' });
+    expect(searchUrls).toHaveLength(0);
+  });
+
+  it('forwards a valid since value to Bluesky', async () => {
+    const searchUrls = mockUpstream();
+    const response = await searchHandler(
+      new Request('https://example.com/api/search?term=trump&since=2026-08-31T18:00:00Z', {
+        method: 'GET',
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(searchUrls).toHaveLength(1);
+    expect(searchUrls[0].searchParams.get('since')).toBe('2026-08-31T18:00:00Z');
+    expect(searchUrls[0].searchParams.get('q')).toBe('trump');
+  });
+
+  it('omits since from the upstream request when not provided', async () => {
+    const searchUrls = mockUpstream();
+    await searchHandler(new Request('https://example.com/api/search?term=trump', { method: 'GET' }));
+    expect(searchUrls).toHaveLength(1);
+    expect(searchUrls[0].searchParams.has('since')).toBe(false);
+  });
+
+  it('caches results per since window', async () => {
+    const searchUrls = mockUpstream();
+    const base = 'https://example.com/api/search?term=trump';
+    await searchHandler(new Request(`${base}&since=2026-08-31T18:00:00Z`, { method: 'GET' }));
+    await searchHandler(new Request(`${base}&since=2026-08-31T18:00:00Z`, { method: 'GET' }));
+    await searchHandler(new Request(`${base}&since=2026-08-30T18:00:00Z`, { method: 'GET' }));
+    expect(searchUrls.map((url) => url.searchParams.get('since'))).toEqual([
+      '2026-08-31T18:00:00Z',
+      '2026-08-30T18:00:00Z',
+    ]);
   });
 });
 

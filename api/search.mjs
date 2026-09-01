@@ -95,6 +95,14 @@ function stripControlChars(value) {
   return value.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
 }
 
+// `since` is forwarded to Bluesky as a date-range filter. Accept an ISO date
+// (YYYY-MM-DD) or a UTC datetime, which is what the lexicon documents.
+const SINCE_PATTERN = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z)?$/;
+
+function isValidSince(value) {
+  return SINCE_PATTERN.test(value) && Number.isFinite(Date.parse(value));
+}
+
 function jsonNoStore(payload, status = 200, extraHeaders = {}) {
   return Response.json(payload, {
     status,
@@ -110,7 +118,8 @@ function parseSearchInput(request) {
   const term = stripControlChars(getQueryString(url.searchParams.get('term'))).trim();
   const cursor = stripControlChars(getQueryString(url.searchParams.get('cursor')));
   const sort = stripControlChars(getQueryString(url.searchParams.get('sort'))).trim().toLowerCase();
-  return { term, cursor, sort };
+  const since = stripControlChars(getQueryString(url.searchParams.get('since'))).trim();
+  return { term, cursor, sort, since };
 }
 
 async function createSession(handle, appPassword) {
@@ -218,8 +227,8 @@ async function refreshOrCreateSession(handle, appPassword) {
   return sessionPromise;
 }
 
-function getSearchCacheKey(term, cursor, sort) {
-  return JSON.stringify([term, cursor || '', sort]);
+function getSearchCacheKey(term, cursor, sort, since = '') {
+  return JSON.stringify([term, cursor || '', sort, since || '']);
 }
 
 function getCachedSearchResult(cacheKey) {
@@ -264,7 +273,7 @@ function resetModuleStateForTests() {
   lastSearchCacheCleanupAt = 0;
 }
 
-async function searchPosts(term, cursor, accessJwt, sort) {
+async function searchPosts(term, cursor, accessJwt, sort, since) {
   const sortValue = normalizeSortValue(sort);
   const params = new URLSearchParams({
     q: term,
@@ -275,6 +284,12 @@ async function searchPosts(term, cursor, accessJwt, sort) {
 
   if (cursor) {
     params.set('cursor', cursor);
+  }
+
+  // Restrict ranking to the requested window so every page is usable,
+  // instead of ranking across all time and discarding most results later.
+  if (since) {
+    params.set('since', since);
   }
 
   return fetchWithTimeout(`${BSKY_SERVICE}/app.bsky.feed.searchPosts?${params}`, {
@@ -294,7 +309,7 @@ export async function GET(request, context) {
     return jsonNoStore({ error: 'Server missing BSKY_HANDLE or BSKY_APP_PASSWORD.' }, 500);
   }
 
-  const { term, cursor, sort } = parseSearchInput(request);
+  const { term, cursor, sort, since } = parseSearchInput(request);
 
   if (!term) {
     return jsonNoStore({ error: 'Missing term parameter.' }, 400);
@@ -312,8 +327,12 @@ export async function GET(request, context) {
     return jsonNoStore({ error: 'Invalid sort parameter.' }, 400);
   }
 
+  if (since && !isValidSince(since)) {
+    return jsonNoStore({ error: 'Invalid since parameter.' }, 400);
+  }
+
   const sortValue = sort || 'top';
-  const cacheKey = getSearchCacheKey(term, cursor, sortValue);
+  const cacheKey = getSearchCacheKey(term, cursor, sortValue, since);
   const cachedResult = getCachedSearchResult(cacheKey);
   if (cachedResult) {
     return jsonNoStore(cachedResult, 200);
@@ -330,11 +349,11 @@ export async function GET(request, context) {
 
   try {
     let session = await ensureSession(handle, appPassword);
-    let response = await searchPosts(term, cursor, session.accessJwt, sortValue);
+    let response = await searchPosts(term, cursor, session.accessJwt, sortValue, since);
 
     if (response.status === 401) {
       session = await refreshOrCreateSession(handle, appPassword);
-      response = await searchPosts(term, cursor, session.accessJwt, sortValue);
+      response = await searchPosts(term, cursor, session.accessJwt, sortValue, since);
     }
 
     const payload = await response.json().catch(() => null);
@@ -362,6 +381,7 @@ export const testUtils =
         getQueryString,
         stripControlChars,
         getSearchCacheKey,
+        isValidSince,
         isSessionExpired,
         getCachedSearchResult,
         cleanupSearchCache,

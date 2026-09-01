@@ -183,6 +183,10 @@ function getLoadMoreButton() {
   return mocks.document.getElementById('loadMoreBtn');
 }
 
+function getRequestedSinceValues(fetchMock) {
+  return fetchMock.mock.calls.map(([url]) => new URL(url, 'https://example.test').searchParams.get('since'));
+}
+
 describe('load more button state', () => {
   let originalDocument;
   let originalFetch;
@@ -287,6 +291,37 @@ describe('load more button state', () => {
     const button = getLoadMoreButton();
     expect(button.style.display).toBe('none');
     expect(button.disabled).toBe(false);
+  });
+
+  it('sends the time window as since and reuses it when loading more', async () => {
+    const before = Date.now();
+    globalThis.fetch = makePagedFetch();
+    await search.performSearch();
+    const after = Date.now();
+
+    const searchSince = getRequestedSinceValues(globalThis.fetch);
+    expect(searchSince).toHaveLength(2);
+    expect(searchSince[0]).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00Z$/);
+    expect(searchSince[1]).toBe(searchSince[0]);
+    expect(state.searchSince).toBe(searchSince[0]);
+
+    // 24-hour window, rounded down to the minute.
+    const sinceTs = Date.parse(searchSince[0]);
+    expect(sinceTs).toBeLessThanOrEqual(after - 24 * 3600000);
+    expect(sinceTs).toBeGreaterThan(before - 24 * 3600000 - 60000);
+
+    globalThis.fetch = makePagedFetch();
+    await search.loadMore();
+    expect(getRequestedSinceValues(globalThis.fetch)).toEqual([searchSince[0]]);
+  });
+
+  it('drops the since window when results are cleared', async () => {
+    globalThis.fetch = makePagedFetch();
+    await search.performSearch();
+    expect(state.searchSince).not.toBe(null);
+
+    search.clearSearchResults();
+    expect(state.searchSince).toBe(null);
   });
 
   it('re-enables the button when loading more fails', async () => {

@@ -34,6 +34,7 @@ import {
   getPostTimestamp,
   getPostUrl,
   getSearchCacheKey,
+  getSearchSince,
   isValidBskyUrl,
   normalizeSortValue,
   normalizeTerm,
@@ -123,9 +124,9 @@ export function updateExpansionSummary() {
 }
 
 // Search posts for a single term (server-side proxy)
-async function searchTerm(term, cursor = null, sort = state.searchSort) {
+async function searchTerm(term, cursor = null, sort = state.searchSort, since = state.searchSince) {
   const sortValue = normalizeSortValue(sort);
-  const cacheKey = getSearchCacheKey(term, cursor, sortValue);
+  const cacheKey = getSearchCacheKey(term, cursor, sortValue, since);
 
   // Check cache first
   const cached = getCachedSearch(cacheKey);
@@ -136,6 +137,9 @@ async function searchTerm(term, cursor = null, sort = state.searchSort) {
   const params = new URLSearchParams({ term, sort: sortValue });
   if (cursor) {
     params.set('cursor', cursor);
+  }
+  if (since) {
+    params.set('since', since);
   }
 
   const response = await fetch(`${SEARCH_API}?${params}`);
@@ -160,13 +164,18 @@ async function searchTerm(term, cursor = null, sort = state.searchSort) {
 }
 
 // Fetch all posts for a term (with pagination)
-async function fetchAllPostsForTerm(term, maxPages = INITIAL_MAX_PAGES, sort = state.searchSort) {
+async function fetchAllPostsForTerm(
+  term,
+  maxPages = INITIAL_MAX_PAGES,
+  sort = state.searchSort,
+  since = state.searchSince
+) {
   let allTermPosts = [];
   let cursor = null;
   let pages = 0;
 
   while (pages < maxPages) {
-    const data = await searchTerm(term, cursor, sort);
+    const data = await searchTerm(term, cursor, sort, since);
 
     if (data.posts && data.posts.length > 0) {
       const taggedPosts = data.posts.map((post) => ({
@@ -185,8 +194,8 @@ async function fetchAllPostsForTerm(term, maxPages = INITIAL_MAX_PAGES, sort = s
   return allTermPosts;
 }
 
-async function fetchLatestPostsForTerm(term, sort = state.searchSort) {
-  const data = await searchTerm(term, null, sort);
+async function fetchLatestPostsForTerm(term, sort = state.searchSort, since = state.searchSince) {
+  const data = await searchTerm(term, null, sort, since);
   if (data.posts && data.posts.length > 0) {
     return data.posts.map((post) => ({
       ...post,
@@ -907,6 +916,8 @@ async function refreshSearch() {
   const searchSort = state.searchSort;
   const minLikes = state.minLikes;
   const timeFilterHours = state.timeFilterHours;
+  // The window has moved on since the search started; ask for the current one.
+  const searchSince = getSearchSince(timeFilterHours);
   const retainedPosts = pruneIngestedPostsByCurrentFilters();
   state.allPosts = sortPosts(retainedPosts, searchSort);
 
@@ -918,7 +929,7 @@ async function refreshSearch() {
     ...state.pendingPosts.map((post) => post.uri),
   ]);
   const results = await Promise.all(
-    searchTerms.map((term) => fetchLatestPostsForTerm(term, searchSort))
+    searchTerms.map((term) => fetchLatestPostsForTerm(term, searchSort, searchSince))
   );
   if (!isCurrentSearchGeneration(currentGeneration)) {
     return null;
@@ -1025,6 +1036,8 @@ export async function performSearch() {
   state.minLikes = parseInt(minLikesInput.value) || 0;
   state.timeFilterHours = parseInt(timeFilterSelect.value) || 24;
   state.searchSort = normalizeSortValue(sortSelect.value);
+  // Fixed for the lifetime of this search so pagination stays consistent.
+  state.searchSince = getSearchSince(state.timeFilterHours);
 
   if (state.rawSearchTerms.length === 0) {
     showStatus('Please enter at least one search term.', 'error');
@@ -1055,8 +1068,9 @@ export async function performSearch() {
     const totalTerms = state.searchTerms.length;
 
     // Fetch all terms in parallel, but render progressively as each completes
+    const searchSince = state.searchSince;
     const promises = state.searchTerms.map(async (term) => {
-      const posts = await fetchAllPostsForTerm(term, INITIAL_MAX_PAGES, state.searchSort);
+      const posts = await fetchAllPostsForTerm(term, INITIAL_MAX_PAGES, state.searchSort, searchSince);
 
       // Bail if a newer search has started — prevents stale data corruption
       if (!isCurrentSearchGeneration(currentGeneration)) return posts;
@@ -1130,12 +1144,13 @@ export async function loadMore() {
 
   try {
     const searchSort = state.searchSort;
+    const searchSince = state.searchSince;
     const requests = state.searchTerms
       .map((term) => ({ term, cursor: state.currentCursors[term] }))
       .filter((request) => request.cursor);
     const promises = requests
       .map(async ({ term, cursor }) => {
-        const data = await searchTerm(term, cursor, searchSort);
+        const data = await searchTerm(term, cursor, searchSort, searchSince);
 
         if (data.posts && data.posts.length > 0) {
           return {
@@ -1209,6 +1224,7 @@ export function clearSearchResults() {
   state.currentCursors = {};
   state.rawSearchTerms = [];
   state.searchTerms = [];
+  state.searchSince = null;
   state.pendingPosts = [];
   clearNewPostHighlights();
   clearDerivedPostsTimer();
