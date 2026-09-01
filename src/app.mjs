@@ -1,13 +1,11 @@
 import { state } from './state.mjs';
 import { normalizeSortValue } from './utils.mjs';
 import {
-  autoRefreshToggle,
   expandTermsToggle,
   minLikesInput,
   postUrlInput,
   quoteForm,
   quoteTabs,
-  refreshIntervalSelect,
   searchBtn,
   sortSelect,
   termsInput,
@@ -19,14 +17,9 @@ import {
   cancelDebouncedSearch,
   clearSearchResults,
   debouncedSearch,
-  disableAutoRefresh,
-  enableAutoRefresh,
   focusSearchInput,
   performSearch,
-  scheduleNextRefresh,
   updateExpansionSummary,
-  updateRefreshInterval,
-  updateRefreshMeta,
   updateSearchURL,
 } from './search.mjs';
 import {
@@ -127,30 +120,10 @@ prefersDarkScheme.addEventListener('change', () => {
   handleSystemThemeChange();
 });
 
-autoRefreshToggle.addEventListener('change', (event) => {
-  if (event.target.checked) {
-    enableAutoRefresh();
-  } else {
-    disableAutoRefresh();
-  }
-});
-
-refreshIntervalSelect.addEventListener('change', () => {
-  updateRefreshInterval();
-  if (state.autoRefreshEnabled) {
-    scheduleNextRefresh();
-  } else {
-    updateRefreshMeta();
-  }
-});
-
 sortSelect.addEventListener('change', () => {
   state.searchSort = normalizeSortValue(sortSelect.value);
   updateSearchURL();
   applySearchSortChange();
-  if (state.autoRefreshEnabled) {
-    scheduleNextRefresh();
-  }
 });
 
 quoteTabs.addEventListener('click', (event) => {
@@ -191,7 +164,5 @@ expandTermsToggle.addEventListener('change', () => {
 // Initialize
 initTheme();
 initFromURL();
-updateRefreshInterval();
-updateRefreshMeta();
 updateExpansionSummary();
 focusSearchInput();

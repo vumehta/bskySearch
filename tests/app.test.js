@@ -22,7 +22,6 @@ const {
   sortPosts,
   normalizeTerm,
   expandSearchTerms,
-  formatDuration,
   getPostTimestamp,
   didCache,
   state,
@@ -570,43 +569,6 @@ describe('normalizeTerm', () => {
 
   it('strips control characters', () => {
     expect(normalizeTerm('he\u0000l\u001Flo\u007F')).toBe('hello');
-  });
-});
-
-// ============================================================================
-// formatDuration
-// ============================================================================
-describe('formatDuration', () => {
-  it('formats seconds only', () => {
-    expect(formatDuration(45000)).toBe('0:45');
-  });
-
-  it('formats minutes and seconds', () => {
-    expect(formatDuration(125000)).toBe('2:05');
-  });
-
-  it('pads seconds with leading zero', () => {
-    expect(formatDuration(65000)).toBe('1:05');
-  });
-
-  it('formats hours and minutes', () => {
-    expect(formatDuration(3660000)).toBe('1h 1m');
-  });
-
-  it('formats multiple hours', () => {
-    expect(formatDuration(7320000)).toBe('2h 2m');
-  });
-
-  it('handles zero', () => {
-    expect(formatDuration(0)).toBe('0:00');
-  });
-
-  it('handles negative values as zero', () => {
-    expect(formatDuration(-1000)).toBe('0:00');
-  });
-
-  it('handles exactly one hour', () => {
-    expect(formatDuration(3600000)).toBe('1h 0m');
   });
 });
 

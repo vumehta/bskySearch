@@ -25,13 +25,11 @@ const mocks = vi.hoisted(() => {
   };
 
   const dom = {
-    autoRefreshToggle: createControl({ checked: false }),
     expandTermsToggle: createControl({ checked: false }),
     minLikesInput: createControl({ value: '' }),
     postUrlInput: createControl({ value: '' }),
     quoteForm: createControl(),
     quoteTabs: createControl(),
-    refreshIntervalSelect: createControl({ value: '5' }),
     searchBtn: createControl(),
     sortSelect: createControl({ value: 'top' }),
     termsInput: createControl({ value: '' }),
@@ -40,7 +38,6 @@ const mocks = vi.hoisted(() => {
   };
 
   const state = {
-    autoRefreshEnabled: false,
     pendingSearch: false,
     quoteSort: 'likes',
     searchSort: 'top',
@@ -51,14 +48,9 @@ const mocks = vi.hoisted(() => {
     cancelDebouncedSearch: vi.fn(),
     clearSearchResults: vi.fn(),
     debouncedSearch: vi.fn(),
-    disableAutoRefresh: vi.fn(),
-    enableAutoRefresh: vi.fn(),
     focusSearchInput: vi.fn(),
     performSearch: vi.fn(),
-    scheduleNextRefresh: vi.fn(),
     updateExpansionSummary: vi.fn(),
-    updateRefreshInterval: vi.fn(),
-    updateRefreshMeta: vi.fn(),
     updateSearchURL: vi.fn(),
   };
 
@@ -80,20 +72,17 @@ const mocks = vi.hoisted(() => {
   };
 
   const reset = () => {
-    dom.autoRefreshToggle.reset({ checked: false });
     dom.expandTermsToggle.reset({ checked: false });
     dom.minLikesInput.reset({ value: '' });
     dom.postUrlInput.reset({ value: '' });
     dom.quoteForm.reset();
     dom.quoteTabs.reset();
-    dom.refreshIntervalSelect.reset({ value: '5' });
     dom.searchBtn.reset();
     dom.sortSelect.reset({ value: 'top' });
     dom.termsInput.reset({ value: '' });
     dom.themeSelect.reset({ value: 'system' });
     dom.timeFilterSelect.reset({ value: '24' });
 
-    state.autoRefreshEnabled = false;
     state.pendingSearch = false;
     state.quoteSort = 'likes';
     state.searchSort = 'top';
@@ -158,7 +147,6 @@ describe('app sort change handler', () => {
     expect(mocks.state.searchSort).toBe('latest');
     expect(mocks.search.updateSearchURL).toHaveBeenCalledTimes(1);
     expect(mocks.search.applySearchSortChange).toHaveBeenCalledTimes(1);
-    expect(mocks.search.scheduleNextRefresh).not.toHaveBeenCalled();
   });
 
   it('rebuilds and re-renders when sort changes back to top', async () => {
@@ -171,17 +159,6 @@ describe('app sort change handler', () => {
     expect(mocks.state.searchSort).toBe('top');
     expect(mocks.search.updateSearchURL).toHaveBeenCalledTimes(1);
     expect(mocks.search.applySearchSortChange).toHaveBeenCalledTimes(1);
-    expect(mocks.search.scheduleNextRefresh).not.toHaveBeenCalled();
-  });
-
-  it('reschedules auto-refresh when enabled after sort changes', async () => {
-    await bootApp();
-
-    mocks.state.autoRefreshEnabled = true;
-    mocks.dom.sortSelect.value = 'latest';
-    mocks.dom.sortSelect.dispatch('change');
-
-    expect(mocks.search.scheduleNextRefresh).toHaveBeenCalledTimes(1);
   });
 });
 

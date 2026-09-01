@@ -3,7 +3,6 @@ export {
   expandSearchTerms,
   filterByDate,
   filterByLikes,
-  formatDuration,
   getPostTimestamp,
   getSearchCacheKey,
   getSearchSince,
