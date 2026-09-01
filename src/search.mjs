@@ -742,6 +742,27 @@ function syncVisibleResultPosts(visiblePosts) {
   }
 }
 
+// Keep the "Load More" button in step with pagination and loading state.
+// Called from renderResults() and from the finally blocks that clear
+// state.isLoading, so the button never stays stuck on "Loading…".
+function syncLoadMoreButton() {
+  if (!loadMoreBtnEl) return;
+
+  const hasMoreResults =
+    state.allPosts.length > 0 &&
+    Object.values(state.currentCursors).some((cursor) => cursor !== null);
+  if (!hasMoreResults) {
+    loadMoreBtnEl.style.display = 'none';
+    loadMoreBtnEl.disabled = false;
+    loadMoreBtnEl.textContent = 'Load More Results';
+    return;
+  }
+
+  loadMoreBtnEl.style.display = '';
+  loadMoreBtnEl.disabled = state.isLoading;
+  loadMoreBtnEl.textContent = state.isLoading ? 'Loading…' : 'Load More Results';
+}
+
 // Render all results using safe DOM methods
 function renderResults() {
   ensureResultsShell();
@@ -753,7 +774,7 @@ function renderResults() {
     resultsHeaderEl.style.display = 'none';
     resultsListEl.style.display = 'none';
     showMoreBtnEl.style.display = 'none';
-    loadMoreBtnEl.style.display = 'none';
+    syncLoadMoreButton();
     resultsEmptyEl.style.display = 'block';
     resultsEmptyPrimaryEl.textContent =
       state.pendingPosts.length > 0
@@ -801,23 +822,7 @@ function renderResults() {
     showMoreBtnEl.style.display = 'none';
   }
 
-  const hasMoreResults = Object.values(state.currentCursors).some((cursor) => cursor !== null);
-  if (hasMoreResults) {
-    loadMoreBtnEl.style.display = '';
-    if (state.isLoading) {
-      loadMoreBtnEl.disabled = true;
-      if (!loadMoreBtnEl.textContent || loadMoreBtnEl.textContent === 'Load More Results') {
-        loadMoreBtnEl.textContent = 'Loading…';
-      }
-    } else {
-      loadMoreBtnEl.disabled = false;
-      loadMoreBtnEl.textContent = 'Load More Results';
-    }
-  } else {
-    loadMoreBtnEl.style.display = 'none';
-    loadMoreBtnEl.disabled = false;
-    loadMoreBtnEl.textContent = 'Load More Results';
-  }
+  syncLoadMoreButton();
 }
 
 function renderNewPosts() {
@@ -1102,6 +1107,9 @@ export async function performSearch() {
   } finally {
     state.isLoading = false;
     searchBtn.disabled = false;
+    // The final render above ran while isLoading was still true, which left
+    // the "Load More" button disabled with "Loading…"; bring it back in sync.
+    syncLoadMoreButton();
     if (state.autoRefreshEnabled && searchCompleted) {
       scheduleNextRefresh();
     }
@@ -1118,11 +1126,7 @@ export async function loadMore() {
   const currentGeneration = state.searchGeneration;
   const prevCount = state.allPosts.length;
   state.isLoading = true;
-  const loadMoreBtn = loadMoreBtnEl || document.getElementById('loadMoreBtn');
-  if (loadMoreBtn) {
-    loadMoreBtn.disabled = true;
-    loadMoreBtn.textContent = 'Loading…';
-  }
+  syncLoadMoreButton();
 
   try {
     const searchSort = state.searchSort;
@@ -1170,10 +1174,7 @@ export async function loadMore() {
     showStatus(`Error loading more: ${error.message}`, 'error');
   } finally {
     state.isLoading = false;
-    if (loadMoreBtn) {
-      loadMoreBtn.disabled = false;
-      loadMoreBtn.textContent = 'Load More Results';
-    }
+    syncLoadMoreButton();
     if (consumePendingSearch(state)) {
       performSearch();
     }
