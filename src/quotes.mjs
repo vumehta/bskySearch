@@ -51,7 +51,7 @@ export function updateQuoteTabs() {
   });
 }
 
-function showQuoteStatus(message, type = 'info') {
+function showQuoteStatus(message, type) {
   quoteStatusDiv.className = `status ${type}`;
   setText(quoteStatusDiv, message);
   quoteStatusDiv.style.display = 'block';

@@ -1,3 +1,5 @@
+import { isDatetimeString } from '@atproto/syntax';
+
 function normalizeSortValue(raw) {
   return raw === 'latest' ? 'latest' : 'top';
 }
@@ -83,24 +85,37 @@ function getRuntimeCredentials(context) {
   };
 }
 
-function getQueryString(value) {
-  if (Array.isArray(value)) {
-    return value[0];
-  }
-  return typeof value === 'string' ? value : '';
-}
-
 function stripControlChars(value) {
   if (typeof value !== 'string') return '';
   return value.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
 }
 
-// `since` is forwarded to Bluesky as a date-range filter. Accept an ISO date
-// (YYYY-MM-DD) or a UTC datetime, which is what the lexicon documents.
-const SINCE_PATTERN = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z)?$/;
+// `since` is forwarded to Bluesky as a date-range filter. The search lexicon
+// accepts either an ISO date (YYYY-MM-DD) or an AT Protocol datetime.
+const ISO_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+const ISO_DATE_PREFIX_PATTERN = /^(\d{4})-(\d{2})-(\d{2})(?:T|$)/;
+const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+function isLeapYear(year) {
+  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+}
+
+function hasValidCalendarDate(value) {
+  const match = ISO_DATE_PREFIX_PATTERN.exec(value);
+  if (!match) return false;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (month < 1 || month > 12) return false;
+
+  const maxDay = month === 2 && isLeapYear(year) ? 29 : DAYS_IN_MONTH[month - 1];
+  return day >= 1 && day <= maxDay;
+}
 
 function isValidSince(value) {
-  return SINCE_PATTERN.test(value) && Number.isFinite(Date.parse(value));
+  if (!hasValidCalendarDate(value)) return false;
+  return ISO_DATE_PATTERN.test(value) || isDatetimeString(value);
 }
 
 function jsonNoStore(payload, status = 200, extraHeaders = {}) {
@@ -115,10 +130,10 @@ function jsonNoStore(payload, status = 200, extraHeaders = {}) {
 
 function parseSearchInput(request) {
   const url = new URL(request.url);
-  const term = stripControlChars(getQueryString(url.searchParams.get('term'))).trim();
-  const cursor = stripControlChars(getQueryString(url.searchParams.get('cursor')));
-  const sort = stripControlChars(getQueryString(url.searchParams.get('sort'))).trim().toLowerCase();
-  const since = stripControlChars(getQueryString(url.searchParams.get('since'))).trim();
+  const term = stripControlChars(url.searchParams.get('term')).trim();
+  const cursor = stripControlChars(url.searchParams.get('cursor'));
+  const sort = stripControlChars(url.searchParams.get('sort')).trim().toLowerCase();
+  const since = stripControlChars(url.searchParams.get('since')).trim();
   return { term, cursor, sort, since };
 }
 
@@ -378,7 +393,6 @@ export async function GET(request, context) {
 export const testUtils =
   process.env.NODE_ENV === 'test'
     ? {
-        getQueryString,
         stripControlChars,
         getSearchCacheKey,
         isValidSince,
