@@ -85,13 +85,6 @@ function getRuntimeCredentials(context) {
   };
 }
 
-function getQueryString(value) {
-  if (Array.isArray(value)) {
-    return value[0];
-  }
-  return typeof value === 'string' ? value : '';
-}
-
 function stripControlChars(value) {
   if (typeof value !== 'string') return '';
   return value.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
@@ -137,10 +130,10 @@ function jsonNoStore(payload, status = 200, extraHeaders = {}) {
 
 function parseSearchInput(request) {
   const url = new URL(request.url);
-  const term = stripControlChars(getQueryString(url.searchParams.get('term'))).trim();
-  const cursor = stripControlChars(getQueryString(url.searchParams.get('cursor')));
-  const sort = stripControlChars(getQueryString(url.searchParams.get('sort'))).trim().toLowerCase();
-  const since = stripControlChars(getQueryString(url.searchParams.get('since'))).trim();
+  const term = stripControlChars(url.searchParams.get('term')).trim();
+  const cursor = stripControlChars(url.searchParams.get('cursor'));
+  const sort = stripControlChars(url.searchParams.get('sort')).trim().toLowerCase();
+  const since = stripControlChars(url.searchParams.get('since')).trim();
   return { term, cursor, sort, since };
 }
 
@@ -400,7 +393,6 @@ export async function GET(request, context) {
 export const testUtils =
   process.env.NODE_ENV === 'test'
     ? {
-        getQueryString,
         stripControlChars,
         getSearchCacheKey,
         isValidSince,

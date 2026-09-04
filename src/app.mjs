@@ -164,5 +164,4 @@ expandTermsToggle.addEventListener('change', () => {
 // Initialize
 initTheme();
 initFromURL();
-updateExpansionSummary();
 focusSearchInput();

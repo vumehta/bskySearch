@@ -14,7 +14,6 @@ const searchModule = await import('../api/search.mjs');
 const searchHandler = searchModule.GET;
 const { testUtils } = searchModule;
 const {
-  getQueryString,
   stripControlChars,
   getSearchCacheKey,
   isValidSince,
@@ -180,34 +179,6 @@ describe('search handler request/response behavior', () => {
     expect(response.status).toBe(405);
     expect(response.headers.get('Allow')).toBe('GET');
     await expect(response.json()).resolves.toEqual({ error: 'Method not allowed.' });
-  });
-});
-
-// ============================================================================
-// getQueryString
-// ============================================================================
-describe('getQueryString', () => {
-  it('returns string value as-is', () => {
-    expect(getQueryString('hello')).toBe('hello');
-  });
-
-  it('returns first element of array', () => {
-    expect(getQueryString(['first', 'second'])).toBe('first');
-  });
-
-  it('returns undefined for empty array', () => {
-    expect(getQueryString([])).toBe(undefined);
-  });
-
-  it('returns empty string for non-string, non-array values', () => {
-    expect(getQueryString(123)).toBe('');
-    expect(getQueryString(null)).toBe('');
-    expect(getQueryString(undefined)).toBe('');
-    expect(getQueryString({})).toBe('');
-  });
-
-  it('handles array with single element', () => {
-    expect(getQueryString(['only'])).toBe('only');
   });
 });
 

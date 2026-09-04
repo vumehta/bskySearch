@@ -76,7 +76,7 @@ function createThreadParentElement(post) {
 
 function createThreadContextElement(parents) {
   const container = document.createElement('div');
-  container.className = 'thread-context thread-context-inline';
+  container.className = 'thread-context';
 
   const label = document.createElement('div');
   label.className = 'thread-label';

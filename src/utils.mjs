@@ -171,7 +171,7 @@ export function parseBlueskyPostUrl(urlString) {
   let parsedUrl;
   try {
     parsedUrl = new URL(urlString);
-  } catch (e) {
+  } catch {
     throw new Error('Please enter a valid URL.');
   }
 
@@ -186,9 +186,6 @@ export function parseBlueskyPostUrl(urlString) {
 
   const rawHandle = parts[1];
   const postId = parts[3];
-  if (!rawHandle || !postId) {
-    throw new Error('URL is missing a handle or post ID.');
-  }
 
   const actor = rawHandle.startsWith('did:')
     ? rawHandle

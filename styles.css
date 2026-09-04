@@ -20,7 +20,6 @@
     --accent-soft: #f0f7ff;
     --accent-soft-border: #cce0ff;
     --accent-text: #1565c0;
-    --info-bg: #f5f5f5;
     --error-bg: #ffebee;
     --error-text: #c62828;
     --loading-bg: #e3f2fd;
@@ -59,7 +58,6 @@
     --accent-soft: #12375c;
     --accent-soft-border: #1f5a8c;
     --accent-text: #9cc8ff;
-    --info-bg: #161616;
     --error-bg: #3b1b1b;
     --error-text: #ff9a9a;
     --loading-bg: #1a1a1a;
@@ -221,7 +219,6 @@ label {
 }
 
 input[type="text"],
-input[type="password"],
 input[type="number"],
 input[type="url"] {
     padding: 10px 12px;
@@ -233,7 +230,6 @@ input[type="url"] {
 }
 
 input[type="text"]:focus-visible,
-input[type="password"]:focus-visible,
 input[type="number"]:focus-visible,
 input[type="url"]:focus-visible {
     outline: none;
@@ -297,11 +293,6 @@ button:disabled {
 .status.error {
     background: var(--error-bg);
     color: var(--error-text);
-}
-
-.status.info {
-    background: var(--info-bg);
-    color: var(--muted);
 }
 
 .results-header {
@@ -677,15 +668,8 @@ button:disabled {
 .thread-context {
     background: var(--accent-soft);
     border: 1px solid var(--accent-soft-border);
-    border-bottom: none;
-    border-radius: 8px 8px 0 0;
-    padding: 12px;
-    margin-bottom: 0;
-}
-
-.thread-context-inline {
-    border-bottom: 1px solid var(--accent-soft-border);
     border-radius: 8px;
+    padding: 12px;
     margin-bottom: 12px;
 }
 
@@ -802,8 +786,7 @@ button:disabled {
         align-items: flex-start;
     }
 
-    .form-row,
-    .auth-form {
+    .form-row {
         flex-direction: column;
     }
 

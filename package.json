@@ -1,8 +1,8 @@
 {
   "name": "bskysearch",
   "version": "1.0.0",
+  "private": true,
   "description": "",
-  "main": "app.js",
   "scripts": {
     "minify:js": "esbuild src/app.mjs --bundle --minify --platform=browser --format=iife --target=es2019 --outfile=app.min.js",
     "minify:css": "postcss styles.css --use cssnano --no-map -o styles.min.css",
@@ -31,7 +31,6 @@
     "esbuild": "^0.28.2",
     "postcss": "^8.5.6",
     "postcss-cli": "^11.0.1",
-    "terser": "^5.50.0",
     "vitest": "^4.1.11"
   },
   "dependencies": {

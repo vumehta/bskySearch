@@ -62,7 +62,7 @@ const renderedPostFingerprints = new Map();
 let highlightMatcherCache = { key: '', regex: null, termSet: null };
 
 // Show status message
-function showStatus(message, type = 'info') {
+function showStatus(message, type) {
   statusDiv.className = `status ${type}`;
   setText(statusDiv, message);
   statusDiv.style.display = 'block';
@@ -140,7 +140,7 @@ async function searchTerm(term, cursor = null, sort = state.searchSort, since = 
       const errorData = await response.json();
       if (errorData.message) errorMsg += ` - ${errorData.message}`;
       if (errorData.error) errorMsg += ` - ${errorData.error}`;
-    } catch (e) {}
+    } catch {}
     throw new Error(errorMsg);
   }
 
@@ -538,11 +538,9 @@ function ensureResultsShell() {
   resultsEmptyEl.appendChild(resultsEmptySecondaryEl);
 
   resultsListEl = document.createElement('div');
-  resultsListEl.className = 'results-list';
 
   showMoreBtnEl = document.createElement('button');
   showMoreBtnEl.className = 'load-more';
-  showMoreBtnEl.id = 'showMoreBtn';
   showMoreBtnEl.type = 'button';
   showMoreBtnEl.addEventListener('click', () => {
     increaseRenderLimit();
@@ -594,7 +592,6 @@ function syncVisibleResultPosts(visiblePosts) {
 
     if (!postElement || previousFingerprint !== nextFingerprint) {
       const nextElement = createPostElement(post);
-      nextElement.dataset.uri = uri;
 
       if (postElement?.parentNode === resultsListEl) {
         resultsListEl.replaceChild(nextElement, postElement);
@@ -921,8 +918,4 @@ export function applySearchSortChange() {
     return;
   }
   flushDerivedPostsRebuild({ render: true });
-}
-
-export function renderSearchResults() {
-  renderResults();
 }
