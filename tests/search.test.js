@@ -277,17 +277,41 @@ describe('getSearchCacheKey', () => {
 // since parameter
 // ============================================================================
 describe('isValidSince', () => {
-  it('accepts ISO dates and UTC datetimes', () => {
+  it('accepts valid ISO dates and AT Protocol datetimes', () => {
     expect(isValidSince('2026-08-31')).toBe(true);
+    expect(isValidSince('2024-02-29')).toBe(true);
+    expect(isValidSince('2000-02-29')).toBe(true);
     expect(isValidSince('2026-08-31T18:00:00Z')).toBe(true);
+    expect(isValidSince('2024-02-29T18:00:00Z')).toBe(true);
     expect(isValidSince('2026-08-31T18:00:00.123Z')).toBe(true);
+    expect(isValidSince('2026-08-31T18:00:00.123456Z')).toBe(true);
+    expect(isValidSince('2026-08-31T18:00:00+02:00')).toBe(true);
   });
 
-  it('rejects free-form, offset, and impossible values', () => {
+  it('rejects free-form and malformed values', () => {
     expect(isValidSince('yesterday')).toBe(false);
-    expect(isValidSince('2026-08-31T18:00:00+02:00')).toBe(false);
     expect(isValidSince('2026-13-45')).toBe(false);
     expect(isValidSince('2026-08-31T18:00:00Z; DROP')).toBe(false);
+  });
+
+  it('rejects impossible calendar dates instead of normalizing them', () => {
+    expect(isValidSince('2026-02-29')).toBe(false);
+    expect(isValidSince('2026-02-30')).toBe(false);
+    expect(isValidSince('2026-04-31')).toBe(false);
+    expect(isValidSince('1900-02-29')).toBe(false);
+    expect(isValidSince('2026-00-10')).toBe(false);
+    expect(isValidSince('2026-01-00')).toBe(false);
+    expect(isValidSince('2026-02-30T00:00:00Z')).toBe(false);
+    expect(isValidSince('2026-04-31T12:00:00+02:00')).toBe(false);
+  });
+
+  it('rejects invalid AT Protocol timezone forms', () => {
+    expect(isValidSince('2026-08-31T18:00:00-00:00')).toBe(false);
+    expect(isValidSince('2026-08-31T18:00:00+24:00')).toBe(false);
+    expect(isValidSince('2026-08-31T18:00:00+0200')).toBe(false);
+    expect(isValidSince('2026-08-31T24:00:00Z')).toBe(false);
+    expect(isValidSince('2026-08-31T18:60:00Z')).toBe(false);
+    expect(isValidSince('2026-08-31T18:00:00')).toBe(false);
   });
 });
 
@@ -318,6 +342,30 @@ describe('search handler since forwarding', () => {
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: 'Invalid since parameter.' });
     expect(searchUrls).toHaveLength(0);
+  });
+
+  it('returns 400 for an impossible calendar date without calling upstream', async () => {
+    const searchUrls = mockUpstream();
+    const response = await searchHandler(
+      new Request('https://example.com/api/search?term=trump&since=2026-02-30T00:00:00Z', {
+        method: 'GET',
+      }),
+    );
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: 'Invalid since parameter.' });
+    expect(searchUrls).toHaveLength(0);
+  });
+
+  it('forwards a valid offset datetime to Bluesky', async () => {
+    const searchUrls = mockUpstream();
+    const response = await searchHandler(
+      new Request('https://example.com/api/search?term=trump&since=2026-08-31T18:00:00%2B02:00', {
+        method: 'GET',
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(searchUrls).toHaveLength(1);
+    expect(searchUrls[0].searchParams.get('since')).toBe('2026-08-31T18:00:00+02:00');
   });
 
   it('forwards a valid since value to Bluesky', async () => {
