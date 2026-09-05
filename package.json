@@ -6,10 +6,14 @@
   "scripts": {
     "minify:js": "esbuild src/app.mjs --bundle --minify --platform=browser --format=iife --target=es2019 --outfile=app.min.js",
     "minify:css": "postcss styles.css --use cssnano --no-map -o styles.min.css",
-    "build": "npm run minify:js && npm run minify:css && node scripts/prepare-dist.js",
+    "build": "npm run minify:js && npm run minify:monitor && npm run minify:css && node scripts/prepare-dist.js",
     "perf:smoke": "node scripts/perf-smoke.mjs",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "minify:monitor": "esbuild src/monitor.mjs --bundle --minify --platform=browser --format=iife --target=es2019 --outfile=monitor.min.js",
+    "monitor:dev": "npm run build && wrangler d1 migrations apply DB --local && wrangler dev --test-scheduled",
+    "monitor:types": "wrangler types",
+    "monitor:dry-run": "npm run build && wrangler deploy --dry-run"
   },
   "repository": {
     "type": "git",
@@ -27,11 +31,15 @@
     "node": "22.x"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260905.1",
+    "@playwright/test": "^1.63.0",
     "cssnano": "^8.0.8",
     "esbuild": "^0.28.2",
+    "miniflare": "5.20260903.0-alpha",
     "postcss": "^8.5.6",
     "postcss-cli": "^11.0.1",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.11",
+    "wrangler": "4.129.0"
   },
   "dependencies": {
     "@atproto/syntax": "^0.7.5"

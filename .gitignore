@@ -9,3 +9,11 @@ app.min.js
 styles.min.css
 dist/
 tasks/lessons.md
+monitor.min.js
+.wrangler/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+worker-configuration.d.ts
+test-results/
+playwright-report/
