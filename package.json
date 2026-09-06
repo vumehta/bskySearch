@@ -24,7 +24,7 @@
   },
   "homepage": "https://github.com/vumehta/bskySearch#readme",
   "engines": {
-    "node": "24.x"
+    "node": ">=24.11.0 <25"
   },
   "devDependencies": {
     "cssnano": "^8.0.8",

@@ -5,8 +5,9 @@ phrase expansion, cursor pagination, inline thread context, and a quote finder.
 
 ## Development
 
-Use Node.js 24 and npm. On Windows PowerShell, use `npm.cmd` if execution policy
-blocks the `npm.ps1` shim.
+Use Node.js 24.11.0 or newer within the 24.x release line, and npm. The minimum
+version is required by the locked cssnano build dependency. On Windows PowerShell,
+use `npm.cmd` if execution policy blocks the `npm.ps1` shim.
 
 ```sh
 npm ci
