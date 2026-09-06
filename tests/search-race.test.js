@@ -104,4 +104,22 @@ describe('search result race guards', () => {
     expect(state.currentCursors).toEqual({});
     expect(state.searchTerms).toEqual([]);
   });
+
+  it('does not restore a stale error or loading state after pagination is cleared', async () => {
+    const response = deferred();
+    globalThis.fetch = vi.fn(() => response.promise);
+    state.currentCursors = { apple: 'cursor-1' };
+    state.searchTerms = ['apple'];
+    const loadMorePromise = search.loadMore();
+    const signal = globalThis.fetch.mock.calls[0][1].signal;
+    search.clearSearchResults();
+    await loadMorePromise;
+    response.resolve({ ok: false, status: 500, json: async () => ({ error: 'Late failure' }) });
+    await Promise.resolve();
+    expect(signal.aborted).toBe(true);
+    expect(state.isLoading).toBe(false);
+    expect(mocks.dom.searchBtn.disabled).toBe(false);
+    expect(mocks.dom.statusDiv.style.display).toBe('none');
+    expect(state.currentCursors).toEqual({});
+  });
 });

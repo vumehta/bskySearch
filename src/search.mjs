@@ -4,6 +4,7 @@ import {
   RENDER_STEP,
   SEARCH_API,
   SEARCH_DEBOUNCE_MS,
+  SEARCH_CONCURRENCY,
 } from './constants.mjs';
 import { isCurrentSearchGeneration, searchCache, state } from './state.mjs';
 import {
@@ -33,13 +34,16 @@ import {
 } from './utils.mjs';
 import { appendEngagementStats, SEARCH_STAT_CLASSES } from './post-stats.mjs';
 import { enforceSearchCacheLimit, getCachedSearch } from './cache.mjs';
-import { consumePendingSearch } from './search-state.mjs';
+import { fetchJson } from './http.mjs';
+import { createHighlightMatcher, getMatchedTermsForPost, getPostRenderFingerprint, ingestSearchPosts, nextSearchCursor, settleWithConcurrency, validateSearchPage } from './search-model.mjs';
 import { setQueryParam, updateURLWithParams } from './url.mjs';
-import { isReplyPost, toggleThread } from './thread.mjs';
+import { cancelThreadRequest, cancelThreadRequests, initializeThreadToggle, isReplyPost, toggleThread } from './thread.mjs';
 
 const DERIVE_THROTTLE_MS = 120;
 
-let ingestedPostsByUri = new Map();
+const ingestedPostsByUri = new Map();
+let activeSearchController = null;
+let searchSeenCursors = new Map();
 let deriveTimerId = null;
 
 // Coalesce render updates into a single frame.
@@ -113,75 +117,112 @@ export function updateExpansionSummary() {
   expandSummary.textContent = `Typed: ${rawTerms.join(', ')}. Expanded: ${expanded.join(', ')}`;
 }
 
-// Search posts for a single term (server-side proxy)
-async function searchTerm(term, cursor = null, sort = state.searchSort, since = state.searchSince) {
-  const sortValue = normalizeSortValue(sort);
-  const cacheKey = getSearchCacheKey(term, cursor, sortValue, since);
-
-  // Check cache first
+// Every page belongs to a fixed search generation, sort, and time window.
+async function searchTerm(term, cursor, { sort, since, signal }) {
+  signal.throwIfAborted();
+  const cacheKey = getSearchCacheKey(term, cursor, sort, since);
   const cached = getCachedSearch(cacheKey);
-  if (cached) {
-    return cached;
+  if (cached) return cached;
+
+  const params = new URLSearchParams({ term, sort });
+  if (cursor) params.set('cursor', cursor);
+  if (since) params.set('since', since);
+  let data;
+  try {
+    data = validateSearchPage(await fetchJson(`${SEARCH_API}?${params}`, { signal }));
+  } catch (error) {
+    if (error.name === 'AbortError') throw error;
+    throw new Error(`Search failed for "${term}": ${error.message}`, { cause: error });
   }
-
-  const params = new URLSearchParams({ term, sort: sortValue });
-  if (cursor) {
-    params.set('cursor', cursor);
-  }
-  if (since) {
-    params.set('since', since);
-  }
-
-  const response = await fetch(`${SEARCH_API}?${params}`);
-
-  if (!response.ok) {
-    let errorMsg = `Search failed for "${term}": ${response.status}`;
-    try {
-      const errorData = await response.json();
-      if (errorData.message) errorMsg += ` - ${errorData.message}`;
-      if (errorData.error) errorMsg += ` - ${errorData.error}`;
-    } catch {}
-    throw new Error(errorMsg);
-  }
-
-  const data = await response.json();
-
-  // Cache the result
+  signal.throwIfAborted();
   searchCache.set(cacheKey, { data, timestamp: Date.now() });
   enforceSearchCacheLimit();
-
   return data;
 }
 
-// Fetch all posts for a term (with pagination)
-async function fetchAllPostsForTerm(
-  term,
-  maxPages = INITIAL_MAX_PAGES,
-  sort = state.searchSort,
-  since = state.searchSince
-) {
-  let allTermPosts = [];
-  let cursor = null;
-  let pages = 0;
+function isActiveSearch(context) {
+  return isCurrentSearchGeneration(context.generation) && !context.signal.aborted;
+}
 
-  while (pages < maxPages) {
-    const data = await searchTerm(term, cursor, sort, since);
-
-    if (data.posts && data.posts.length > 0) {
-      const taggedPosts = data.posts.map((post) => ({
-        ...post,
-        matchedTerm: term,
-      }));
-      allTermPosts = allTermPosts.concat(taggedPosts);
-    }
-
-    if (!data.cursor) break;
-    cursor = data.cursor;
-    pages += 1;
+// Commit each successful page before requesting the next. A failed page leaves
+// its request cursor available for retry, including an initial empty cursor.
+async function fetchPagesForTerm(term, maxPages, context) {
+  for (let page = 0; page < maxPages && isActiveSearch(context); page += 1) {
+    const cursor = state.currentCursors[term];
+    if (cursor === null) return;
+    const data = await searchTerm(term, cursor, context);
+    if (!isActiveSearch(context)) return;
+    const posts = Array.isArray(data.posts) ? data.posts : [];
+    ingestSearchPosts(ingestedPostsByUri, posts.map((post) => ({ ...post, matchedTerm: term, matchedTerms: [term] })));
+    const seen = searchSeenCursors.get(term) || new Set();
+    const nextCursor = nextSearchCursor(data.cursor, cursor, seen);
+    if (nextCursor) seen.add(nextCursor);
+    searchSeenCursors.set(term, seen);
+    state.currentCursors[term] = nextCursor;
+    scheduleDerivedPostsRebuild();
+    if (nextCursor === null) return;
   }
+}
 
-  state.currentCursors[term] = cursor;
-  return allTermPosts;
+function cancelActiveSearch() {
+  state.searchGeneration += 1;
+  activeSearchController?.abort();
+  activeSearchController = null;
+  state.isLoading = false;
+  searchBtn.disabled = false;
+  clearDerivedPostsTimer();
+  cancelScheduledRender();
+}
+
+function createSearchContext() {
+  activeSearchController = new AbortController();
+  return {
+    generation: state.searchGeneration,
+    signal: activeSearchController.signal,
+    sort: state.searchSort,
+    since: state.searchSince,
+  };
+}
+
+async function runSearchPages(terms, maxPages, context, { loadingMore = false } = {}) {
+  const previousCount = state.allPosts.length;
+  state.isLoading = true;
+  searchBtn.disabled = true;
+  syncLoadMoreButton();
+  try {
+    let completed = 0;
+    const results = await settleWithConcurrency(terms, SEARCH_CONCURRENCY, async (term) => {
+      try {
+        await fetchPagesForTerm(term, maxPages, context);
+      } finally {
+        completed += 1;
+        if (isActiveSearch(context) && completed < terms.length) {
+          showStatus(`Loaded ${completed}/${terms.length} terms…`, 'loading');
+        }
+      }
+    }, context.signal);
+    if (!isActiveSearch(context)) return;
+    const failures = results.filter((result) => result.status === 'rejected');
+    if (failures.length) {
+      showStatus(`${failures.length}/${terms.length} terms could not finish. ${failures[0].reason.message}. Load more to retry.`, 'error');
+    } else {
+      hideStatus();
+    }
+    flushDerivedPostsRebuild();
+    if (loadingMore && state.allPosts.length > previousCount) {
+      state.renderLimit = Math.min(state.allPosts.length, state.renderLimit + RENDER_STEP);
+    }
+    renderResults();
+  } catch (error) {
+    if (isActiveSearch(context)) showStatus(`Error: ${error.message}`, 'error');
+  } finally {
+    if (isActiveSearch(context)) {
+      activeSearchController = null;
+      state.isLoading = false;
+      searchBtn.disabled = false;
+      syncLoadMoreButton();
+    }
+  }
 }
 
 function resetRenderLimit() {
@@ -211,55 +252,6 @@ function clearDerivedPostsTimer() {
   if (deriveTimerId) {
     clearTimeout(deriveTimerId);
     deriveTimerId = null;
-  }
-}
-
-function getMatchedTermsForPost(post) {
-  if (Array.isArray(post.matchedTerms) && post.matchedTerms.length > 0) {
-    return post.matchedTerms.filter(Boolean);
-  }
-  if (post.matchedTerm) {
-    return [post.matchedTerm];
-  }
-  return [];
-}
-
-function mergeMatchedTerms(existingTerms, incomingTerms) {
-  const merged = [];
-  const seen = new Set();
-
-  const add = (term) => {
-    if (!term) return;
-    const normalized = term.toLowerCase();
-    if (seen.has(normalized)) return;
-    seen.add(normalized);
-    merged.push(term);
-  };
-
-  existingTerms.forEach(add);
-  incomingTerms.forEach(add);
-  return merged;
-}
-
-function ingestPosts(posts) {
-  for (const post of posts) {
-    if (!post?.uri) continue;
-
-    const incomingTerms = getMatchedTermsForPost(post);
-    const existing = ingestedPostsByUri.get(post.uri);
-
-    if (!existing) {
-      const normalized = { ...post };
-      normalized.matchedTerms = incomingTerms;
-      normalized.matchedTerm = normalized.matchedTerms[0] || '';
-      ingestedPostsByUri.set(post.uri, normalized);
-      continue;
-    }
-
-    const mergedTerms = mergeMatchedTerms(getMatchedTermsForPost(existing), incomingTerms);
-    Object.assign(existing, post);
-    existing.matchedTerms = mergedTerms;
-    existing.matchedTerm = existing.matchedTerms[0] || '';
   }
 }
 
@@ -300,15 +292,7 @@ function getHighlightMatcher(terms) {
     return highlightMatcherCache;
   }
 
-  if (terms.length === 0) {
-    highlightMatcherCache = { key, regex: null, termSet: new Set() };
-    return highlightMatcherCache;
-  }
-
-  const escapedTerms = terms.map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-  const regex = new RegExp(`(${escapedTerms.join('|')})`, 'gi');
-  const termSet = new Set(terms.map((term) => term.toLowerCase()));
-  highlightMatcherCache = { key, regex, termSet };
+  highlightMatcherCache = { key, ...createHighlightMatcher(terms) };
   return highlightMatcherCache;
 }
 
@@ -402,7 +386,7 @@ function createPostElement(post) {
   // Time
   const timeSpan = document.createElement('span');
   timeSpan.className = 'post-time';
-  timeSpan.textContent = formatRelativeTime(post.indexedAt);
+  timeSpan.textContent = formatRelativeTime(post.record?.createdAt || post.indexedAt);
   header.appendChild(timeSpan);
 
   postDiv.appendChild(header);
@@ -414,8 +398,8 @@ function createPostElement(post) {
   postDiv.appendChild(textDiv);
 
   // Images (hidden by default)
-  if (post.embed?.$type === 'app.bsky.embed.images#view' && post.embed.images) {
-    const validImages = post.embed.images.filter((img) => img.thumb && isValidBskyUrl(img.thumb));
+  if (post.embed?.$type === 'app.bsky.embed.images#view' && Array.isArray(post.embed.images)) {
+    const validImages = post.embed.images.filter((img) => img?.thumb && isValidBskyUrl(img.thumb));
 
     if (validImages.length > 0) {
       const imagesContainer = document.createElement('div');
@@ -468,6 +452,7 @@ function createPostElement(post) {
       const threadLink = document.createElement('button');
       threadLink.className = 'thread-link';
       threadLink.textContent = 'View Thread';
+      initializeThreadToggle(threadLink);
       threadLink.addEventListener('click', () => toggleThread(post, postDiv));
       linksDiv.appendChild(threadLink);
 
@@ -495,6 +480,7 @@ function createPostElement(post) {
 }
 
 function resetResultsRenderCache() {
+  cancelThreadRequests();
   cancelScheduledRender();
   resultsHeaderEl = null;
   resultsCountEl = null;
@@ -561,22 +547,6 @@ function ensureResultsShell() {
   resultsDiv.appendChild(loadMoreBtnEl);
 }
 
-function getPostRenderFingerprint(post) {
-  const matchedTerms = getMatchedTermsForPost(post).join('\u0001');
-  return [
-    post.uri || '',
-    post.author?.handle || '',
-    post.author?.displayName || '',
-    post.author?.avatar || '',
-    post.indexedAt || '',
-    post.record?.text || '',
-    post.likeCount || 0,
-    post.repostCount || 0,
-    post.replyCount || 0,
-    matchedTerms,
-  ].join('\u0002');
-}
-
 function syncVisibleResultPosts(visiblePosts) {
   const visibleUris = new Set();
   let renderedCount = 0;
@@ -594,6 +564,7 @@ function syncVisibleResultPosts(visiblePosts) {
       const nextElement = createPostElement(post);
 
       if (postElement?.parentNode === resultsListEl) {
+        cancelThreadRequest(postElement);
         resultsListEl.replaceChild(nextElement, postElement);
       }
 
@@ -614,6 +585,7 @@ function syncVisibleResultPosts(visiblePosts) {
       continue;
     }
     if (element.parentNode === resultsListEl) {
+      cancelThreadRequest(element);
       element.remove();
     }
     renderedPostElements.delete(uri);
@@ -631,9 +603,7 @@ function syncVisibleResultPosts(visiblePosts) {
 function syncLoadMoreButton() {
   if (!loadMoreBtnEl) return;
 
-  const hasMoreResults =
-    state.allPosts.length > 0 &&
-    Object.values(state.currentCursors).some((cursor) => cursor !== null);
+  const hasMoreResults = Object.values(state.currentCursors).some((cursor) => cursor !== null);
   if (!hasMoreResults) {
     loadMoreBtnEl.style.display = 'none';
     loadMoreBtnEl.disabled = false;
@@ -642,7 +612,7 @@ function syncLoadMoreButton() {
   }
 
   loadMoreBtnEl.style.display = '';
-  loadMoreBtnEl.disabled = state.isLoading;
+  loadMoreBtnEl.disabled = state.isLoading || state.searchDebounceTimer !== null;
   loadMoreBtnEl.textContent = state.isLoading ? 'Loading…' : 'Load More Results';
 }
 
@@ -659,9 +629,12 @@ function renderResults() {
     showMoreBtnEl.style.display = 'none';
     syncLoadMoreButton();
     resultsEmptyEl.style.display = 'block';
-    resultsEmptyPrimaryEl.textContent = 'No posts found matching your criteria.';
-    resultsEmptySecondaryEl.textContent = 'Try different search terms or lower the minimum likes.';
+    resultsEmptyPrimaryEl.textContent = 'No loaded posts match your criteria.';
+    resultsEmptySecondaryEl.textContent = Object.values(state.currentCursors).some((cursor) => cursor !== null)
+      ? 'Load more results to continue searching, or lower the minimum likes.'
+      : 'Try different search terms or lower the minimum likes.';
     if (resultsListEl.children.length > 0) {
+      for (const element of renderedPostElements.values()) cancelThreadRequest(element);
       resultsListEl.textContent = '';
       renderedPostElements.clear();
       renderedPostFingerprints.clear();
@@ -702,175 +675,51 @@ function renderResults() {
   syncLoadMoreButton();
 }
 
-// Main search function
+// A new search replaces the previous one immediately, including its requests.
 export async function performSearch() {
-  if (state.isLoading) {
-    state.pendingSearch = true;
-    return;
-  }
-  state.pendingSearch = false;
-  state.searchGeneration++;
-  const currentGeneration = state.searchGeneration;
+  cancelDebouncedSearch();
+  cancelActiveSearch();
   const termsValue = termsInput.value.trim();
-  if (!termsValue) {
-    showStatus('Please enter at least one search term.', 'error');
-    return;
-  }
-
-  state.rawSearchTerms = termsValue.split(',').map(normalizeTerm).filter((t) => t.length > 0);
+  state.rawSearchTerms = termsValue.split(',').map(normalizeTerm).filter(Boolean);
   state.searchTerms = expandSearchTerms(state.rawSearchTerms, expandTermsToggle.checked);
-  state.minLikes = parseInt(minLikesInput.value) || 0;
-  state.timeFilterHours = parseInt(timeFilterSelect.value) || 24;
+  state.minLikes = Math.max(0, parseInt(minLikesInput.value, 10) || 0);
+  state.timeFilterHours = parseInt(timeFilterSelect.value, 10) || 24;
   state.searchSort = normalizeSortValue(sortSelect.value);
-  // Fixed for the lifetime of this search so pagination stays consistent.
-  state.searchSince = getSearchSince(state.timeFilterHours);
-
-  if (state.rawSearchTerms.length === 0) {
-    showStatus('Please enter at least one search term.', 'error');
-    return;
-  }
-
-  state.isLoading = true;
-  searchBtn.disabled = true;
+  state.searchSince = state.searchTerms.length ? getSearchSince(state.timeFilterHours) : null;
   state.allPosts = [];
-  state.currentCursors = {};
-  clearDerivedPostsTimer();
+  // Empty string means the first page needs loading; null means exhausted.
+  state.currentCursors = Object.create(null);
+  for (const term of state.searchTerms) state.currentCursors[term] = '';
+  searchSeenCursors = new Map();
   clearIngestedPosts();
   resetResultsRenderCache();
   highlightMatcherCache = { key: '', regex: null, termSet: null };
   resetRenderLimit();
-
   updateSearchURL();
-
-  try {
-    showStatus(`Searching for: ${state.rawSearchTerms.join(', ')}…`, 'loading');
-
-    // Track progress for progressive rendering
-    let completedTerms = 0;
-    const totalTerms = state.searchTerms.length;
-
-    // Fetch all terms in parallel, but render progressively as each completes
-    const searchSince = state.searchSince;
-    const promises = state.searchTerms.map(async (term) => {
-      const posts = await fetchAllPostsForTerm(term, INITIAL_MAX_PAGES, state.searchSort, searchSince);
-
-      // Bail if a newer search has started — prevents stale data corruption
-      if (!isCurrentSearchGeneration(currentGeneration)) return posts;
-
-      // Immediately merge and render as this term completes
-      completedTerms++;
-      ingestPosts(posts);
-
-      // Update status and render immediately
-      if (completedTerms < totalTerms) {
-        showStatus(`Loaded ${completedTerms}/${totalTerms} terms…`, 'loading');
-      }
-      scheduleDerivedPostsRebuild();
-
-      return posts;
-    });
-
-    // Use allSettled to wait for ALL promises before continuing
-    // This prevents race conditions where failed promises' siblings
-    // continue updating state after error handling
-    const results = await Promise.allSettled(promises);
-
-    // Bail if a newer search has started
-    if (!isCurrentSearchGeneration(currentGeneration)) return;
-
-    // Check for failures
-    const failures = results.filter((r) => r.status === 'rejected');
-    if (failures.length > 0) {
-      const errorMsg =
-        failures.length === totalTerms
-          ? `Search failed: ${failures[0].reason.message}`
-          : `${failures.length}/${totalTerms} terms failed to load`;
-      showStatus(errorMsg, 'error');
-      // Continue - we may have partial results from successful terms
-    } else {
-      hideStatus();
-    }
-
-    flushDerivedPostsRebuild({ render: true });
-  } catch (error) {
-    console.error('Search error:', error);
-    showStatus(`Error: ${error.message}`, 'error');
-  } finally {
-    state.isLoading = false;
-    searchBtn.disabled = false;
-    // The final render above ran while isLoading was still true, which left
-    // the "Load More" button disabled with "Loading…"; bring it back in sync.
-    syncLoadMoreButton();
-    if (consumePendingSearch(state)) {
-      performSearch();
-    }
+  if (!state.searchTerms.length) {
+    showStatus('Please enter at least one search term.', 'error');
+    return;
   }
+  showStatus(`Searching for: ${state.rawSearchTerms.join(', ')}…`, 'loading');
+  await runSearchPages([...state.searchTerms], INITIAL_MAX_PAGES, createSearchContext());
 }
 
-// Load more results
 export async function loadMore() {
-  if (state.isLoading) return;
-
-  const currentGeneration = state.searchGeneration;
-  const prevCount = state.allPosts.length;
-  state.isLoading = true;
-  syncLoadMoreButton();
-
-  try {
-    const searchSort = state.searchSort;
-    const searchSince = state.searchSince;
-    const requests = state.searchTerms
-      .map((term) => ({ term, cursor: state.currentCursors[term] }))
-      .filter((request) => request.cursor);
-    const promises = requests
-      .map(async ({ term, cursor }) => {
-        const data = await searchTerm(term, cursor, searchSort, searchSince);
-
-        if (data.posts && data.posts.length > 0) {
-          return {
-            cursor: data.cursor || null,
-            posts: data.posts.map((post) => ({
-              ...post,
-              matchedTerm: term,
-            })),
-            term,
-          };
-        }
-        return { cursor: data.cursor || null, posts: [], term };
-      });
-
-    const results = await Promise.all(promises);
-    if (!isCurrentSearchGeneration(currentGeneration)) {
-      return;
-    }
-
-    results.forEach((result) => {
-      state.currentCursors[result.term] = result.cursor;
-    });
-
-    const newPosts = results.flatMap((result) => result.posts);
-
-    if (newPosts.length > 0) {
-      ingestPosts(newPosts);
-      flushDerivedPostsRebuild();
-      if (state.allPosts.length > prevCount) {
-        state.renderLimit = Math.min(state.allPosts.length, state.renderLimit + RENDER_STEP);
-      }
-    }
-    renderResults();
-  } catch (error) {
-    console.error('Load more error:', error);
-    showStatus(`Error loading more: ${error.message}`, 'error');
-  } finally {
-    state.isLoading = false;
-    syncLoadMoreButton();
-    if (consumePendingSearch(state)) {
-      performSearch();
-    }
-  }
+  if (state.isLoading || state.searchDebounceTimer !== null) return;
+  const terms = state.searchTerms.filter((term) =>
+    Object.hasOwn(state.currentCursors, term) && state.currentCursors[term] !== null);
+  if (!terms.length) return;
+  showStatus('Loading more results…', 'loading');
+  await runSearchPages(terms, 1, createSearchContext(), { loadingMore: true });
 }
 
 export function debouncedSearch() {
+  if (!termsInput.value.trim()) {
+    clearSearchResults();
+    return;
+  }
+  cancelActiveSearch();
+  hideStatus();
   if (state.searchDebounceTimer) {
     clearTimeout(state.searchDebounceTimer);
   }
@@ -878,6 +727,7 @@ export function debouncedSearch() {
     state.searchDebounceTimer = null;
     performSearch();
   }, SEARCH_DEBOUNCE_MS);
+  syncLoadMoreButton();
 }
 
 export function cancelDebouncedSearch() {
@@ -888,10 +738,11 @@ export function cancelDebouncedSearch() {
 }
 
 export function clearSearchResults() {
-  state.pendingSearch = false;
-  state.searchGeneration++;
+  cancelDebouncedSearch();
+  cancelActiveSearch();
   state.allPosts = [];
-  state.currentCursors = {};
+  state.currentCursors = Object.create(null);
+  searchSeenCursors = new Map();
   state.rawSearchTerms = [];
   state.searchTerms = [];
   state.searchSince = null;
@@ -914,8 +765,7 @@ export function focusSearchInput() {
 }
 
 export function applySearchSortChange() {
-  if (state.searchTerms.length === 0) {
-    return;
-  }
-  flushDerivedPostsRebuild({ render: true });
+  cancelDebouncedSearch();
+  if (termsInput.value.trim()) return performSearch();
+  updateSearchURL();
 }

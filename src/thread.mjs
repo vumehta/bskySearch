@@ -1,28 +1,34 @@
 import { PUBLIC_API } from './constants.mjs';
+import { fetchJson } from './http.mjs';
+import { isRenderablePost } from './post-data.mjs';
 import { formatRelativeTime, isValidBskyUrl } from './utils.mjs';
+
+const THREAD_CACHE_TTL_MS = 30000;
+const MAX_THREAD_CACHE_SIZE = 100;
+const threadCache = new Map();
+const toggleStates = new WeakMap();
+const pendingToggles = new Set();
+let nextContextId = 0;
 
 // Thread Explorer functions
 export function isReplyPost(post) {
   return !!post.record?.reply;
 }
 
-async function fetchPostThread(atUri) {
+async function fetchPostThread(atUri, signal) {
   const params = new URLSearchParams({
     uri: atUri,
     depth: '0',
     parentHeight: '100',
   });
-  const response = await fetch(`${PUBLIC_API}/app.bsky.feed.getPostThread?${params}`);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch thread: ${response.status}`);
-  }
-  return response.json();
+  return fetchJson(`${PUBLIC_API}/app.bsky.feed.getPostThread?${params}`, { signal });
 }
 
 function extractParentChain(thread) {
   const parents = [];
   let current = thread.thread?.parent;
   while (current?.post) {
+    if (!isRenderablePost(current.post)) throw new Error('Thread contained an invalid post.');
     parents.unshift(current.post);
     current = current.parent;
   }
@@ -61,7 +67,7 @@ function createThreadParentElement(post) {
 
   const timeSpan = document.createElement('span');
   timeSpan.className = 'thread-parent-time';
-  timeSpan.textContent = formatRelativeTime(post.indexedAt);
+  timeSpan.textContent = formatRelativeTime(post.record?.createdAt || post.indexedAt);
   header.appendChild(timeSpan);
 
   wrapper.appendChild(header);
@@ -74,9 +80,10 @@ function createThreadParentElement(post) {
   return wrapper;
 }
 
-function createThreadContextElement(parents) {
+function createThreadContextElement(parents, contextId) {
   const container = document.createElement('div');
   container.className = 'thread-context';
+  container.id = contextId;
 
   const label = document.createElement('div');
   label.className = 'thread-label';
@@ -105,46 +112,124 @@ function removeThreadContexts(postElement) {
   return removed;
 }
 
-export async function toggleThread(post, postElement) {
-  const link = postElement.querySelector('.thread-link');
-  if (!link) return;
+export function initializeThreadToggle(link) {
+  if (!link.getAttribute('aria-controls')) {
+    link.setAttribute('aria-controls', `thread-context-${++nextContextId}`);
+    link.setAttribute('aria-expanded', 'false');
+  }
+  return link.getAttribute('aria-controls');
+}
 
-  if (link.dataset.loading === 'true') {
+function clearStatusTimer(toggleState) {
+  clearTimeout(toggleState.statusTimer);
+  toggleState.statusTimer = null;
+  if (!toggleState.controller) pendingToggles.delete(toggleState);
+}
+
+function resetPendingToggle(toggleState) {
+  clearStatusTimer(toggleState);
+  toggleState.controller?.abort();
+  toggleState.controller = null;
+  toggleState.link.dataset.loading = 'false';
+  toggleState.link.removeAttribute('aria-busy');
+  toggleState.link.textContent = 'View Thread';
+  pendingToggles.delete(toggleState);
+}
+
+export function cancelThreadRequest(postElement) {
+  const toggleState = toggleStates.get(postElement);
+  if (toggleState && pendingToggles.has(toggleState)) resetPendingToggle(toggleState);
+}
+
+export function cancelThreadRequests() {
+  for (const toggleState of pendingToggles) resetPendingToggle(toggleState);
+}
+
+function showTemporaryStatus(toggleState, message) {
+  toggleState.link.textContent = message;
+  pendingToggles.add(toggleState);
+  toggleState.statusTimer = setTimeout(() => {
+    toggleState.link.textContent = 'View Thread';
+    toggleState.statusTimer = null;
+    pendingToggles.delete(toggleState);
+  }, 2000);
+}
+
+function getCachedParents(uri) {
+  const cached = threadCache.get(uri);
+  if (!cached) return null;
+  if (Date.now() - cached.timestamp >= THREAD_CACHE_TTL_MS) {
+    threadCache.delete(uri);
+    return null;
+  }
+  return cached.parents;
+}
+
+function cacheParents(uri, parents) {
+  threadCache.delete(uri);
+  threadCache.set(uri, { parents, timestamp: Date.now() });
+  while (threadCache.size > MAX_THREAD_CACHE_SIZE) {
+    threadCache.delete(threadCache.keys().next().value);
+  }
+}
+
+export async function toggleThread(post, postElement) {
+  const link = postElement.querySelector('button.thread-link');
+  if (!link) return;
+  const contextId = initializeThreadToggle(link);
+  let toggleState = toggleStates.get(postElement);
+  if (!toggleState) {
+    toggleState = { link, controller: null, statusTimer: null };
+    toggleStates.set(postElement, toggleState);
+  }
+
+  if (toggleState.controller) {
+    resetPendingToggle(toggleState);
     return;
   }
+  clearStatusTimer(toggleState);
 
   if (removeThreadContexts(postElement)) {
     link.textContent = 'View Thread';
+    link.setAttribute('aria-expanded', 'false');
     return;
   }
 
+  const controller = new AbortController();
+  toggleState.controller = controller;
+  pendingToggles.add(toggleState);
   link.dataset.loading = 'true';
-  link.disabled = true;
-  link.textContent = 'Loading…';
+  link.setAttribute('aria-busy', 'true');
+  link.textContent = 'Cancel loading';
 
   try {
-    const threadData = await fetchPostThread(post.uri);
-    const parents = extractParentChain(threadData);
+    let parents = getCachedParents(post.uri);
+    if (!parents) {
+      const threadData = await fetchPostThread(post.uri, controller.signal);
+      if (toggleState.controller !== controller) return;
+      parents = extractParentChain(threadData);
+      if (parents.length > 0) cacheParents(post.uri, parents);
+    }
 
     if (parents.length === 0) {
-      link.textContent = 'No parent posts found';
-      setTimeout(() => {
-        link.textContent = 'View Thread';
-      }, 2000);
+      showTemporaryStatus(toggleState, 'No parent posts found');
       return;
     }
 
-    const contextElement = createThreadContextElement(parents);
+    const contextElement = createThreadContextElement(parents, contextId);
     postElement.insertBefore(contextElement, postElement.firstElementChild || null);
+    link.setAttribute('aria-expanded', 'true');
     link.textContent = 'Hide Thread';
   } catch (error) {
-    console.error('Thread fetch error:', error);
-    link.textContent = 'Failed to load thread';
-    setTimeout(() => {
-      link.textContent = 'View Thread';
-    }, 2000);
+    if (toggleState.controller !== controller || controller.signal.aborted) return;
+    showTemporaryStatus(toggleState,
+      error.name === 'RequestTimeoutError' ? 'Thread request timed out' : 'Failed to load thread');
   } finally {
-    link.dataset.loading = 'false';
-    link.disabled = false;
+    if (toggleState.controller === controller) {
+      toggleState.controller = null;
+      link.dataset.loading = 'false';
+      link.removeAttribute('aria-busy');
+      if (!toggleState.statusTimer) pendingToggles.delete(toggleState);
+    }
   }
 }

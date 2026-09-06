@@ -10,12 +10,12 @@
     --card-bg: #ffffff;
     --text: #333;
     --muted: #666;
-    --muted-2: #888;
+    --muted-2: #707070;
     --border: #e0e0e0;
     --border-soft: #eee;
     --input-bg: #ffffff;
     --input-border: #ddd;
-    --accent: #0085ff;
+    --accent: #006bcc;
     --accent-strong: #0066cc;
     --accent-soft: #f0f7ff;
     --accent-soft-border: #cce0ff;
@@ -25,7 +25,11 @@
     --loading-bg: #e3f2fd;
     --loading-text: #1565c0;
     --highlight: #fff59d;
+    --button-text: #ffffff;
+    --likes-text: #b81753;
+    --reposts-text: #137b43;
     --button-disabled: #ccc;
+    --button-disabled-text: #555555;
     --shadow: rgba(0, 0, 0, 0.08);
     --avatar-bg: #e0e0e0;
     --tag-bg: #e3f2fd;
@@ -48,7 +52,7 @@
     --card-bg: #121212;
     --text: #e6e9ed;
     --muted: #b0b6bf;
-    --muted-2: #8c93a0;
+    --muted-2: #a0a7b3;
     --border: #2a2a2a;
     --border-soft: #1f1f1f;
     --input-bg: #0a0a0a;
@@ -63,7 +67,11 @@
     --loading-bg: #1a1a1a;
     --loading-text: #9cc8ff;
     --highlight: #3b3611;
+    --button-text: #0a0a0a;
+    --likes-text: #ff7daf;
+    --reposts-text: #63d995;
     --button-disabled: #3a3a3a;
+    --button-disabled-text: #c4c4c4;
     --shadow: rgba(0, 0, 0, 0.4);
     --avatar-bg: #2a2a2a;
     --tag-bg: #1a1a1a;
@@ -149,16 +157,17 @@ body {
 .checkbox-inline input {
     width: 16px;
     height: 16px;
+    flex-shrink: 0;
 }
 
 .label-row {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 8px;
 }
 
 .info-trigger {
-    position: relative;
     display: inline-flex;
     align-items: center;
 }
@@ -182,34 +191,33 @@ body {
 
 .info-button:hover,
 .info-button:focus-visible {
+    background: var(--surface);
     color: var(--text);
     border-color: var(--accent);
 }
 
 .info-tooltip {
+    display: none;
     position: absolute;
     top: 100%;
     left: 0;
     margin-top: 6px;
     padding: 8px 10px;
     width: 240px;
+    max-width: 100%;
+    overflow-wrap: anywhere;
     background: var(--card-bg);
     border: 1px solid var(--border);
     border-radius: 6px;
     box-shadow: 0 6px 18px var(--shadow);
     font-size: 12px;
     color: var(--text);
-    opacity: 0;
-    transform: translateY(4px);
-    transition: opacity 0.15s ease, transform 0.15s ease;
-    pointer-events: none;
     z-index: 10;
 }
 
 .info-trigger:hover .info-tooltip,
 .info-trigger:focus-within .info-tooltip {
-    opacity: 1;
-    transform: translateY(0);
+    display: block;
 }
 
 label {
@@ -255,7 +263,7 @@ select:focus-visible {
 button {
     padding: 10px 20px;
     background: var(--accent);
-    color: white;
+    color: var(--button-text);
     border: none;
     border-radius: 6px;
     font-size: 16px;
@@ -275,6 +283,7 @@ button:focus-visible {
 
 button:disabled {
     background: var(--button-disabled);
+    color: var(--button-disabled-text);
     cursor: not-allowed;
 }
 
@@ -299,6 +308,8 @@ button:disabled {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
     margin-bottom: 16px;
     padding-bottom: 12px;
     border-bottom: 1px solid var(--border-soft);
@@ -331,6 +342,7 @@ button:disabled {
 .avatar {
     width: 42px;
     height: 42px;
+    flex-shrink: 0;
     border-radius: 50%;
     object-fit: cover;
     background: var(--avatar-bg);
@@ -356,11 +368,14 @@ button:disabled {
 }
 
 .handle {
+    overflow-wrap: anywhere;
     color: var(--muted-2);
     font-size: 14px;
 }
 
 .post-time {
+    flex-shrink: 0;
+    white-space: nowrap;
     color: var(--muted-2);
     font-size: 13px;
 }
@@ -423,6 +438,7 @@ button:disabled {
 
 .post-stats {
     display: flex;
+    flex-wrap: wrap;
     gap: 20px;
     color: var(--muted);
     font-size: 14px;
@@ -436,7 +452,7 @@ button:disabled {
 }
 
 .stat.likes {
-    color: #e91e63;
+    color: var(--likes-text);
     font-weight: 500;
 }
 
@@ -456,6 +472,8 @@ button:disabled {
 
 .term-tag {
     display: inline-block;
+    max-width: 100%;
+    overflow-wrap: anywhere;
     background: var(--tag-bg);
     color: var(--accent-text);
     padding: 2px 8px;
@@ -612,6 +630,7 @@ button:disabled {
 }
 
 .quote-author {
+    overflow-wrap: anywhere;
     font-weight: 600;
     margin-bottom: 4px;
 }
@@ -629,11 +648,13 @@ button:disabled {
 
 .quote-text {
     white-space: pre-wrap;
+    overflow-wrap: anywhere;
     margin-bottom: 10px;
 }
 
 .quote-stats {
     display: flex;
+    flex-wrap: wrap;
     gap: 16px;
     color: var(--muted);
     font-size: 13px;
@@ -647,16 +668,16 @@ button:disabled {
 }
 
 .quote-stat.likes {
-    color: #e91e63;
+    color: var(--likes-text);
     font-weight: 500;
 }
 
 .quote-stat.reposts {
-    color: #17bf63;
+    color: var(--reposts-text);
 }
 
 .quote-stat.replies {
-    color: #1da1f2;
+    color: var(--accent);
 }
 
 .no-quotes {
@@ -690,6 +711,7 @@ button:disabled {
 
 .thread-parent-header {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 8px;
     margin-bottom: 6px;
@@ -698,23 +720,29 @@ button:disabled {
 .thread-parent-avatar {
     width: 28px;
     height: 28px;
+    flex-shrink: 0;
     border-radius: 50%;
     object-fit: cover;
     background: var(--avatar-bg);
 }
 
 .thread-parent-author {
+    min-width: 0;
+    overflow-wrap: anywhere;
     font-weight: 600;
     font-size: 14px;
     color: var(--text);
 }
 
 .thread-parent-handle {
+    min-width: 0;
+    overflow-wrap: anywhere;
     color: var(--muted-2);
     font-size: 13px;
 }
 
 .thread-parent-time {
+    white-space: nowrap;
     color: var(--muted-2);
     font-size: 12px;
     margin-left: auto;

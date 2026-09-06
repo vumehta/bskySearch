@@ -93,10 +93,10 @@
         </form>
 
         <div id="quoteStatus" class="status" role="status" aria-live="polite" aria-atomic="true"></div>
-        <div id="quoteTabs" class="quote-tabs">
-            <button type="button" class="quote-tab active" data-sort="likes">Most Likes</button>
-            <button type="button" class="quote-tab" data-sort="recent">Most Recent</button>
-            <button type="button" class="quote-tab" data-sort="oldest">Oldest First</button>
+        <div id="quoteTabs" class="quote-tabs" role="group" aria-label="Quote sort order">
+            <button type="button" class="quote-tab active" data-sort="likes" aria-pressed="true">Most Likes</button>
+            <button type="button" class="quote-tab" data-sort="recent" aria-pressed="false">Most Recent</button>
+            <button type="button" class="quote-tab" data-sort="oldest" aria-pressed="false">Oldest First</button>
         </div>
         <div id="quoteOriginal"></div>
         <div id="quoteCount" class="quote-count"></div>

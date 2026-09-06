@@ -27,30 +27,12 @@ const {
   state,
   isCurrentSearchGeneration,
   searchCache,
-  consumePendingSearch,
   DID_CACHE_TTL_MS,
   MAX_SEARCH_CACHE_SIZE,
   MAX_DID_CACHE_SIZE,
   enforceSearchCacheLimit,
   enforceDidCacheLimit,
 } = app;
-
-describe('consumePendingSearch', () => {
-  it('clears and reports a queued search exactly once', () => {
-    const pendingState = { pendingSearch: true };
-
-    expect(consumePendingSearch(pendingState)).toBe(true);
-    expect(pendingState.pendingSearch).toBe(false);
-    expect(consumePendingSearch(pendingState)).toBe(false);
-  });
-
-  it('leaves state unchanged when no search is queued', () => {
-    const pendingState = { pendingSearch: false };
-
-    expect(consumePendingSearch(pendingState)).toBe(false);
-    expect(pendingState.pendingSearch).toBe(false);
-  });
-});
 
 // ============================================================================
 // isValidBskyUrl

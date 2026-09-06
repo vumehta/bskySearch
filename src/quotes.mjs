@@ -20,16 +20,20 @@ import {
 import { appendEngagementStats, QUOTE_STAT_CLASSES } from './post-stats.mjs';
 import { enforceDidCacheLimit, getCachedDid } from './cache.mjs';
 import { setQueryParam, updateURLWithParams } from './url.mjs';
-import { trackQuoteCursor } from './quotes-state.mjs';
+import { mergeQuotes, trackQuoteCursor } from './quotes-state.mjs';
+import { fetchJson } from './http.mjs';
+import { isRenderablePost } from './post-data.mjs';
 
 let quoteSortCache = { quotesRef: null, sortMode: '', sorted: [] };
 let lastRenderedQuoteSort = null;
-let lastRenderedQuoteUris = [];
+let lastRenderedQuotes = [];
+let quoteGeneration = 0;
+let quoteController = null;
 
 function resetQuoteRenderCache() {
   quoteSortCache = { quotesRef: null, sortMode: '', sorted: [] };
   lastRenderedQuoteSort = null;
-  lastRenderedQuoteUris = [];
+  lastRenderedQuotes = [];
 }
 
 export function updateQuoteURL() {
@@ -47,7 +51,9 @@ export function updateQuoteURL() {
 
 export function updateQuoteTabs() {
   quoteTabs.querySelectorAll('.quote-tab').forEach((tab) => {
-    tab.classList.toggle('active', tab.dataset.sort === state.quoteSort);
+    const selected = tab.dataset.sort === state.quoteSort;
+    tab.classList.toggle('active', selected);
+    tab.setAttribute('aria-pressed', String(selected));
   });
 }
 
@@ -62,7 +68,7 @@ function hideQuoteStatus() {
 }
 
 function updateQuoteCount() {
-  if (Number.isFinite(state.quoteTotalCount)) {
+  if (Number.isFinite(state.quoteTotalCount) && state.quoteTotalCount >= state.allQuotes.length) {
     const total = state.quoteTotalCount;
     quoteCountDiv.textContent = `Loaded ${state.allQuotes.length} of ${total} quote${total !== 1 ? 's' : ''}`;
     return;
@@ -105,15 +111,15 @@ function canAppendQuotes(sortedQuotes, sortMode) {
   if (sortMode !== lastRenderedQuoteSort) {
     return false;
   }
-  if (lastRenderedQuoteUris.length === 0) {
+  if (lastRenderedQuotes.length === 0) {
     return false;
   }
-  if (sortedQuotes.length <= lastRenderedQuoteUris.length) {
+  if (sortedQuotes.length <= lastRenderedQuotes.length) {
     return false;
   }
 
-  for (let index = 0; index < lastRenderedQuoteUris.length; index += 1) {
-    if (sortedQuotes[index]?.uri !== lastRenderedQuoteUris[index]) {
+  for (let index = 0; index < lastRenderedQuotes.length; index += 1) {
+    if (sortedQuotes[index] !== lastRenderedQuotes[index]) {
       return false;
     }
   }
@@ -219,13 +225,13 @@ export function renderQuoteResults({ allowAppend = false } = {}) {
     empty.textContent = 'No quotes found for this post.';
     quoteResultsDiv.appendChild(empty);
     lastRenderedQuoteSort = state.quoteSort;
-    lastRenderedQuoteUris = [];
+    lastRenderedQuotes = [];
     return;
   }
 
   const sorted = getSortedQuotes(state.allQuotes, state.quoteSort);
   const appendOnly = allowAppend && canAppendQuotes(sorted, state.quoteSort);
-  const startIndex = appendOnly ? lastRenderedQuoteUris.length : 0;
+  const startIndex = appendOnly ? lastRenderedQuotes.length : 0;
 
   if (!appendOnly) {
     quoteResultsDiv.textContent = '';
@@ -238,25 +244,23 @@ export function renderQuoteResults({ allowAppend = false } = {}) {
   quoteResultsDiv.appendChild(fragment);
 
   lastRenderedQuoteSort = state.quoteSort;
-  lastRenderedQuoteUris = sorted.map((quote) => quote.uri);
+  lastRenderedQuotes = sorted;
 }
 
-async function fetchDid(actor) {
+async function fetchDid(actor, signal) {
+  if (actor.startsWith('did:')) return actor;
   const cacheKey = actor.toLowerCase();
   const cached = getCachedDid(cacheKey);
   if (cached) {
     return cached;
   }
 
-  const response = await fetch(
-    `${PUBLIC_API}/app.bsky.actor.getProfile?actor=${encodeURIComponent(actor)}`
+  const data = await fetchJson(
+    `${PUBLIC_API}/app.bsky.actor.getProfile?actor=${encodeURIComponent(actor)}`,
+    { signal }
   );
-  if (!response.ok) {
-    throw new Error(`Profile fetch failed: ${response.status}`);
-  }
-  const data = await response.json();
-  const did = data.did || data.profile?.did;
-  if (!did) {
+  const did = data?.did || data?.profile?.did;
+  if (typeof did !== 'string' || !did.startsWith('did:')) {
     throw new Error('Could not resolve DID for that handle.');
   }
 
@@ -265,42 +269,48 @@ async function fetchDid(actor) {
   return did;
 }
 
-async function fetchOriginalPost(atUri) {
-  const response = await fetch(
-    `${PUBLIC_API}/app.bsky.feed.getPosts?uris=${encodeURIComponent(atUri)}`
-  );
-  if (!response.ok) {
-    throw new Error(`Original post fetch failed: ${response.status}`);
+function validatePosts(data) {
+  if (!Array.isArray(data?.posts) || !data.posts.every(isRenderablePost)) {
+    throw new Error('The server returned invalid post data.');
   }
-  const data = await response.json();
-  if (!data.posts || data.posts.length === 0) {
-    throw new Error('Post not found.');
-  }
-  return data.posts[0];
+  return data.posts;
 }
 
-async function fetchQuotesPage(atUri, cursor = null) {
+async function fetchOriginalPost(atUri, signal) {
+  const data = await fetchJson(
+    `${PUBLIC_API}/app.bsky.feed.getPosts?uris=${encodeURIComponent(atUri)}`,
+    { signal }
+  );
+  const posts = validatePosts(data);
+  if (posts.length === 0) {
+    throw new Error('Post not found.');
+  }
+  return posts[0];
+}
+
+async function fetchQuotesPage(atUri, cursor = null, signal) {
   let url = `${PUBLIC_API}/app.bsky.feed.getQuotes?uri=${encodeURIComponent(atUri)}&limit=100`;
   if (cursor) {
     url += `&cursor=${encodeURIComponent(cursor)}`;
   }
 
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Quotes fetch failed: ${response.status}`);
+  const data = await fetchJson(url, { signal });
+  if (data?.cursor != null && typeof data.cursor !== 'string') {
+    throw new Error('The server returned an invalid pagination cursor.');
   }
-  const data = await response.json();
   return {
-    posts: Array.isArray(data.posts) ? data.posts : [],
+    posts: validatePosts(data),
     cursor: data.cursor || null,
   };
 }
 
-async function loadMoreQuotes() {
+export async function loadMoreQuotes() {
   if (state.isQuoteLoading || !state.activeQuoteUri || !state.quoteCursor) {
     return;
   }
 
+  const generation = quoteGeneration;
+  const controller = quoteController;
   state.isQuoteLoading = true;
   const loadMoreBtn = document.getElementById('quoteLoadMoreBtn');
   if (loadMoreBtn) {
@@ -309,10 +319,11 @@ async function loadMoreQuotes() {
   }
 
   try {
-    const page = await fetchQuotesPage(state.activeQuoteUri, state.quoteCursor);
+    const page = await fetchQuotesPage(state.activeQuoteUri, state.quoteCursor, controller?.signal);
+    if (generation !== quoteGeneration) return;
     const hasNewQuotes = page.posts.length > 0;
     if (page.posts.length > 0) {
-      state.allQuotes = state.allQuotes.concat(page.posts);
+      state.allQuotes = mergeQuotes(state.allQuotes, page.posts);
     }
     state.quoteCursor = trackQuoteCursor(page.cursor);
     updateQuoteCount();
@@ -321,25 +332,31 @@ async function loadMoreQuotes() {
     }
     hideQuoteStatus();
   } catch (error) {
+    if (generation !== quoteGeneration || controller?.signal.aborted) return;
     console.error('Load more quotes error:', error);
     showQuoteStatus(`Error loading more quotes: ${error.message}`, 'error');
   } finally {
-    state.isQuoteLoading = false;
-    renderQuoteLoadMore();
+    if (generation === quoteGeneration) {
+      state.isQuoteLoading = false;
+      renderQuoteLoadMore();
+    }
   }
 }
 
 export async function performQuoteSearch() {
-  if (state.isQuoteLoading) return;
-
   const urlValue = postUrlInput.value.trim();
   if (!urlValue) {
     showQuoteStatus('Please enter a Bluesky post URL.', 'error');
     return;
   }
 
+  quoteController?.abort();
+  const controller = new AbortController();
+  quoteController = controller;
+  const generation = ++quoteGeneration;
   state.isQuoteLoading = true;
-  quoteSearchBtn.disabled = true;
+  // A new post submission replaces the current search or pagination request.
+  quoteSearchBtn.disabled = false;
   showQuoteStatus('Loading quotes…', 'loading');
   quoteTabs.style.display = 'none';
   quoteResultsDiv.textContent = '';
@@ -357,17 +374,19 @@ export async function performQuoteSearch() {
 
   try {
     const { actor, postId } = parseBlueskyPostUrl(urlValue);
-    const did = await fetchDid(actor);
+    const did = await fetchDid(actor, controller.signal);
+    if (generation !== quoteGeneration) return;
     const atUri = `at://${did}/app.bsky.feed.post/${postId}`;
 
     state.activeQuoteUri = atUri;
 
     const [post, quotePage] = await Promise.all([
-      fetchOriginalPost(atUri),
-      fetchQuotesPage(atUri),
+      fetchOriginalPost(atUri, controller.signal),
+      fetchQuotesPage(atUri, null, controller.signal),
     ]);
+    if (generation !== quoteGeneration) return;
 
-    state.allQuotes = quotePage.posts;
+    state.allQuotes = mergeQuotes([], quotePage.posts);
     state.quoteCursor = trackQuoteCursor(quotePage.cursor);
     if (Number.isFinite(post.quoteCount) && post.quoteCount >= state.allQuotes.length) {
       state.quoteTotalCount = post.quoteCount;
@@ -376,22 +395,35 @@ export async function performQuoteSearch() {
     quoteOriginalDiv.appendChild(createQuoteOriginalElement(post));
     updateQuoteCount();
     quoteTabs.style.display = 'flex';
+    updateQuoteTabs();
     hideQuoteStatus();
     renderQuoteResults();
   } catch (error) {
+    if (generation !== quoteGeneration || controller.signal.aborted) return;
+    // Cancel a still-running sibling (original post or quotes page).
+    controller.abort();
+    state.activeQuoteUri = null;
+    state.quoteCursor = null;
+    state.allQuotes = [];
+    state.quoteTotalCount = null;
+    quoteOriginalDiv.textContent = '';
+    quoteResultsDiv.textContent = '';
+    quoteCountDiv.textContent = '';
     console.error('Quote search error:', error);
     showQuoteStatus(`Error: ${error.message}`, 'error');
   } finally {
-    state.isQuoteLoading = false;
-    quoteSearchBtn.disabled = false;
-    renderQuoteLoadMore();
+    if (generation === quoteGeneration) {
+      state.isQuoteLoading = false;
+      quoteSearchBtn.disabled = false;
+      renderQuoteLoadMore();
+    }
   }
 }
 
 export function handleQuoteTabClick(event) {
   if (!event.target.classList.contains('quote-tab')) return;
   const nextSort = event.target.dataset.sort;
-  if (nextSort && nextSort !== state.quoteSort) {
+  if (['likes', 'recent', 'oldest'].includes(nextSort) && nextSort !== state.quoteSort) {
     state.quoteSort = nextSort;
     updateQuoteTabs();
     updateQuoteURL();

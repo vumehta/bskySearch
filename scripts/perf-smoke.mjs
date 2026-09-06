@@ -1,269 +1,71 @@
-import { deduplicatePosts, filterByDate, filterByLikes, sortPosts } from '../src/utils.mjs';
+import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
+import { createHighlightMatcher, ingestSearchPosts } from '../src/search-model.mjs';
+import { filterByDate, filterByLikes, sortPosts } from '../src/utils.mjs';
 
-function createPost(uri, term, likeCount, indexedAtOffsetHours) {
-  const indexedAt = new Date(Date.now() - indexedAtOffsetHours * 3600000).toISOString();
-  return {
-    uri,
-    matchedTerm: term,
-    likeCount,
-    indexedAt,
-    author: { handle: 'perf-user' },
-    record: { text: `text for ${term}` },
-  };
+const now = Date.now();
+const termResults = Array.from({ length: 10 }, (_, termIndex) =>
+  Array.from({ length: 160 }, (_, index) => ({
+    uri: `at://did:plc:test/app.bsky.feed.post/${index < 56 ? `shared${index}` : `t${termIndex}p${index}`}`,
+    matchedTerm: `term${termIndex}`,
+    likeCount: (index * 7 + termIndex) % 500,
+    indexedAt: new Date(now - (index % 72) * 3600000).toISOString(),
+    author: { handle: 'perf.bsky.social' },
+    record: { text: `post ${index} for term${termIndex}` },
+  }))
+);
+
+function derive(posts) {
+  return sortPosts(filterByLikes(filterByDate(posts, 24), 10), 'top');
 }
 
-function buildTermResults(termCount = 10, postsPerTerm = 160, overlapFactor = 0.35) {
-  const results = [];
-  const sharedCount = Math.floor(postsPerTerm * overlapFactor);
-  const sharedUris = Array.from({ length: sharedCount }, (_, i) => `at://shared/${i}`);
-
-  for (let termIndex = 0; termIndex < termCount; termIndex += 1) {
-    const term = `term-${termIndex}`;
-    const posts = [];
-
-    for (let postIndex = 0; postIndex < postsPerTerm; postIndex += 1) {
-      const usesShared = postIndex < sharedCount;
-      const uri = usesShared ? sharedUris[postIndex] : `at://${term}/${postIndex - sharedCount}`;
-      posts.push(createPost(uri, term, (postIndex * 7 + termIndex) % 500, postIndex % 72));
-    }
-
-    results.push(posts);
-  }
-
-  return results;
-}
-
-function cloneResults(results) {
-  return results.map((posts) =>
-    posts.map((post) => ({
-      ...post,
-      author: { ...post.author },
-      record: { ...post.record },
-    }))
-  );
-}
-
-function legacyProgressiveMerge(results, hours = 24, minLikes = 10, sortMode = 'top') {
-  let allPosts = [];
-
-  for (const termPosts of results) {
-    let combined = deduplicatePosts([...allPosts, ...termPosts]);
-    combined = filterByDate(combined, hours);
-    combined = filterByLikes(combined, minLikes);
-    allPosts = sortPosts(combined, sortMode);
-  }
-
-  return allPosts;
-}
-
-function mergeTermArrays(existingTerms, incomingTerms) {
-  const seen = new Set();
-  const merged = [];
-
-  const add = (value) => {
-    if (!value) return;
-    const normalized = value.toLowerCase();
-    if (seen.has(normalized)) return;
-    seen.add(normalized);
-    merged.push(value);
-  };
-
-  existingTerms.forEach(add);
-  incomingTerms.forEach(add);
-  return merged;
-}
-
-function optimizedIngestThenDerive(results, hours = 24, minLikes = 10, sortMode = 'top') {
+function runProductionMerge() {
   const store = new Map();
-
-  for (const termPosts of results) {
-    for (const post of termPosts) {
-      const existing = store.get(post.uri);
-      if (!existing) {
-        store.set(post.uri, {
-          ...post,
-          matchedTerms: post.matchedTerm ? [post.matchedTerm] : [],
-        });
-        continue;
-      }
-
-      const incomingTerms = post.matchedTerm ? [post.matchedTerm] : [];
-      existing.matchedTerms = mergeTermArrays(existing.matchedTerms || [], incomingTerms);
-    }
-  }
-
-  let derived = Array.from(store.values());
-  derived = filterByDate(derived, hours);
-  derived = filterByLikes(derived, minLikes);
-  return sortPosts(derived, sortMode);
+  termResults.forEach((posts) => ingestSearchPosts(store, posts));
+  return derive([...store.values()]);
 }
 
-function createCachedHighlightMatcher(terms) {
-  const escapedTerms = terms.map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-  const regex = new RegExp(`(${escapedTerms.join('|')})`, 'gi');
-  const termSet = new Set(terms.map((term) => term.toLowerCase()));
+// An independent reference verifies semantics before timing production code,
+// including latest-record values and the union of matching terms.
+const flattened = termResults.flat();
+const expected = [...new Set(flattened.map((post) => post.uri))].map((uri) => {
+  const versions = flattened.filter((post) => post.uri === uri);
+  const matchedTerms = [...new Set(versions.map((post) => post.matchedTerm))];
+  return { ...versions.at(-1), matchedTerm: matchedTerms[0], matchedTerms };
+});
+const inputSnapshot = JSON.stringify(termResults);
+assert.deepEqual(runProductionMerge(), derive(expected));
+assert.equal(JSON.stringify(termResults), inputSnapshot, 'Ingestion must not mutate fetched/cache data.');
 
-  return (text) => {
-    const parts = text.split(regex);
-    let hits = 0;
-    for (const part of parts) {
-      if (termSet.has(part.toLowerCase())) {
-        hits += 1;
-      }
-    }
-    return hits;
-  };
+const terms = Array.from({ length: 28 }, (_, index) => `term${index}`);
+const text = Array.from({ length: 120 }, (_, index) => `token${index % 25} term${index % 28}`).join(' ');
+const matcher = createHighlightMatcher(terms);
+function highlightedParts(value, pattern) {
+  return value.split(pattern.regex).filter((part) => pattern.termSet.has(part.toLowerCase()));
+}
+assert.equal(highlightedParts(text, matcher).length, 120);
+assert.deepEqual(
+  highlightedParts('ALPHA BETA a+b a.b café', createHighlightMatcher(['alpha', 'alpha beta', 'a+b', 'a.b', 'café'])),
+  ['ALPHA BETA', 'a+b', 'a.b', 'café']
+);
+
+function measure(label, operation, runs, budgetMs) {
+  for (let index = 0; index < 10; index += 1) operation();
+  const samples = [];
+  for (let index = 0; index < runs; index += 1) {
+    const start = performance.now();
+    operation();
+    samples.push(performance.now() - start);
+  }
+  samples.sort((left, right) => left - right);
+  const median = samples[Math.floor(samples.length / 2)];
+  const p95 = samples[Math.floor(samples.length * 0.95)];
+  console.log(`${label}: median ${median.toFixed(3)}ms, p95 ${p95.toFixed(3)}ms (budget ${budgetMs}ms)`);
+  assert.ok(p95 < budgetMs, `${label} exceeded its smoke-check budget.`);
 }
 
-function legacyHighlightMatch(text, terms) {
-  const escapedTerms = terms.map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-  const regex = new RegExp(`(${escapedTerms.join('|')})`, 'gi');
-  const parts = text.split(regex);
-  let hits = 0;
-  for (const part of parts) {
-    if (terms.some((term) => part.toLowerCase() === term.toLowerCase())) {
-      hits += 1;
-    }
-  }
-  return hits;
-}
-
-function runOrderedPair(runIndex, legacyFn, optimizedFn) {
-  let legacyDuration = 0;
-  let optimizedDuration = 0;
-
-  if (runIndex % 2 === 0) {
-    let start = performance.now();
-    legacyFn();
-    legacyDuration = performance.now() - start;
-
-    start = performance.now();
-    optimizedFn();
-    optimizedDuration = performance.now() - start;
-  } else {
-    let start = performance.now();
-    optimizedFn();
-    optimizedDuration = performance.now() - start;
-
-    start = performance.now();
-    legacyFn();
-    legacyDuration = performance.now() - start;
-  }
-
-  return { legacyDuration, optimizedDuration };
-}
-
-function benchmarkSearchMerge() {
-  const warmupRuns = 8;
-  const runs = 50;
-  const baseResults = buildTermResults();
-  let legacyMs = 0;
-  let optimizedMs = 0;
-
-  for (let run = 0; run < warmupRuns; run += 1) {
-    const legacyInput = cloneResults(baseResults);
-    const optimizedInput = cloneResults(baseResults);
-    runOrderedPair(
-      run,
-      () => legacyProgressiveMerge(legacyInput),
-      () => optimizedIngestThenDerive(optimizedInput)
-    );
-  }
-
-  for (let run = 0; run < runs; run += 1) {
-    const legacyInput = cloneResults(baseResults);
-    const optimizedInput = cloneResults(baseResults);
-    const { legacyDuration, optimizedDuration } = runOrderedPair(
-      run,
-      () => legacyProgressiveMerge(legacyInput),
-      () => optimizedIngestThenDerive(optimizedInput)
-    );
-    legacyMs += legacyDuration;
-    optimizedMs += optimizedDuration;
-  }
-
-  return {
-    runs,
-    avgLegacyMs: legacyMs / runs,
-    avgOptimizedMs: optimizedMs / runs,
-    speedup: legacyMs / optimizedMs,
-  };
-}
-
-function benchmarkHighlighting() {
-  const warmupRuns = 40;
-  const runs = 500;
-  const terms = Array.from({ length: 28 }, (_, index) => `term${index}`);
-  const text = Array.from({ length: 120 }, (_, index) => `token${index % 25} term${index % 28}`).join(
-    ' '
-  );
-  const cachedMatcher = createCachedHighlightMatcher(terms);
-  let legacyMs = 0;
-  let currentMs = 0;
-
-  for (let run = 0; run < warmupRuns; run += 1) {
-    runOrderedPair(
-      run,
-      () => legacyHighlightMatch(text, terms),
-      () => cachedMatcher(text)
-    );
-  }
-
-  for (let run = 0; run < runs; run += 1) {
-    const { legacyDuration, optimizedDuration } = runOrderedPair(
-      run,
-      () => legacyHighlightMatch(text, terms),
-      () => cachedMatcher(text)
-    );
-    legacyMs += legacyDuration;
-    currentMs += optimizedDuration;
-  }
-
-  return {
-    runs,
-    avgLegacyMs: legacyMs / runs,
-    avgCurrentMs: currentMs / runs,
-    speedup: legacyMs / currentMs,
-  };
-}
-
-function formatMs(value) {
-  return `${value.toFixed(3)}ms`;
-}
-
-function runSmokeCheck() {
-  const searchMerge = benchmarkSearchMerge();
-  const highlighting = benchmarkHighlighting();
-
-  console.log('Performance smoke check');
-  console.log('-----------------------');
-  console.log(
-    `Search merge: legacy ${formatMs(searchMerge.avgLegacyMs)} vs optimized ${formatMs(
-      searchMerge.avgOptimizedMs
-    )} (speedup ${searchMerge.speedup.toFixed(2)}x)`
-  );
-  console.log(
-    `Highlighting: legacy ${formatMs(highlighting.avgLegacyMs)} vs optimized ${formatMs(
-      highlighting.avgCurrentMs
-    )} (speedup ${highlighting.speedup.toFixed(2)}x)`
-  );
-
-  const regressions = [];
-  if (searchMerge.speedup < 1.1) {
-    regressions.push('Search merge optimization is below expected speedup threshold (1.10x).');
-  }
-  if (highlighting.speedup < 1.1) {
-    regressions.push('Highlight optimization is below expected speedup threshold (1.10x).');
-  }
-
-  if (regressions.length > 0) {
-    regressions.forEach((message) => console.error(message));
-    process.exitCode = 1;
-    return;
-  }
-
-  console.log('Perf smoke check passed.');
-}
-
-runSmokeCheck();
+// Generous budgets catch major regressions without comparing noisy timings of
+// copied algorithms. Browser rendering is validated separately.
+measure('Production merge/filter/sort (1600 records)', runProductionMerge, 60, 50);
+measure('Production cached highlighting (120 matches)', () => highlightedParts(text, matcher), 200, 5);
+console.log('Production performance and result-equivalence checks passed.');
