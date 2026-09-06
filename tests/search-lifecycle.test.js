@@ -49,15 +49,21 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
   vi.useRealTimers();
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 describe('upstream bodies and response validation', () => {
-  it('keeps the deadline active after search headers arrive', async () => {
+  it.each(['headers', 'JSON body'])('times out pending search %s without caching and clears its timer', async (phase) => {
     vi.useFakeTimers();
     let signal;
     upstream({
       search: (_url, options) => {
         signal = options.signal;
+        if (phase === 'headers') {
+          return new Promise((_, reject) => {
+            signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+          });
+        }
         return { ok: true, status: 200, json: () => new Promise(() => {}) };
       },
     });
@@ -65,6 +71,8 @@ describe('upstream bodies and response validation', () => {
     await vi.advanceTimersByTimeAsync(UPSTREAM_TIMEOUT_MS + 1);
     const response = await pending;
     expect(response.status).toBe(504);
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    await expect(response.json()).resolves.toEqual({ error: 'Upstream request timed out.' });
     expect(signal.aborted).toBe(true);
     expect(searchResultsCache.size).toBe(0);
     expect(vi.getTimerCount()).toBe(0);
@@ -199,13 +207,14 @@ describe('authentication lifecycle', () => {
     vi.setSystemTime(0);
     const handlers = upstream();
     expect((await GET(request('first'), context)).status).toBe(200);
-    expect(testUtils.isSessionExpired()).toBe(false);
+    expect((await GET(request('still-fresh'), context)).status).toBe(200);
+    expect(handlers.refresh).not.toHaveBeenCalled();
     vi.setSystemTime(SESSION_TTL_MS + 1);
     expect((await GET(request('second'), context)).status).toBe(200);
     expect(handlers.create).toHaveBeenCalledTimes(1);
     expect(handlers.refresh).toHaveBeenCalledTimes(1);
     expect(handlers.refresh.mock.calls[0][0].headers.Authorization).toBe('Bearer refresh-a');
-    expect(handlers.search.mock.calls[1][1].headers.Authorization).toBe('Bearer access-b');
+    expect(handlers.search.mock.calls.at(-1)[1].headers.Authorization).toBe('Bearer access-b');
   });
 
   it.each([400, 401])('creates a new session when refresh credentials are rejected with %i', async (status) => {
@@ -294,6 +303,7 @@ describe('coalescing and cancellation', () => {
     expect(responses.map((response) => response.status)).toEqual(Array(25).fill(200));
     expect(await Promise.all(responses.map((response) => response.json()))).toEqual(Array(25).fill(posts));
     expect((await GET(request(), context)).status).toBe(200);
+    expect((await GET(new Request(`${request().url}&cursor=&sort=top`), context)).status).toBe(200);
     expect(handlers.create).toHaveBeenCalledTimes(1);
     expect(handlers.search).toHaveBeenCalledTimes(1);
   });
@@ -434,17 +444,59 @@ describe('bounded search admission', () => {
 });
 
 describe('handler input boundaries', () => {
+  it('returns 400 for a missing term without contacting upstream', async () => {
+    upstream();
+    const response = await GET(new Request('https://example.com/api/search'), context);
+    expect(response.status).toBe(400);
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    await expect(response.json()).resolves.toEqual({ error: 'Missing term parameter.' });
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('returns 405 with the allowed method without contacting upstream', async () => {
+    upstream();
+    const response = await GET(request('topic', { method: 'POST' }), context);
+    expect(response.status).toBe(405);
+    expect(response.headers.get('Allow')).toBe('GET');
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    await expect(response.json()).resolves.toEqual({ error: 'Method not allowed.' });
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
   it.each([
-    ['term', 'a'.repeat(501)],
-    ['cursor', 'a'.repeat(1001)],
-    ['sort', 'popular'],
-    ['since', '2026-02-30'],
-  ])('rejects an invalid %s without contacting upstream', async (key, value) => {
+    ['term', 'a'.repeat(501), 'Search term is too long.'],
+    ['cursor', 'a'.repeat(1001), 'Cursor is too long.'],
+    ['sort', 'popular', 'Invalid sort parameter.'],
+    ['since', '2026-02-30', 'Invalid since parameter.'],
+    ['since', 'yesterday', 'Invalid since parameter.'],
+    ['since', '2026-02-30T00:00:00Z', 'Invalid since parameter.'],
+  ])('rejects an invalid %s without contacting upstream', async (key, value, error) => {
     upstream();
     const url = new URL('https://example.com/api/search?term=topic');
     url.searchParams.set(key, value);
-    expect((await GET(new Request(url), context)).status).toBe(400);
+    const response = await GET(new Request(url), context);
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error });
     expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('strips C0 and C1 control characters before forwarding the term', async () => {
+    const handlers = upstream();
+    const response = await GET(request('  he\u0000l\u001Flo\u007F\u0085  '), context);
+    expect(response.status).toBe(200);
+    expect(handlers.search.mock.calls[0][0].searchParams.get('q')).toBe('hello');
+  });
+
+  it.each(['2026-08-31T18:00:00Z', '2026-08-31T18:00:00+02:00'])
+  ('forwards the since datetime unchanged: %s', async (since) => {
+    const handlers = upstream();
+    const url = new URL(request().url);
+    url.searchParams.set('since', since);
+    expect((await GET(new Request(url), context)).status).toBe(200);
+    expect(handlers.search).toHaveBeenCalledTimes(1);
+    const params = handlers.search.mock.calls[0][0].searchParams;
+    expect(params.get('since')).toBe(since);
+    expect(params.get('q')).toBe('topic');
   });
 
   it('accepts exact length boundaries, normalizes sort, and keeps English-only search', async () => {
@@ -461,12 +513,49 @@ describe('handler input boundaries', () => {
     expect(params.get('sort')).toBe('latest');
     expect(params.get('lang')).toBe('en');
     expect(params.get('limit')).toBe('100');
+    expect(params.has('since')).toBe(false);
+  });
+
+  it('uses process credentials when no runtime context is supplied', async () => {
+    vi.stubEnv('BSKY_HANDLE', 'process-handle');
+    vi.stubEnv('BSKY_APP_PASSWORD', 'process-password');
+    const handlers = upstream();
+    expect((await GET(request())).status).toBe(200);
+    expect(JSON.parse(handlers.create.mock.calls[0][0].body)).toEqual({
+      identifier: 'process-handle',
+      password: 'process-password',
+    });
   });
 
   it('rejects missing runtime credentials without using process credentials or upstream', async () => {
+    vi.stubEnv('BSKY_HANDLE', 'process-handle');
+    vi.stubEnv('BSKY_APP_PASSWORD', 'process-password');
     upstream();
     const response = await GET(request(), { env: {} });
     expect(response.status).toBe(500);
     expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('search cache isolation', () => {
+  it.each([
+    ['term', 'one', 'two'],
+    ['cursor', 'cursor-1', 'cursor-2'],
+    ['sort', 'top', 'latest'],
+    ['since', '2026-08-31T18:00:00Z', '2026-08-30T18:00:00Z'],
+    ['since', null, '2026-08-31T18:00:00Z'],
+  ])('caches %s variants separately (%s / %s)', async (key, firstValue, secondValue) => {
+    const handlers = upstream();
+    const first = new URL(request().url);
+    if (firstValue !== null) first.searchParams.set(key, firstValue);
+    const second = new URL(first);
+    second.searchParams.set(key, secondValue);
+
+    for (const url of [first, second, first, second]) {
+      expect((await GET(new Request(url), context)).status).toBe(200);
+    }
+    expect(handlers.search).toHaveBeenCalledTimes(2);
+    expect(handlers.search.mock.calls.map(([url]) => url.searchParams.get(key === 'term' ? 'q' : key)))
+      .toEqual([firstValue, secondValue]);
   });
 });

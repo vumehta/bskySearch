@@ -1,42 +1,21 @@
-/**
- * Frontend pure function tests for bskySearch
- *
- * These tests cover the core utility functions that don't depend on DOM or network.
- */
-
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
-// Import pure utilities from the refactored modules
-const app = await import('../src/testing.mjs');
-
-const {
+import {
   isValidBskyUrl,
   parseBlueskyPostUrl,
-  deduplicatePosts,
-  trackQuoteCursor,
   getSearchCacheKey,
   getSearchSince,
-  getCachedDid,
   filterByDate,
   filterByLikes,
   sortPosts,
   normalizeTerm,
   expandSearchTerms,
   getPostTimestamp,
-  didCache,
-  state,
-  isCurrentSearchGeneration,
-  searchCache,
-  DID_CACHE_TTL_MS,
-  MAX_SEARCH_CACHE_SIZE,
-  MAX_DID_CACHE_SIZE,
-  enforceSearchCacheLimit,
-  enforceDidCacheLimit,
-} = app;
+} from '../src/utils.mjs';
+import { enforceDidCacheLimit, enforceSearchCacheLimit, getCachedDid } from '../src/cache.mjs';
+import { didCache, searchCache } from '../src/state.mjs';
+import { DID_CACHE_TTL_MS, MAX_DID_CACHE_SIZE, MAX_SEARCH_CACHE_SIZE } from '../src/constants.mjs';
 
-// ============================================================================
-// isValidBskyUrl
-// ============================================================================
 describe('isValidBskyUrl', () => {
   it('returns true for valid bsky.app URLs', () => {
     expect(isValidBskyUrl('https://bsky.app/profile/someone')).toBe(true);
@@ -75,9 +54,6 @@ describe('isValidBskyUrl', () => {
   });
 });
 
-// ============================================================================
-// parseBlueskyPostUrl
-// ============================================================================
 describe('parseBlueskyPostUrl', () => {
   it('parses valid post URL with handle', () => {
     const result = parseBlueskyPostUrl('https://bsky.app/profile/alice.bsky.social/post/abc123');
@@ -125,129 +101,24 @@ describe('parseBlueskyPostUrl', () => {
   });
 });
 
-// ============================================================================
-// deduplicatePosts
-// ============================================================================
-describe('deduplicatePosts', () => {
-  it('returns empty array for empty input', () => {
-    expect(deduplicatePosts([])).toEqual([]);
-  });
-
-  it('returns posts unchanged if no duplicates', () => {
-    const posts = [
-      { uri: 'at://1', matchedTerm: 'term1' },
-      { uri: 'at://2', matchedTerm: 'term2' },
-    ];
-    const result = deduplicatePosts(posts);
-    expect(result).toHaveLength(2);
-    expect(result[0].matchedTerms).toEqual(['term1']);
-    expect(result[1].matchedTerms).toEqual(['term2']);
-  });
-
-  it('deduplicates by URI', () => {
-    const posts = [
-      { uri: 'at://1', matchedTerm: 'term1' },
-      { uri: 'at://1', matchedTerm: 'term1' },
-      { uri: 'at://2', matchedTerm: 'term2' },
-    ];
-    const result = deduplicatePosts(posts);
-    expect(result).toHaveLength(2);
-  });
-
-  it('merges matchedTerms for duplicate URIs', () => {
-    const posts = [
-      { uri: 'at://1', matchedTerm: 'term1' },
-      { uri: 'at://1', matchedTerm: 'term2' },
-      { uri: 'at://1', matchedTerm: 'term3' },
-    ];
-    const result = deduplicatePosts(posts);
-    expect(result).toHaveLength(1);
-    expect(result[0].matchedTerms).toContain('term1');
-    expect(result[0].matchedTerms).toContain('term2');
-    expect(result[0].matchedTerms).toContain('term3');
-  });
-
-  it('does not add duplicate matchedTerms', () => {
-    const posts = [
-      { uri: 'at://1', matchedTerm: 'term1' },
-      { uri: 'at://1', matchedTerm: 'term1' },
-    ];
-    const result = deduplicatePosts(posts);
-    expect(result[0].matchedTerms).toEqual(['term1']);
-  });
-
-  it('preserves other post properties', () => {
-    const posts = [
-      { uri: 'at://1', matchedTerm: 'term1', likeCount: 42, author: { handle: 'alice' } },
-    ];
-    const result = deduplicatePosts(posts);
-    expect(result[0].likeCount).toBe(42);
-    expect(result[0].author.handle).toBe('alice');
-  });
-});
-
-// ============================================================================
-// trackQuoteCursor (stateless behavior only)
-// ============================================================================
-describe('trackQuoteCursor', () => {
-  it('returns null for null input', () => {
-    expect(trackQuoteCursor(null)).toBe(null);
-  });
-
-  it('returns null for empty string', () => {
-    expect(trackQuoteCursor('')).toBe(null);
-  });
-
-  it('returns null for undefined', () => {
-    expect(trackQuoteCursor(undefined)).toBe(null);
-  });
-});
-
-// ============================================================================
-// getSearchCacheKey
-// ============================================================================
 describe('getSearchCacheKey', () => {
-  it('generates deterministic key for same inputs', () => {
-    const key1 = getSearchCacheKey('term', 'cursor', 'top');
-    const key2 = getSearchCacheKey('term', 'cursor', 'top');
-    expect(key1).toBe(key2);
+  it('keeps each search dimension isolated in the cache', () => {
+    const searches = [
+      ['term', 'cursor', 'top', '2026-08-31T00:00:00Z'],
+      ['other', 'cursor', 'top', '2026-08-31T00:00:00Z'],
+      ['term', 'next', 'top', '2026-08-31T00:00:00Z'],
+      ['term', 'cursor', 'latest', '2026-08-31T00:00:00Z'],
+      ['term', 'cursor', 'top', '2026-08-30T00:00:00Z'],
+    ];
+    expect(new Set(searches.map((args) => getSearchCacheKey(...args))).size).toBe(searches.length);
   });
 
-  it('generates different keys for different terms', () => {
-    const key1 = getSearchCacheKey('term1', null, 'top');
-    const key2 = getSearchCacheKey('term2', null, 'top');
-    expect(key1).not.toBe(key2);
-  });
-
-  it('generates different keys for different cursors', () => {
-    const key1 = getSearchCacheKey('term', 'cursor1', 'top');
-    const key2 = getSearchCacheKey('term', 'cursor2', 'top');
-    expect(key1).not.toBe(key2);
-  });
-
-  it('generates different keys for different sort modes', () => {
-    const key1 = getSearchCacheKey('term', null, 'top');
-    const key2 = getSearchCacheKey('term', null, 'latest');
-    expect(key1).not.toBe(key2);
-  });
-
-  it('treats null cursor as empty string', () => {
-    const key1 = getSearchCacheKey('term', null, 'top');
-    const key2 = getSearchCacheKey('term', '', 'top');
-    expect(key1).toBe(key2);
-  });
-
-  it('generates different keys for different since windows', () => {
-    const key1 = getSearchCacheKey('term', null, 'top', '2026-08-31T00:00:00Z');
-    const key2 = getSearchCacheKey('term', null, 'top', '2026-08-30T00:00:00Z');
-    expect(key1).not.toBe(key2);
+  it('normalizes missing pagination and date filters', () => {
+    expect(getSearchCacheKey('term', null, 'top')).toBe(getSearchCacheKey('term', '', 'top'));
     expect(getSearchCacheKey('term', null, 'top')).toBe(getSearchCacheKey('term', null, 'top', ''));
   });
 });
 
-// ============================================================================
-// getSearchSince
-// ============================================================================
 describe('getSearchSince', () => {
   const now = Date.UTC(2026, 8, 1, 18, 34, 56, 789); // 2026-09-01T18:34:56.789Z
 
@@ -269,131 +140,59 @@ describe('getSearchSince', () => {
   });
 });
 
-// ============================================================================
-// getCachedDid
-// ============================================================================
 describe('getCachedDid', () => {
-  beforeEach(() => {
+  afterEach(() => {
     didCache.clear();
+    vi.useRealTimers();
   });
 
-  it('returns null for missing key', () => {
-    expect(getCachedDid('nonexistent')).toBe(null);
-  });
-
-  it('returns null for expired entry', () => {
-    const expiredTimestamp = Date.now() - DID_CACHE_TTL_MS - 1000;
-    didCache.set('alice', { did: 'did:plc:abc', timestamp: expiredTimestamp });
-    expect(getCachedDid('alice')).toBe(null);
-    // Should also delete the expired entry
+  it('reuses a DID through its TTL boundary and removes it once expired', () => {
+    vi.useFakeTimers();
+    expect(getCachedDid('alice')).toBeNull();
+    didCache.set('alice', { did: 'did:plc:abc', timestamp: Date.now() });
+    expect(getCachedDid('alice')).toBe('did:plc:abc');
+    vi.advanceTimersByTime(DID_CACHE_TTL_MS);
+    expect(getCachedDid('alice')).toBe('did:plc:abc');
+    vi.advanceTimersByTime(1);
+    expect(getCachedDid('alice')).toBeNull();
     expect(didCache.has('alice')).toBe(false);
-  });
-
-  it('returns did for fresh entry', () => {
-    const freshTimestamp = Date.now() - 1000; // 1 second ago
-    didCache.set('bob', { did: 'did:plc:xyz', timestamp: freshTimestamp });
-    expect(getCachedDid('bob')).toBe('did:plc:xyz');
-  });
-
-  it('returns did for entry at TTL boundary', () => {
-    const boundaryTimestamp = Date.now() - DID_CACHE_TTL_MS + 1000; // Just under TTL
-    didCache.set('carol', { did: 'did:plc:boundary', timestamp: boundaryTimestamp });
-    expect(getCachedDid('carol')).toBe('did:plc:boundary');
   });
 });
 
-// ============================================================================
-// expandSearchTerms
-// ============================================================================
 describe('expandSearchTerms', () => {
-  it('returns single-word terms unchanged', () => {
-    const result = expandSearchTerms(['hello', 'world'], false);
-    expect(result).toEqual(['hello', 'world']);
+  it('keeps phrases and single words intact when expansion is off', () => {
+    expect(expandSearchTerms(['hello world', 'single'], false)).toEqual(['hello world', 'single']);
   });
 
-  it('does not expand when shouldExpandWords is false', () => {
-    const result = expandSearchTerms(['hello world'], false);
-    expect(result).toEqual(['hello world']);
+  it('expands phrases in order without repeated or empty terms', () => {
+    expect(expandSearchTerms(['Hello world', 'hello', '', 'WORLD', '  '], true))
+      .toEqual(['Hello world', 'Hello', 'world']);
   });
 
-  it('expands multi-word terms when shouldExpandWords is true', () => {
-    const result = expandSearchTerms(['hello world'], true);
-    expect(result).toContain('hello world');
-    expect(result).toContain('hello');
-    expect(result).toContain('world');
-  });
-
-  it('deduplicates expanded terms (case-insensitive)', () => {
-    const result = expandSearchTerms(['Hello', 'hello'], true);
-    expect(result).toHaveLength(1);
-  });
-
-  it('handles empty terms array', () => {
+  it('handles empty terms arrays', () => {
     expect(expandSearchTerms([], true)).toEqual([]);
     expect(expandSearchTerms([], false)).toEqual([]);
   });
 
-  it('filters out empty strings', () => {
-    const result = expandSearchTerms(['', '  ', 'valid'], false);
-    expect(result).toEqual(['valid']);
-  });
-
-  it('preserves original phrase before individual words', () => {
-    const result = expandSearchTerms(['foo bar'], true);
-    expect(result[0]).toBe('foo bar');
-    expect(result).toContain('foo');
-    expect(result).toContain('bar');
+  it('filters empty terms with expansion off', () => {
+    expect(expandSearchTerms(['', '  ', 'valid'], false)).toEqual(['valid']);
   });
 });
 
-// ============================================================================
-// filterByLikes
-// ============================================================================
 describe('filterByLikes', () => {
-  it('filters posts below minimum likes threshold', () => {
+  it('includes the threshold and treats missing counts as zero', () => {
     const posts = [
       { uri: 'at://1', likeCount: 5 },
       { uri: 'at://2', likeCount: 15 },
       { uri: 'at://3', likeCount: 10 },
+      { uri: 'at://4' },
+      { uri: 'at://5', likeCount: 0 },
     ];
-    const result = filterByLikes(posts, 10);
-    expect(result).toHaveLength(2);
-    expect(result.map(p => p.uri)).toEqual(['at://2', 'at://3']);
-  });
-
-  it('treats missing likeCount as 0', () => {
-    const posts = [
-      { uri: 'at://1' },
-      { uri: 'at://2', likeCount: 10 },
-    ];
-    const result = filterByLikes(posts, 5);
-    expect(result).toHaveLength(1);
-    expect(result[0].uri).toBe('at://2');
-  });
-
-  it('returns all posts when minLikes is 0', () => {
-    const posts = [
-      { uri: 'at://1', likeCount: 0 },
-      { uri: 'at://2' },
-    ];
-    const result = filterByLikes(posts, 0);
-    expect(result).toHaveLength(2);
-  });
-
-  it('returns empty array for empty input', () => {
-    expect(filterByLikes([], 10)).toEqual([]);
-  });
-
-  it('includes posts with exactly the minimum likes', () => {
-    const posts = [{ uri: 'at://1', likeCount: 10 }];
-    const result = filterByLikes(posts, 10);
-    expect(result).toHaveLength(1);
+    expect(filterByLikes(posts, 10).map((post) => post.uri)).toEqual(['at://2', 'at://3']);
+    expect(filterByLikes(posts, 0)).toEqual(posts);
   });
 });
 
-// ============================================================================
-// filterByDate
-// ============================================================================
 describe('filterByDate', () => {
   const fixedNow = Date.parse('2026-01-01T12:00:00.000Z');
 
@@ -426,7 +225,7 @@ describe('filterByDate', () => {
     expect(nanHours.map((post) => post.uri)).toEqual(['at://fresh']);
   });
 
-  it('uses getPostTimestamp fallback to record.createdAt', () => {
+  it('filters by creation time when it differs from indexing time', () => {
     const posts = [
       {
         uri: 'at://fallback-recent',
@@ -444,9 +243,6 @@ describe('filterByDate', () => {
   });
 });
 
-// ============================================================================
-// getPostTimestamp
-// ============================================================================
 describe('getPostTimestamp', () => {
   it('prefers record.createdAt when present', () => {
     const post = {
@@ -470,54 +266,25 @@ describe('getPostTimestamp', () => {
   });
 });
 
-// ============================================================================
-// sortPosts
-// ============================================================================
 describe('sortPosts', () => {
-  const posts = [
-    { uri: 'at://1', likeCount: 10, indexedAt: '2024-01-03T00:00:00Z', record: { createdAt: '2024-01-03T00:00:00Z' } },
-    { uri: 'at://2', likeCount: 50, indexedAt: '2024-01-01T00:00:00Z', record: { createdAt: '2024-01-01T00:00:00Z' } },
-    { uri: 'at://3', likeCount: 25, indexedAt: '2024-01-02T00:00:00Z', record: { createdAt: '2024-01-02T00:00:00Z' } },
-  ];
+  const posts = Object.freeze([
+    { uri: 'at://4', indexedAt: '2023-12-31T00:00:00Z' },
+    { uri: 'at://1', likeCount: 10, record: { createdAt: '2024-01-03T00:00:00Z' } },
+    { uri: 'at://2', likeCount: 50, record: { createdAt: '2024-01-01T00:00:00Z' } },
+    { uri: 'at://3', likeCount: 25, record: { createdAt: '2024-01-02T00:00:00Z' } },
+  ]);
 
-  it('sorts by likes (high to low) for top mode', () => {
-    const result = sortPosts(posts, 'top');
-    expect(result[0].likeCount).toBe(50);
-    expect(result[1].likeCount).toBe(25);
-    expect(result[2].likeCount).toBe(10);
+  it('defaults to descending likes, treating missing counts as zero, without changing the input', () => {
+    const expected = [posts[2], posts[3], posts[1], posts[0]];
+    expect(sortPosts(posts, 'top')).toEqual(expected);
+    expect(sortPosts(posts)).toEqual(expected);
   });
 
-  it('sorts by time (newest first) for latest mode', () => {
-    const result = sortPosts(posts, 'latest');
-    expect(result[0].uri).toBe('at://1');
-    expect(result[1].uri).toBe('at://3');
-    expect(result[2].uri).toBe('at://2');
-  });
-
-  it('does not mutate original array', () => {
-    const original = [...posts];
-    sortPosts(posts, 'top');
-    expect(posts).toEqual(original);
-  });
-
-  it('defaults to top sorting', () => {
-    const result = sortPosts(posts);
-    expect(result[0].likeCount).toBe(50);
-  });
-
-  it('handles missing likeCount', () => {
-    const postsWithMissing = [
-      { uri: 'at://1' },
-      { uri: 'at://2', likeCount: 10 },
-    ];
-    const result = sortPosts(postsWithMissing, 'top');
-    expect(result[0].likeCount).toBe(10);
+  it('sorts by newest time without changing the input', () => {
+    expect(sortPosts(posts, 'latest')).toEqual([posts[1], posts[3], posts[2], posts[0]]);
   });
 });
 
-// ============================================================================
-// normalizeTerm
-// ============================================================================
 describe('normalizeTerm', () => {
   it('trims whitespace', () => {
     expect(normalizeTerm('  hello  ')).toBe('hello');
@@ -554,108 +321,20 @@ describe('normalizeTerm', () => {
   });
 });
 
-// ============================================================================
-// isCurrentSearchGeneration
-// ============================================================================
-describe('isCurrentSearchGeneration', () => {
-  const originalGeneration = state.searchGeneration;
+describe.each([
+  ['search', searchCache, MAX_SEARCH_CACHE_SIZE, enforceSearchCacheLimit],
+  ['DID', didCache, MAX_DID_CACHE_SIZE, enforceDidCacheLimit],
+])('%s cache capacity', (_, cache, limit, enforceLimit) => {
+  afterEach(() => cache.clear());
 
-  beforeEach(() => {
-    state.searchGeneration = originalGeneration;
-  });
+  it('leaves small caches intact and evicts the oldest entries on overflow', () => {
+    cache.set('key-0', {});
+    cache.set('key-1', {});
+    enforceLimit();
+    expect([...cache.keys()]).toEqual(['key-0', 'key-1']);
 
-  it('returns true when generation matches current state', () => {
-    state.searchGeneration = 42;
-    expect(isCurrentSearchGeneration(42)).toBe(true);
-  });
-
-  it('returns false when generation is stale', () => {
-    state.searchGeneration = 42;
-    expect(isCurrentSearchGeneration(41)).toBe(false);
-  });
-});
-
-// ============================================================================
-// enforceSearchCacheLimit
-// ============================================================================
-describe('enforceSearchCacheLimit', () => {
-  beforeEach(() => {
-    searchCache.clear();
-  });
-
-  it('trims search cache to MAX_SEARCH_CACHE_SIZE', () => {
-    for (let i = 0; i < MAX_SEARCH_CACHE_SIZE + 10; i++) {
-      searchCache.set(`key-${i}`, { data: { id: i }, timestamp: Date.now() });
-    }
-
-    enforceSearchCacheLimit();
-
-    expect(searchCache.size).toBe(MAX_SEARCH_CACHE_SIZE);
-  });
-
-  it('removes oldest entries first', () => {
-    for (let i = 0; i < MAX_SEARCH_CACHE_SIZE + 5; i++) {
-      searchCache.set(`key-${i}`, { data: { id: i }, timestamp: Date.now() });
-    }
-
-    enforceSearchCacheLimit();
-
-    // Oldest 5 entries should be gone
-    for (let i = 0; i < 5; i++) {
-      expect(searchCache.has(`key-${i}`)).toBe(false);
-    }
-    // Newest entries should remain
-    expect(searchCache.has(`key-${MAX_SEARCH_CACHE_SIZE + 4}`)).toBe(true);
-  });
-
-  it('does nothing when under limit', () => {
-    searchCache.set('a', { data: {}, timestamp: Date.now() });
-    searchCache.set('b', { data: {}, timestamp: Date.now() });
-
-    enforceSearchCacheLimit();
-
-    expect(searchCache.size).toBe(2);
-  });
-});
-
-// ============================================================================
-// enforceDidCacheLimit
-// ============================================================================
-describe('enforceDidCacheLimit', () => {
-  beforeEach(() => {
-    didCache.clear();
-  });
-
-  it('trims DID cache to MAX_DID_CACHE_SIZE', () => {
-    for (let i = 0; i < MAX_DID_CACHE_SIZE + 10; i++) {
-      didCache.set(`handle-${i}`, { did: `did:plc:${i}`, timestamp: Date.now() });
-    }
-
-    enforceDidCacheLimit();
-
-    expect(didCache.size).toBe(MAX_DID_CACHE_SIZE);
-  });
-
-  it('removes oldest entries first', () => {
-    for (let i = 0; i < MAX_DID_CACHE_SIZE + 3; i++) {
-      didCache.set(`handle-${i}`, { did: `did:plc:${i}`, timestamp: Date.now() });
-    }
-
-    enforceDidCacheLimit();
-
-    // Oldest 3 entries should be gone
-    for (let i = 0; i < 3; i++) {
-      expect(didCache.has(`handle-${i}`)).toBe(false);
-    }
-    // Newest entries should remain
-    expect(didCache.has(`handle-${MAX_DID_CACHE_SIZE + 2}`)).toBe(true);
-  });
-
-  it('does nothing when under limit', () => {
-    didCache.set('alice', { did: 'did:plc:1', timestamp: Date.now() });
-
-    enforceDidCacheLimit();
-
-    expect(didCache.size).toBe(1);
+    for (let index = 2; index < limit + 4; index++) cache.set('key-' + index, {});
+    enforceLimit();
+    expect([...cache.keys()]).toEqual(Array.from({ length: limit }, (_, index) => 'key-' + (index + 4)));
   });
 });

@@ -33,6 +33,7 @@ export class TestNode {
   get lastElementChild() { return this.children.at(-1) || null; }
   setAttribute(name, value) { this.attributes[name] = String(value); }
   getAttribute(name) { return this.attributes[name] ?? null; }
+  removeAttribute(name) { delete this.attributes[name]; }
   addEventListener(event, handler) { this.listeners.set(event, handler); }
   appendChild(child) { return this.insertBefore(child, null); }
   insertBefore(child, reference) {
@@ -47,6 +48,13 @@ export class TestNode {
     child.parentNode = this;
     return child;
   }
+  replaceChild(next, previous) {
+    if (previous.parentNode !== this) throw new Error('replaceChild: node not found');
+    if (next === previous) return previous;
+    this.insertBefore(next, previous);
+    previous.remove();
+    return previous;
+  }
   remove() {
     if (!this.parentNode) return;
     const siblings = this.parentNode.children;
@@ -54,8 +62,9 @@ export class TestNode {
     this.parentNode = null;
   }
   querySelectorAll(selector) {
+    const [tagName, className] = selector.split('.');
     return this.children.flatMap((child) => [
-      ...(selector.startsWith('.') && child.classList.contains(selector.slice(1)) ? [child] : []),
+      ...(className && (!tagName || child.tagName === tagName) && child.classList.contains(className) ? [child] : []),
       ...child.querySelectorAll(selector),
     ]);
   }

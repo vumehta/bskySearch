@@ -1,153 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createTestDocument, deferred } from './helpers/dom.mjs';
 
-// A tiny DOM stand-in: enough tree behaviour for renderResults() to run in node.
-const mocks = vi.hoisted(() => {
-  class FakeNode {
-    constructor(tagName = '') {
-      this.tagName = tagName;
-      this.children = [];
-      this.parentNode = null;
-      this.style = {};
-      this.dataset = {};
-      this.className = '';
-      this.disabled = false;
-      this.listeners = new Map();
-      this.attributes = new Map();
-      this.classList = { add: () => {}, remove: () => {} };
-      this._textContent = '';
-    }
-
-    get textContent() {
-      return this._textContent;
-    }
-
-    set textContent(value) {
-      this._textContent = value;
-      if (value === '') {
-        this.children.forEach((child) => {
-          child.parentNode = null;
-        });
-        this.children = [];
-      }
-    }
-
-    get lastElementChild() {
-      return this.children[this.children.length - 1] || null;
-    }
-
-    addEventListener(name, handler) {
-      this.listeners.set(name, handler);
-    }
-
-    setAttribute(name, value) { this.attributes.set(name, String(value)); }
-
-    getAttribute(name) { return this.attributes.get(name) ?? null; }
-
-    removeAttribute(name) { this.attributes.delete(name); }
-
-    appendChild(child) {
-      return this.insertBefore(child, null);
-    }
-
-    insertBefore(child, reference) {
-      if (child.parentNode) {
-        child.parentNode.removeChild(child);
-      }
-      const index = reference ? this.children.indexOf(reference) : -1;
-      if (index === -1) {
-        this.children.push(child);
-      } else {
-        this.children.splice(index, 0, child);
-      }
-      child.parentNode = this;
-      return child;
-    }
-
-    replaceChild(next, previous) {
-      const index = this.children.indexOf(previous);
-      if (index === -1) throw new Error('replaceChild: node not found');
-      if (next.parentNode) {
-        next.parentNode.removeChild(next);
-      }
-      this.children[index] = next;
-      next.parentNode = this;
-      previous.parentNode = null;
-      return previous;
-    }
-
-    removeChild(child) {
-      const index = this.children.indexOf(child);
-      if (index !== -1) {
-        this.children.splice(index, 1);
-        child.parentNode = null;
-      }
-      return child;
-    }
-
-    remove() {
-      if (this.parentNode) {
-        this.parentNode.removeChild(this);
-      }
-    }
-  }
-
-  const createElement = (tagName) => new FakeNode(tagName);
-
-  // Only attached nodes are findable, like a real document.
-  const findById = (node, id) => {
-    if (node.id === id) return node;
-    for (const child of node.children) {
-      const match = findById(child, id);
-      if (match) return match;
-    }
-    return null;
-  };
-
-  const roots = [];
-  const document = {
-    createElement,
-    createDocumentFragment: () => new FakeNode('#fragment'),
-    createTextNode: (text) => {
-      const node = new FakeNode('#text');
-      node.textContent = String(text);
-      return node;
-    },
-    getElementById: (id) => {
-      for (const root of roots) {
-        const match = findById(root, id);
-        if (match) return match;
-      }
-      return null;
-    },
-  };
-
-  const dom = {
-    expandSummary: createElement('span'),
-    expandTermsToggle: { checked: false },
-    minLikesInput: { value: '0' },
-    resultsDiv: createElement('div'),
-    searchBtn: { disabled: false },
-    sortSelect: { value: 'top' },
-    statusDiv: createElement('div'),
-    termsInput: { value: '' },
-    timeFilterSelect: { value: '24' },
-  };
-  roots.push(dom.resultsDiv, dom.statusDiv);
-
-  return { document, dom };
-});
-
-vi.mock('../src/dom.mjs', () => mocks.dom);
-
-function deferred() {
-  let resolve;
-  let reject;
-  const promise = new Promise((promiseResolve, promiseReject) => {
-    resolve = promiseResolve;
-    reject = promiseReject;
-  });
-  return { promise, reject, resolve };
-}
+let testDocument;
+let elements;
 
 function makePost(id, likeCount) {
   const now = new Date().toISOString();
@@ -179,95 +34,62 @@ function makePagedFetch() {
 }
 
 function getLoadMoreButton() {
-  return mocks.document.getElementById('loadMoreBtn');
-}
-
-function findByClass(root, className) {
-  if (root.className.split(' ').includes(className)) return root;
-  for (const child of root.children) {
-    const found = findByClass(child, className);
-    if (found) return found;
-  }
-  return null;
+  return testDocument.getElementById('loadMoreBtn');
 }
 
 function getRequestedSinceValues(fetchMock) {
   return fetchMock.mock.calls.map(([url]) => new URL(url, 'https://example.test').searchParams.get('since'));
 }
 
-describe('load more button state', () => {
-  let originalDocument;
-  let originalFetch;
-  let originalRaf;
-  let originalCancelRaf;
+describe('search pagination and lifecycle', () => {
   let search;
   let state;
 
   beforeEach(async () => {
     vi.resetModules();
-    originalDocument = globalThis.document;
-    originalFetch = globalThis.fetch;
-    originalRaf = globalThis.requestAnimationFrame;
-    originalCancelRaf = globalThis.cancelAnimationFrame;
-    globalThis.document = mocks.document;
-    globalThis.requestAnimationFrame = (callback) => setTimeout(callback, 0);
-    globalThis.cancelAnimationFrame = (id) => clearTimeout(id);
-    globalThis.window = {
+    ({ document: testDocument, elements } = createTestDocument([
+      'terms', 'minLikes', 'timeFilter', 'sortSelect', 'searchBtn', 'status',
+      'results', 'expandTermsToggle', 'expandSummary',
+    ]));
+    vi.stubGlobal('document', testDocument);
+    vi.stubGlobal('requestAnimationFrame', (callback) => setTimeout(callback, 0));
+    vi.stubGlobal('cancelAnimationFrame', (id) => clearTimeout(id));
+    vi.stubGlobal('fetch', vi.fn());
+    vi.stubGlobal('window', {
       history: { replaceState: vi.fn() },
       location: { pathname: '/', search: '' },
-    };
+    });
     search = await import('../src/search.mjs');
     ({ state } = await import('../src/state.mjs'));
-    const { searchCache } = await import('../src/state.mjs');
-    searchCache.clear();
-    state.allPosts = [];
-    state.currentCursors = {};
-    state.rawSearchTerms = [];
-    state.searchTerms = [];
-    state.searchGeneration = 0;
-    state.isLoading = false;
-    mocks.dom.termsInput.value = 'apple';
-    mocks.dom.minLikesInput.value = '0';
-    mocks.dom.sortSelect.value = 'top';
-    mocks.dom.timeFilterSelect.value = '24';
-    mocks.dom.expandTermsToggle.checked = false;
+    elements.terms.value = 'apple';
+    elements.minLikes.value = '0';
+    elements.sortSelect.value = 'top';
+    elements.timeFilter.value = '24';
+    elements.expandTermsToggle.checked = false;
   });
 
   afterEach(() => {
     search.clearSearchResults();
     vi.useRealTimers();
-    globalThis.document = originalDocument;
-    globalThis.fetch = originalFetch;
-    globalThis.requestAnimationFrame = originalRaf;
-    globalThis.cancelAnimationFrame = originalCancelRaf;
-    delete globalThis.window;
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
-  it('leaves the button clickable after a search that has more pages', async () => {
+  it('keeps pagination usable across initial, loading, completed, and terminal pages', async () => {
     globalThis.fetch = makePagedFetch();
-
     await search.performSearch();
-
     expect(state.isLoading).toBe(false);
     expect(state.currentCursors.apple).toBe('cursor-2');
     const button = getLoadMoreButton();
-    expect(button).toBeTruthy();
     expect(button.style.display).toBe('');
     expect(button.disabled).toBe(false);
     expect(button.textContent).toBe('Load More Results');
-  });
-
-  it('shows a loading state while more results are in flight, then recovers', async () => {
-    globalThis.fetch = makePagedFetch();
-    await search.performSearch();
 
     const pending = deferred();
     globalThis.fetch = vi.fn(() => pending.promise);
     const loadMorePromise = search.loadMore();
     await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1));
 
-    const button = getLoadMoreButton();
     expect(button.disabled).toBe(true);
     expect(button.textContent).toBe('Loading…');
 
@@ -281,11 +103,6 @@ describe('load more button state', () => {
     expect(button.style.display).toBe('');
     expect(button.disabled).toBe(false);
     expect(button.textContent).toBe('Load More Results');
-  });
-
-  it('hides the button once the last page has been loaded', async () => {
-    globalThis.fetch = makePagedFetch();
-    await search.performSearch();
 
     globalThis.fetch = vi.fn(async () => ({
       ok: true,
@@ -294,7 +111,6 @@ describe('load more button state', () => {
     await search.loadMore();
 
     expect(state.currentCursors.apple).toBe(null);
-    const button = getLoadMoreButton();
     expect(button.style.display).toBe('none');
     expect(button.disabled).toBe(false);
   });
@@ -321,31 +137,8 @@ describe('load more button state', () => {
     expect(getRequestedSinceValues(globalThis.fetch)).toEqual([searchSince[0]]);
   });
 
-  it('drops the since window when results are cleared', async () => {
-    globalThis.fetch = makePagedFetch();
-    await search.performSearch();
-    expect(state.searchSince).not.toBe(null);
-
-    search.clearSearchResults();
-    expect(state.searchSince).toBe(null);
-  });
-
-  it('re-enables the button when loading more fails', async () => {
-    globalThis.fetch = makePagedFetch();
-    await search.performSearch();
-
-    globalThis.fetch = vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) }));
-    await search.loadMore();
-
-    const button = getLoadMoreButton();
-    expect(state.isLoading).toBe(false);
-    expect(button.style.display).toBe('');
-    expect(button.disabled).toBe(false);
-    expect(button.textContent).toBe('Load More Results');
-  });
-
   it('offers continuation when the first two pages contain no qualifying posts', async () => {
-    mocks.dom.minLikesInput.value = '10';
+    elements.minLikes.value = '10';
     let page = 0;
     globalThis.fetch = vi.fn(async () => {
       page += 1;
@@ -390,12 +183,12 @@ describe('load more button state', () => {
     await search.performSearch();
     expect(state.allPosts).toHaveLength(1);
     expect(state.currentCursors.apple).toBe('c1');
-    expect(mocks.dom.statusDiv.textContent).toContain('Load more to retry');
+    expect(elements.status.textContent).toContain('Load more to retry');
     await search.loadMore();
     expect(state.allPosts).toHaveLength(2);
     expect(state.currentCursors.apple).toBe(null);
     expect(new URL(globalThis.fetch.mock.calls[2][0], 'https://example.test').searchParams.get('cursor')).toBe('c1');
-    expect(mocks.dom.statusDiv.style.display).toBe('none');
+    expect(elements.status.style.display).toBe('none');
   });
 
   it('retains a first-page failure as a retryable cursor', async () => {
@@ -411,7 +204,7 @@ describe('load more button state', () => {
   });
 
   it('advances healthy terms independently when another pagination request fails', async () => {
-    mocks.dom.termsInput.value = 'apple,banana';
+    elements.terms.value = 'apple,banana';
     globalThis.fetch = vi.fn(async (url) => {
       const params = new URL(url, 'https://example.test').searchParams;
       return { ok: true, json: async () => ({ cursor: params.has('cursor') ? 'c2' : 'c1', posts: [makePost(`${params.get('term')}${params.get('cursor') || 'initial'}`, 20)] }) };
@@ -423,25 +216,16 @@ describe('load more button state', () => {
     await search.loadMore();
     expect(state.allPosts).toHaveLength(5);
     expect(state.currentCursors).toEqual({ apple: 'c3', banana: 'c2' });
-    expect(mocks.dom.statusDiv.textContent).toContain('1/2 terms');
-  });
-
-  it('restarts the API result stream when changing sort', async () => {
-    globalThis.fetch = makePagedFetch();
-    await search.performSearch();
-    mocks.dom.sortSelect.value = 'latest';
-    state.searchSort = 'latest';
-    await search.applySearchSortChange();
-    await search.loadMore();
-    const params = globalThis.fetch.mock.calls.map(([url]) => new URL(url, 'https://example.test').searchParams);
-    expect(params.map((p) => p.get('sort'))).toEqual(['top', 'top', 'latest', 'latest', 'latest']);
-    expect(params[2].has('cursor')).toBe(false);
-    expect(params[4].get('cursor')).toBe('cursor-4');
-    expect(state.allPosts).toHaveLength(6);
+    expect(elements.status.textContent).toContain('1/2 terms');
+    expect(state.isLoading).toBe(false);
+    const button = getLoadMoreButton();
+    expect(button.style.display).toBe('');
+    expect(button.disabled).toBe(false);
+    expect(button.textContent).toBe('Load More Results');
   });
 
   it('supports object-property names as ordinary search terms', async () => {
-    mocks.dom.termsInput.value = '__proto__,constructor';
+    elements.terms.value = '__proto__,constructor';
     globalThis.fetch = makePagedFetch();
     await search.performSearch();
     expect(Object.keys(state.currentCursors)).toEqual(['__proto__', 'constructor']);
@@ -450,7 +234,7 @@ describe('load more button state', () => {
   });
 
   it('limits concurrent term requests to four without dropping queued terms', async () => {
-    mocks.dom.termsInput.value = 'a,b,c,d,e,f,g,h,i';
+    elements.terms.value = 'a,b,c,d,e,f,g,h,i';
     const pending = [];
     let active = 0;
     let peak = 0;
@@ -479,13 +263,13 @@ describe('load more button state', () => {
     globalThis.fetch = vi.fn().mockReturnValueOnce(oldResponse.promise).mockReturnValueOnce(newResponse.promise);
     const oldSearch = search.performSearch();
     const oldSignal = globalThis.fetch.mock.calls[0][1].signal;
-    mocks.dom.termsInput.value = 'banana';
+    elements.terms.value = 'banana';
     const newSearch = search.performSearch();
     await oldSearch;
     expect(oldSignal.aborted).toBe(true);
     expect(globalThis.fetch).toHaveBeenCalledTimes(2);
     expect(state.isLoading).toBe(true);
-    expect(mocks.dom.searchBtn.disabled).toBe(true);
+    expect(elements.searchBtn.disabled).toBe(true);
     oldResponse.resolve({ ok: true, json: async () => ({ cursor: 'stale', posts: [makePost('stale', 99)] }) });
     newResponse.resolve({ ok: true, json: async () => ({ posts: [makePost('banana', 20)] }) });
     await newSearch;
@@ -494,7 +278,7 @@ describe('load more button state', () => {
   });
 
   it('clearing a search aborts active and queued work without stale errors or cursors', async () => {
-    mocks.dom.termsInput.value = 'a,b,c,d,e,f';
+    elements.terms.value = 'a,b,c,d,e,f';
     const oldResponse = deferred();
     globalThis.fetch = vi.fn(() => oldResponse.promise);
     const oldSearch = search.performSearch();
@@ -505,8 +289,34 @@ describe('load more button state', () => {
     expect(globalThis.fetch).toHaveBeenCalledTimes(4);
     expect(state.currentCursors).toEqual({});
     expect(state.isLoading).toBe(false);
-    expect(mocks.dom.searchBtn.disabled).toBe(false);
-    expect(mocks.dom.statusDiv.style.display).toBe('none');
+    expect(elements.searchBtn.disabled).toBe(false);
+    expect(elements.status.style.display).toBe('none');
+  });
+
+  it.each(['success', 'error'])('clearing during pagination ignores a late %s without restoring results or loading state', async (outcome) => {
+    globalThis.fetch = makePagedFetch();
+    await search.performSearch();
+    const response = deferred();
+    globalThis.fetch = vi.fn(() => response.promise);
+    const loading = search.loadMore();
+    const signal = globalThis.fetch.mock.calls[0][1].signal;
+
+    elements.terms.value = '';
+    search.debouncedSearch();
+    expect(signal.aborted).toBe(true);
+    expect(elements.results.textContent).toBe('');
+    await loading;
+    response.resolve(outcome === 'success'
+      ? { ok: true, json: async () => ({ cursor: 'stale', posts: [makePost('stale', 100)] }) }
+      : { ok: false, status: 500, json: async () => ({ error: 'Late failure' }) });
+    await Promise.resolve();
+    expect(state.allPosts).toEqual([]);
+    expect(state.currentCursors).toEqual({});
+    expect(state.searchTerms).toEqual([]);
+    expect(state.searchSince).toBe(null);
+    expect(state.isLoading).toBe(false);
+    expect(elements.searchBtn.disabled).toBe(false);
+    expect(elements.status.style.display).toBe('none');
   });
 
   it('debouncing cancels an obsolete request before the next search starts', async () => {
@@ -516,7 +326,7 @@ describe('load more button state', () => {
       .mockResolvedValue({ ok: true, json: async () => ({ posts: [makePost('replacement', 20)] }) });
     const oldSearch = search.performSearch();
     const oldSignal = globalThis.fetch.mock.calls[0][1].signal;
-    mocks.dom.termsInput.value = 'replacement';
+    elements.terms.value = 'replacement';
     search.debouncedSearch();
     expect(oldSignal.aborted).toBe(true);
     await oldSearch;
@@ -534,7 +344,7 @@ describe('load more button state', () => {
     await promise;
     expect(state.isLoading).toBe(false);
     expect(state.currentCursors.apple).toBe('');
-    expect(mocks.dom.statusDiv.textContent).toContain('timed out');
+    expect(elements.status.textContent).toContain('timed out');
     expect(getLoadMoreButton().disabled).toBe(false);
   });
 
@@ -552,18 +362,10 @@ describe('load more button state', () => {
     await search.performSearch();
     expect(state.allPosts).toEqual([]);
     expect(state.currentCursors.apple).toBe('');
-    expect(mocks.dom.statusDiv.textContent).toContain('invalid search response');
+    expect(elements.status.textContent).toContain('invalid search response');
     await search.loadMore();
     expect(globalThis.fetch).toHaveBeenCalledTimes(2);
     expect(state.allPosts).toHaveLength(1);
-  });
-
-  it('displays creation time consistently with the date filter and sort', async () => {
-    const post = makePost('creationtime', 20);
-    post.record.createdAt = new Date(Date.now() - 6 * 3600000).toISOString();
-    globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ posts: [post] }) }));
-    await search.performSearch();
-    expect(findByClass(mocks.dom.resultsDiv, 'post-time').textContent).toBe('6h ago');
   });
 
   it.each(['createdAt', 'reply', 'embed'])('updates an existing card when only %s changes', async (field) => {
@@ -572,22 +374,22 @@ describe('load more button state', () => {
       .mockResolvedValueOnce({ ok: true, json: async () => ({ cursor: 'c1', posts: [post] }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ cursor: 'c2', posts: [post] }) });
     await search.performSearch();
-    const previousCard = findByClass(mocks.dom.resultsDiv, 'post');
+    const previousCard = elements.results.querySelector('.post');
     const updated = { ...post, record: { ...post.record } };
     if (field === 'createdAt') updated.record.createdAt = new Date(Date.now() - 3600000).toISOString();
     if (field === 'reply') updated.record.reply = { parent: { uri: 'at://did:plc:test/app.bsky.feed.post/parent' } };
     if (field === 'embed') updated.embed = { $type: 'app.bsky.embed.images#view', images: [{ thumb: 'https://cdn.bsky.app/image.jpg', alt: 'An image' }] };
     globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ posts: [updated] }) }));
     await search.loadMore();
-    const nextCard = findByClass(mocks.dom.resultsDiv, 'post');
+    const nextCard = elements.results.querySelector('.post');
     expect(nextCard).not.toBe(previousCard);
-    if (field === 'createdAt') expect(findByClass(nextCard, 'post-time').textContent).toBe('1h ago');
+    if (field === 'createdAt') expect(nextCard.querySelector('.post-time').textContent).toBe('1h ago');
     if (field === 'reply') {
-      const toggle = findByClass(nextCard, 'thread-link');
+      const toggle = nextCard.querySelector('.thread-link');
       expect(toggle.textContent).toBe('View Thread');
       expect(toggle.getAttribute('aria-expanded')).toBe('false');
       expect(toggle.getAttribute('aria-controls')).toMatch(/^thread-context-/);
     }
-    if (field === 'embed') expect(findByClass(nextCard, 'image-placeholder')).toBeTruthy();
+    if (field === 'embed') expect(nextCard.querySelector('.image-placeholder')).toBeTruthy();
   });
 });

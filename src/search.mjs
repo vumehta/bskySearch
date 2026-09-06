@@ -29,7 +29,6 @@ import {
   isValidBskyUrl,
   normalizeSortValue,
   normalizeTerm,
-  setText,
   sortPosts,
 } from './utils.mjs';
 import { appendEngagementStats, SEARCH_STAT_CLASSES } from './post-stats.mjs';
@@ -43,13 +42,11 @@ const DERIVE_THROTTLE_MS = 120;
 
 const ingestedPostsByUri = new Map();
 let activeSearchController = null;
-let searchSeenCursors = new Map();
+const searchSeenCursors = new Map();
 let deriveTimerId = null;
 
-// Coalesce render updates into a single frame.
 let pendingRenderFrame = null;
 
-// Search results rendering cache.
 let resultsHeaderEl = null;
 let resultsCountEl = null;
 let resultsSortEl = null;
@@ -59,16 +56,14 @@ let resultsEmptySecondaryEl = null;
 let resultsListEl = null;
 let showMoreBtnEl = null;
 let loadMoreBtnEl = null;
-const renderedPostElements = new Map();
-const renderedPostFingerprints = new Map();
+const renderedPosts = new Map();
 
 // Highlight matcher cache for a single active term set.
 let highlightMatcherCache = { key: '', regex: null, termSet: null };
 
-// Show status message
 function showStatus(message, type) {
   statusDiv.className = `status ${type}`;
-  setText(statusDiv, message);
+  statusDiv.textContent = message;
   statusDiv.style.display = 'block';
 }
 
@@ -88,13 +83,7 @@ export function updateSearchURL() {
 }
 
 export function updateExpansionSummary() {
-  const inputValue = termsInput.value.trim();
-  if (!inputValue) {
-    expandSummary.textContent = 'Enter terms to preview expansion.';
-    return;
-  }
-
-  const rawTerms = inputValue.split(',').map(normalizeTerm).filter(Boolean);
+  const rawTerms = termsInput.value.split(',').map(normalizeTerm).filter(Boolean);
   if (rawTerms.length === 0) {
     expandSummary.textContent = 'Enter terms to preview expansion.';
     return;
@@ -152,8 +141,7 @@ async function fetchPagesForTerm(term, maxPages, context) {
     if (cursor === null) return;
     const data = await searchTerm(term, cursor, context);
     if (!isActiveSearch(context)) return;
-    const posts = Array.isArray(data.posts) ? data.posts : [];
-    ingestSearchPosts(ingestedPostsByUri, posts.map((post) => ({ ...post, matchedTerm: term, matchedTerms: [term] })));
+    ingestSearchPosts(ingestedPostsByUri, data.posts.map((post) => ({ ...post, matchedTerm: term, matchedTerms: [term] })));
     const seen = searchSeenCursors.get(term) || new Set();
     const nextCursor = nextSearchCursor(data.cursor, cursor, seen);
     if (nextCursor) seen.add(nextCursor);
@@ -210,7 +198,7 @@ async function runSearchPages(terms, maxPages, context, { loadingMore = false } 
     }
     flushDerivedPostsRebuild();
     if (loadingMore && state.allPosts.length > previousCount) {
-      state.renderLimit = Math.min(state.allPosts.length, state.renderLimit + RENDER_STEP);
+      increaseRenderLimit();
     }
     renderResults();
   } catch (error) {
@@ -225,12 +213,8 @@ async function runSearchPages(terms, maxPages, context, { loadingMore = false } 
   }
 }
 
-function resetRenderLimit() {
-  state.renderLimit = INITIAL_RENDER_LIMIT;
-}
-
-function increaseRenderLimit(step = RENDER_STEP) {
-  state.renderLimit = Math.min(state.allPosts.length, state.renderLimit + step);
+function increaseRenderLimit() {
+  state.renderLimit = Math.min(state.allPosts.length, state.renderLimit + RENDER_STEP);
 }
 
 function cancelScheduledRender() {
@@ -273,17 +257,9 @@ function scheduleDerivedPostsRebuild() {
   }, DERIVE_THROTTLE_MS);
 }
 
-function flushDerivedPostsRebuild({ render = false } = {}) {
+function flushDerivedPostsRebuild() {
   clearDerivedPostsTimer();
   recomputeDerivedPosts();
-  if (render) {
-    cancelScheduledRender();
-    renderResults();
-  }
-}
-
-function clearIngestedPosts() {
-  ingestedPostsByUri.clear();
 }
 
 function getHighlightMatcher(terms) {
@@ -296,7 +272,6 @@ function getHighlightMatcher(terms) {
   return highlightMatcherCache;
 }
 
-// Create text with highlighted search terms using DOM methods (safe)
 function createHighlightedText(text, terms) {
   const fragment = document.createDocumentFragment();
   if (!text) return fragment;
@@ -323,7 +298,6 @@ function createHighlightedText(text, terms) {
   return fragment;
 }
 
-// Create a post element using safe DOM methods
 function createPostElement(post) {
   const postUrl = getPostUrl(post);
   const handle = post.author.handle;
@@ -333,7 +307,6 @@ function createPostElement(post) {
   const postDiv = document.createElement('div');
   postDiv.className = 'post';
 
-  // Search terms tags
   const termsDiv = document.createElement('div');
   termsDiv.className = 'search-terms';
   const matchedTerms = getMatchedTermsForPost(post);
@@ -345,11 +318,9 @@ function createPostElement(post) {
   });
   postDiv.appendChild(termsDiv);
 
-  // Header
   const header = document.createElement('div');
   header.className = 'post-header';
 
-  // Avatar
   if (post.author.avatar && isValidBskyUrl(post.author.avatar)) {
     const avatar = document.createElement('img');
     avatar.className = 'avatar';
@@ -363,7 +334,6 @@ function createPostElement(post) {
     header.appendChild(avatarPlaceholder);
   }
 
-  // Author info
   const authorInfo = document.createElement('div');
   authorInfo.className = 'author-info';
 
@@ -383,7 +353,6 @@ function createPostElement(post) {
 
   header.appendChild(authorInfo);
 
-  // Time
   const timeSpan = document.createElement('span');
   timeSpan.className = 'post-time';
   timeSpan.textContent = formatRelativeTime(post.record?.createdAt || post.indexedAt);
@@ -391,13 +360,11 @@ function createPostElement(post) {
 
   postDiv.appendChild(header);
 
-  // Post text with highlights
   const textDiv = document.createElement('div');
   textDiv.className = 'post-text';
   textDiv.appendChild(createHighlightedText(text, state.searchTerms));
   postDiv.appendChild(textDiv);
 
-  // Images (hidden by default)
   if (post.embed?.$type === 'app.bsky.embed.images#view' && Array.isArray(post.embed.images)) {
     const validImages = post.embed.images.filter((img) => img?.thumb && isValidBskyUrl(img.thumb));
 
@@ -405,7 +372,6 @@ function createPostElement(post) {
       const imagesContainer = document.createElement('div');
       imagesContainer.className = 'post-images-container';
 
-      // Create placeholder
       const placeholder = document.createElement('div');
       placeholder.className = 'image-placeholder';
 
@@ -414,7 +380,6 @@ function createPostElement(post) {
       const count = validImages.length;
       showBtn.textContent = `Show ${count} image${count !== 1 ? 's' : ''}`;
       showBtn.addEventListener('click', () => {
-        // Replace placeholder with actual images
         const imagesDiv = document.createElement('div');
         imagesDiv.className = `post-images ${validImages.length === 1 ? 'single' : 'multiple'}`;
 
@@ -436,42 +401,31 @@ function createPostElement(post) {
     }
   }
 
-  // Stats
   const statsDiv = document.createElement('div');
   statsDiv.className = 'post-stats';
   appendEngagementStats(statsDiv, post, SEARCH_STAT_CLASSES);
   postDiv.appendChild(statsDiv);
 
-  // Links container
   const linksDiv = document.createElement('div');
   linksDiv.className = 'link-actions';
 
-  // Thread link (View Thread for replies, View Replies for standalone posts)
   if (postUrl) {
-    if (isReplyPost(post)) {
+    const isReply = isReplyPost(post);
+    if (isReply) {
       const threadLink = document.createElement('button');
       threadLink.className = 'thread-link';
       threadLink.textContent = 'View Thread';
       initializeThreadToggle(threadLink);
       threadLink.addEventListener('click', () => toggleThread(post, postDiv));
       linksDiv.appendChild(threadLink);
-
-      const blueskyLink = document.createElement('a');
-      blueskyLink.className = 'thread-link';
-      blueskyLink.href = postUrl;
-      blueskyLink.target = '_blank';
-      blueskyLink.rel = 'noopener noreferrer';
-      blueskyLink.textContent = 'View on Bluesky';
-      linksDiv.appendChild(blueskyLink);
-    } else {
-      const repliesLink = document.createElement('a');
-      repliesLink.className = 'thread-link';
-      repliesLink.href = postUrl;
-      repliesLink.target = '_blank';
-      repliesLink.rel = 'noopener noreferrer';
-      repliesLink.textContent = 'View Replies \u2192';
-      linksDiv.appendChild(repliesLink);
     }
+    const blueskyLink = document.createElement('a');
+    blueskyLink.className = 'thread-link';
+    blueskyLink.href = postUrl;
+    blueskyLink.target = '_blank';
+    blueskyLink.rel = 'noopener noreferrer';
+    blueskyLink.textContent = isReply ? 'View on Bluesky' : 'View Replies \u2192';
+    linksDiv.appendChild(blueskyLink);
   }
 
   postDiv.appendChild(linksDiv);
@@ -491,8 +445,7 @@ function resetResultsRenderCache() {
   resultsListEl = null;
   showMoreBtnEl = null;
   loadMoreBtnEl = null;
-  renderedPostElements.clear();
-  renderedPostFingerprints.clear();
+  renderedPosts.clear();
   resultsDiv.textContent = '';
 }
 
@@ -557,10 +510,10 @@ function syncVisibleResultPosts(visiblePosts) {
     visibleUris.add(uri);
 
     const nextFingerprint = getPostRenderFingerprint(post);
-    const previousFingerprint = renderedPostFingerprints.get(uri);
-    let postElement = renderedPostElements.get(uri);
+    const previous = renderedPosts.get(uri);
+    let postElement = previous?.element;
 
-    if (!postElement || previousFingerprint !== nextFingerprint) {
+    if (!postElement || previous.fingerprint !== nextFingerprint) {
       const nextElement = createPostElement(post);
 
       if (postElement?.parentNode === resultsListEl) {
@@ -569,8 +522,7 @@ function syncVisibleResultPosts(visiblePosts) {
       }
 
       postElement = nextElement;
-      renderedPostElements.set(uri, postElement);
-      renderedPostFingerprints.set(uri, nextFingerprint);
+      renderedPosts.set(uri, { element: postElement, fingerprint: nextFingerprint });
     }
 
     const currentAtIndex = resultsListEl.children[renderedCount];
@@ -580,7 +532,7 @@ function syncVisibleResultPosts(visiblePosts) {
     renderedCount += 1;
   });
 
-  for (const [uri, element] of renderedPostElements.entries()) {
+  for (const [uri, { element }] of renderedPosts) {
     if (visibleUris.has(uri)) {
       continue;
     }
@@ -588,8 +540,7 @@ function syncVisibleResultPosts(visiblePosts) {
       cancelThreadRequest(element);
       element.remove();
     }
-    renderedPostElements.delete(uri);
-    renderedPostFingerprints.delete(uri);
+    renderedPosts.delete(uri);
   }
 
   while (resultsListEl.children.length > renderedCount) {
@@ -597,9 +548,6 @@ function syncVisibleResultPosts(visiblePosts) {
   }
 }
 
-// Keep the "Load More" button in step with pagination and loading state.
-// Called from renderResults() and from the finally blocks that clear
-// state.isLoading, so the button never stays stuck on "Loading…".
 function syncLoadMoreButton() {
   if (!loadMoreBtnEl) return;
 
@@ -616,7 +564,6 @@ function syncLoadMoreButton() {
   loadMoreBtnEl.textContent = state.isLoading ? 'Loading…' : 'Load More Results';
 }
 
-// Render all results using safe DOM methods
 function renderResults() {
   ensureResultsShell();
 
@@ -633,12 +580,7 @@ function renderResults() {
     resultsEmptySecondaryEl.textContent = Object.values(state.currentCursors).some((cursor) => cursor !== null)
       ? 'Load more results to continue searching, or lower the minimum likes.'
       : 'Try different search terms or lower the minimum likes.';
-    if (resultsListEl.children.length > 0) {
-      for (const element of renderedPostElements.values()) cancelThreadRequest(element);
-      resultsListEl.textContent = '';
-      renderedPostElements.clear();
-      renderedPostFingerprints.clear();
-    }
+    syncVisibleResultPosts([]);
     return;
   }
 
@@ -662,12 +604,8 @@ function renderResults() {
   const remaining = totalCount - visibleCount;
   if (remaining > 0) {
     showMoreBtnEl.style.display = '';
-    showMoreBtnEl.textContent =
-      remaining <= RENDER_STEP
-        ? remaining === 1
-          ? 'Show 1 more loaded result'
-          : `Show ${remaining} more loaded results`
-        : `Show ${RENDER_STEP} more loaded results`;
+    const nextCount = Math.min(remaining, RENDER_STEP);
+    showMoreBtnEl.textContent = `Show ${nextCount} more loaded result${nextCount === 1 ? '' : 's'}`;
   } else {
     showMoreBtnEl.style.display = 'none';
   }
@@ -690,11 +628,11 @@ export async function performSearch() {
   // Empty string means the first page needs loading; null means exhausted.
   state.currentCursors = Object.create(null);
   for (const term of state.searchTerms) state.currentCursors[term] = '';
-  searchSeenCursors = new Map();
-  clearIngestedPosts();
+  searchSeenCursors.clear();
+  ingestedPostsByUri.clear();
   resetResultsRenderCache();
   highlightMatcherCache = { key: '', regex: null, termSet: null };
-  resetRenderLimit();
+  state.renderLimit = INITIAL_RENDER_LIMIT;
   updateSearchURL();
   if (!state.searchTerms.length) {
     showStatus('Please enter at least one search term.', 'error');
@@ -720,9 +658,7 @@ export function debouncedSearch() {
   }
   cancelActiveSearch();
   hideStatus();
-  if (state.searchDebounceTimer) {
-    clearTimeout(state.searchDebounceTimer);
-  }
+  cancelDebouncedSearch();
   state.searchDebounceTimer = setTimeout(() => {
     state.searchDebounceTimer = null;
     performSearch();
@@ -742,13 +678,12 @@ export function clearSearchResults() {
   cancelActiveSearch();
   state.allPosts = [];
   state.currentCursors = Object.create(null);
-  searchSeenCursors = new Map();
+  searchSeenCursors.clear();
   state.rawSearchTerms = [];
   state.searchTerms = [];
   state.searchSince = null;
-  clearDerivedPostsTimer();
-  clearIngestedPosts();
-  resetRenderLimit();
+  ingestedPostsByUri.clear();
+  state.renderLimit = INITIAL_RENDER_LIMIT;
   resetResultsRenderCache();
   hideStatus();
   updateSearchURL();

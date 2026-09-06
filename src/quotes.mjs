@@ -2,7 +2,6 @@ import { PUBLIC_API } from './constants.mjs';
 import { didCache, state } from './state.mjs';
 import {
   postUrlInput,
-  quoteSearchBtn,
   quoteStatusDiv,
   quoteTabs,
   quoteOriginalDiv,
@@ -15,7 +14,6 @@ import {
   getPostTimestamp,
   getPostUrl,
   parseBlueskyPostUrl,
-  setText,
 } from './utils.mjs';
 import { appendEngagementStats, QUOTE_STAT_CLASSES } from './post-stats.mjs';
 import { enforceDidCacheLimit, getCachedDid } from './cache.mjs';
@@ -24,19 +22,12 @@ import { mergeQuotes, trackQuoteCursor } from './quotes-state.mjs';
 import { fetchJson } from './http.mjs';
 import { isRenderablePost } from './post-data.mjs';
 
-let quoteSortCache = { quotesRef: null, sortMode: '', sorted: [] };
 let lastRenderedQuoteSort = null;
 let lastRenderedQuotes = [];
 let quoteGeneration = 0;
 let quoteController = null;
 
-function resetQuoteRenderCache() {
-  quoteSortCache = { quotesRef: null, sortMode: '', sorted: [] };
-  lastRenderedQuoteSort = null;
-  lastRenderedQuotes = [];
-}
-
-export function updateQuoteURL() {
+function updateQuoteURL() {
   const params = new URLSearchParams(window.location.search);
   const postValue = postUrlInput.value.trim();
   setQueryParam(params, 'post', postValue);
@@ -59,7 +50,7 @@ export function updateQuoteTabs() {
 
 function showQuoteStatus(message, type) {
   quoteStatusDiv.className = `status ${type}`;
-  setText(quoteStatusDiv, message);
+  quoteStatusDiv.textContent = message;
   quoteStatusDiv.style.display = 'block';
 }
 
@@ -94,41 +85,13 @@ function sortQuotes(quotes, sortMode) {
   return sorted;
 }
 
-function getSortedQuotes(quotes, sortMode) {
-  if (quoteSortCache.quotesRef === quotes && quoteSortCache.sortMode === sortMode) {
-    return quoteSortCache.sorted;
-  }
-  const sorted = sortQuotes(quotes, sortMode);
-  quoteSortCache = {
-    quotesRef: quotes,
-    sortMode,
-    sorted,
-  };
-  return sorted;
-}
-
 function canAppendQuotes(sortedQuotes, sortMode) {
-  if (sortMode !== lastRenderedQuoteSort) {
-    return false;
-  }
-  if (lastRenderedQuotes.length === 0) {
-    return false;
-  }
-  if (sortedQuotes.length <= lastRenderedQuotes.length) {
-    return false;
-  }
-
-  for (let index = 0; index < lastRenderedQuotes.length; index += 1) {
-    if (sortedQuotes[index] !== lastRenderedQuotes[index]) {
-      return false;
-    }
-  }
-
-  return true;
+  return sortMode === lastRenderedQuoteSort &&
+    lastRenderedQuotes.length > 0 &&
+    sortedQuotes.length > lastRenderedQuotes.length &&
+    lastRenderedQuotes.every((post, index) => sortedQuotes[index] === post);
 }
 
-// Shared layout for the original post card and each quote card. They differ only
-// in the wrapper class, the leading label, and the trailing quote-count stat.
 function createQuoteCard(post, { className, label = '', includeQuoteCount = false }) {
   const wrapper = document.createElement('div');
   wrapper.className = className;
@@ -189,18 +152,6 @@ function createQuoteCard(post, { className, label = '', includeQuoteCount = fals
   return wrapper;
 }
 
-function createQuoteOriginalElement(post) {
-  return createQuoteCard(post, {
-    className: 'quote-original',
-    label: 'Original Post',
-    includeQuoteCount: true,
-  });
-}
-
-function createQuotePostElement(post, index) {
-  return createQuoteCard(post, { className: `quote-post depth-${(index % 8) + 1}` });
-}
-
 function renderQuoteLoadMore() {
   quoteLoadMoreDiv.textContent = '';
   if (!state.quoteCursor) {
@@ -217,7 +168,7 @@ function renderQuoteLoadMore() {
   quoteLoadMoreDiv.appendChild(button);
 }
 
-export function renderQuoteResults({ allowAppend = false } = {}) {
+function renderQuoteResults({ allowAppend = false } = {}) {
   if (state.allQuotes.length === 0) {
     quoteResultsDiv.textContent = '';
     const empty = document.createElement('div');
@@ -229,7 +180,7 @@ export function renderQuoteResults({ allowAppend = false } = {}) {
     return;
   }
 
-  const sorted = getSortedQuotes(state.allQuotes, state.quoteSort);
+  const sorted = sortQuotes(state.allQuotes, state.quoteSort);
   const appendOnly = allowAppend && canAppendQuotes(sorted, state.quoteSort);
   const startIndex = appendOnly ? lastRenderedQuotes.length : 0;
 
@@ -239,7 +190,9 @@ export function renderQuoteResults({ allowAppend = false } = {}) {
 
   const fragment = document.createDocumentFragment();
   for (let index = startIndex; index < sorted.length; index += 1) {
-    fragment.appendChild(createQuotePostElement(sorted[index], index));
+    fragment.appendChild(createQuoteCard(sorted[index], {
+      className: `quote-post depth-${(index % 8) + 1}`,
+    }));
   }
   quoteResultsDiv.appendChild(fragment);
 
@@ -321,13 +274,13 @@ export async function loadMoreQuotes() {
   try {
     const page = await fetchQuotesPage(state.activeQuoteUri, state.quoteCursor, controller?.signal);
     if (generation !== quoteGeneration) return;
-    const hasNewQuotes = page.posts.length > 0;
-    if (page.posts.length > 0) {
+    const hasPosts = page.posts.length > 0;
+    if (hasPosts) {
       state.allQuotes = mergeQuotes(state.allQuotes, page.posts);
     }
     state.quoteCursor = trackQuoteCursor(page.cursor);
     updateQuoteCount();
-    if (hasNewQuotes) {
+    if (hasPosts) {
       renderQuoteResults({ allowAppend: true });
     }
     hideQuoteStatus();
@@ -355,8 +308,6 @@ export async function performQuoteSearch() {
   quoteController = controller;
   const generation = ++quoteGeneration;
   state.isQuoteLoading = true;
-  // A new post submission replaces the current search or pagination request.
-  quoteSearchBtn.disabled = false;
   showQuoteStatus('Loading quotes…', 'loading');
   quoteTabs.style.display = 'none';
   quoteResultsDiv.textContent = '';
@@ -368,7 +319,8 @@ export async function performQuoteSearch() {
   state.quoteSeenCursors = new Set();
   state.quoteTotalCount = null;
   state.activeQuoteUri = null;
-  resetQuoteRenderCache();
+  lastRenderedQuoteSort = null;
+  lastRenderedQuotes = [];
 
   updateQuoteURL();
 
@@ -392,7 +344,11 @@ export async function performQuoteSearch() {
       state.quoteTotalCount = post.quoteCount;
     }
 
-    quoteOriginalDiv.appendChild(createQuoteOriginalElement(post));
+    quoteOriginalDiv.appendChild(createQuoteCard(post, {
+      className: 'quote-original',
+      label: 'Original Post',
+      includeQuoteCount: true,
+    }));
     updateQuoteCount();
     quoteTabs.style.display = 'flex';
     updateQuoteTabs();
@@ -414,7 +370,6 @@ export async function performQuoteSearch() {
   } finally {
     if (generation === quoteGeneration) {
       state.isQuoteLoading = false;
-      quoteSearchBtn.disabled = false;
       renderQuoteLoadMore();
     }
   }

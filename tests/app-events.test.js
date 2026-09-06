@@ -1,306 +1,189 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createTestDocument } from './helpers/dom.mjs';
 
-const mocks = vi.hoisted(() => {
-  const createControl = (initial = {}) => {
-    const listeners = new Map();
-    return {
-      value: initial.value ?? '',
-      checked: initial.checked ?? false,
-      addEventListener: vi.fn((eventName, handler) => {
-        listeners.set(eventName, handler);
-      }),
-      dispatch(eventName, event = {}) {
-        const handler = listeners.get(eventName);
-        if (handler) {
-          handler({ target: this, ...event });
-        }
-      },
-      reset(nextInitial = initial) {
-        listeners.clear();
-        this.value = nextInitial.value ?? '';
-        this.checked = nextInitial.checked ?? false;
-        this.addEventListener.mockClear();
-      },
-    };
-  };
+const postUrl = 'https://bsky.app/profile/did:plc:test/post/original';
+let elements;
+let search;
+let state;
 
-  const dom = {
-    expandTermsToggle: createControl({ checked: false }),
-    minLikesInput: createControl({ value: '' }),
-    postUrlInput: createControl({ value: '' }),
-    quoteForm: createControl(),
-    quoteTabs: createControl(),
-    searchBtn: createControl(),
-    sortSelect: createControl({ value: 'top' }),
-    termsInput: createControl({ value: '' }),
-    themeSelect: createControl({ value: 'system' }),
-    timeFilterSelect: createControl({ value: '24' }),
-  };
-
-  const state = {
-    quoteSort: 'likes',
-    searchSort: 'top',
-  };
-
-  const search = {
-    applySearchSortChange: vi.fn(),
-    cancelDebouncedSearch: vi.fn(),
-    clearSearchResults: vi.fn(),
-    debouncedSearch: vi.fn(),
-    focusSearchInput: vi.fn(),
-    performSearch: vi.fn(),
-    updateExpansionSummary: vi.fn(),
-    updateSearchURL: vi.fn(),
-  };
-
-  const quotes = {
-    handleQuoteTabClick: vi.fn(),
-    performQuoteSearch: vi.fn(),
-    updateQuoteTabs: vi.fn(),
-  };
-
-  const theme = {
-    handleSystemThemeChange: vi.fn(),
-    handleThemeChange: vi.fn(),
-    initTheme: vi.fn(),
-    prefersDarkScheme: { addEventListener: vi.fn() },
-  };
-
-  const url = {
-    updateURLWithParams: vi.fn(),
-  };
-
-  const reset = () => {
-    dom.expandTermsToggle.reset({ checked: false });
-    dom.minLikesInput.reset({ value: '' });
-    dom.postUrlInput.reset({ value: '' });
-    dom.quoteForm.reset();
-    dom.quoteTabs.reset();
-    dom.searchBtn.reset();
-    dom.sortSelect.reset({ value: 'top' });
-    dom.termsInput.reset({ value: '' });
-    dom.themeSelect.reset({ value: 'system' });
-    dom.timeFilterSelect.reset({ value: '24' });
-
-    state.quoteSort = 'likes';
-    state.searchSort = 'top';
-
-    for (const mod of [search, quotes, theme, url]) {
-      for (const val of Object.values(mod)) {
-        if (typeof val?.mockClear === 'function') val.mockClear();
-        if (typeof val?.addEventListener?.mockClear === 'function') val.addEventListener.mockClear();
-      }
-    }
-  };
-
+function makePost(id = 'result') {
   return {
-    dom,
-    quotes,
-    reset,
-    search,
-    state,
-    theme,
-    url,
+    uri: `at://did:plc:test/app.bsky.feed.post/${id}`,
+    author: { handle: 'alice.bsky.social' },
+    record: { text: 'An apple pie post', createdAt: new Date().toISOString() },
+    likeCount: 50,
   };
-});
-
-vi.mock('../src/state.mjs', () => ({ state: mocks.state }));
-vi.mock('../src/dom.mjs', () => mocks.dom);
-vi.mock('../src/utils.mjs', () => ({
-  normalizeSortValue: (raw) => (raw === 'latest' ? 'latest' : 'top'),
-}));
-vi.mock('../src/search.mjs', () => mocks.search);
-vi.mock('../src/quotes.mjs', () => mocks.quotes);
-vi.mock('../src/theme.mjs', () => mocks.theme);
-vi.mock('../src/url.mjs', () => mocks.url);
-
-async function bootApp() {
-  await import('../src/app.mjs');
 }
 
-describe('app sort change handler', () => {
-  let originalWindow;
+function dispatch(id, event, details = {}) {
+  return elements[id].listeners.get(event)({ target: elements[id], ...details });
+}
 
-  beforeEach(() => {
-    vi.resetModules();
-    mocks.reset();
-    originalWindow = globalThis.window;
-    globalThis.window = { location: { search: '' } };
+async function bootApp(query = '') {
+  window.location.search = query;
+  await import('../src/app.mjs');
+  await vi.advanceTimersByTimeAsync(0);
+}
+
+function searchRequests() {
+  return fetch.mock.calls.map(([url]) => new URL(url, window.location))
+    .filter((url) => url.pathname === '/api/search').map((url) => url.searchParams);
+}
+
+beforeEach(async () => {
+  vi.resetModules();
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-09-06T12:00:00Z'));
+  const testDOM = createTestDocument([
+    'terms', 'minLikes', 'timeFilter', 'sortSelect', 'searchBtn', 'status', 'results',
+    'themeSelect', 'expandTermsToggle', 'expandSummary', 'quoteForm', 'postUrl',
+    'quoteSearchBtn', 'quoteStatus', 'quoteTabs', 'quoteOriginal', 'quoteCount',
+    'quoteResults', 'quoteLoadMore',
+  ]);
+  elements = testDOM.elements;
+  elements.minLikes.value = '0';
+  elements.timeFilter.value = '24';
+  elements.sortSelect.value = 'top';
+  elements.expandTermsToggle.checked = false;
+  for (const sort of ['likes', 'recent', 'oldest']) {
+    const tab = testDOM.document.createElement('button');
+    tab.className = 'quote-tab';
+    tab.dataset.sort = sort;
+    elements.quoteTabs.appendChild(tab);
+  }
+  const location = new URL('https://example.test/');
+  vi.stubGlobal('document', testDOM.document);
+  vi.stubGlobal('window', {
+    location,
+    history: { replaceState: (_state, _title, url) => { location.href = new URL(url, location).href; } },
+    matchMedia: () => ({ matches: false, addEventListener() {} }),
   });
-
-  afterEach(() => {
-    if (originalWindow === undefined) {
-      delete globalThis.window;
-      return;
-    }
-    globalThis.window = originalWindow;
-  });
-
-  it('rebuilds and re-renders results when sort changes', async () => {
-    await bootApp();
-
-    mocks.dom.sortSelect.value = 'latest';
-    mocks.dom.sortSelect.dispatch('change');
-
-    expect(mocks.state.searchSort).toBe('latest');
-    expect(mocks.search.updateSearchURL).toHaveBeenCalledTimes(1);
-    expect(mocks.search.applySearchSortChange).toHaveBeenCalledTimes(1);
-  });
-
-  it('rebuilds and re-renders when sort changes back to top', async () => {
-    await bootApp();
-
-    mocks.state.searchSort = 'latest';
-    mocks.dom.sortSelect.value = 'top';
-    mocks.dom.sortSelect.dispatch('change');
-
-    expect(mocks.state.searchSort).toBe('top');
-    expect(mocks.search.updateSearchURL).toHaveBeenCalledTimes(1);
-    expect(mocks.search.applySearchSortChange).toHaveBeenCalledTimes(1);
-  });
+  vi.stubGlobal('localStorage', { getItem: () => null, setItem() {} });
+  vi.stubGlobal('requestAnimationFrame', (callback) => setTimeout(callback, 0));
+  vi.stubGlobal('cancelAnimationFrame', (id) => clearTimeout(id));
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ posts: [makePost()] })));
+  search = await import('../src/search.mjs');
+  ({ state } = await import('../src/state.mjs'));
 });
 
-describe('app search input handler', () => {
-  let originalWindow;
+afterEach(() => {
+  search.clearSearchResults();
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
-  beforeEach(() => {
-    vi.resetModules();
-    mocks.reset();
-    originalWindow = globalThis.window;
-    globalThis.window = { location: { search: '' } };
-  });
-
-  afterEach(() => {
-    if (originalWindow === undefined) {
-      delete globalThis.window;
-      return;
-    }
-    globalThis.window = originalWindow;
-  });
-
-  it('clears stale results when the terms field is emptied', async () => {
+describe('app search controls', () => {
+  it('debounces typing and clears loaded results and pending input immediately', async () => {
     await bootApp();
+    elements.terms.value = 'apple';
+    dispatch('terms', 'input');
+    expect(elements.expandSummary.textContent).toContain('apple');
+    expect(fetch).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(elements.results.querySelectorAll('.post')).toHaveLength(1);
+    expect(state.searchSince).not.toBe(null);
 
-    const expansionCallsBeforeInput = mocks.search.updateExpansionSummary.mock.calls.length;
-    mocks.dom.termsInput.value = '';
-    mocks.dom.termsInput.dispatch('input');
-
-    expect(mocks.search.updateExpansionSummary).toHaveBeenCalledTimes(expansionCallsBeforeInput + 1);
-    expect(mocks.search.cancelDebouncedSearch).toHaveBeenCalledTimes(1);
-    expect(mocks.search.clearSearchResults).toHaveBeenCalledTimes(1);
-    expect(mocks.search.debouncedSearch).not.toHaveBeenCalled();
+    elements.terms.value = 'banana';
+    dispatch('terms', 'input');
+    elements.terms.value = '';
+    dispatch('terms', 'input');
+    expect(elements.results.textContent).toBe('');
+    expect(state.searchTerms).toEqual([]);
+    expect(state.searchSince).toBe(null);
+    expect(elements.status.style.display).toBe('none');
+    await vi.advanceTimersByTimeAsync(300);
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
-  it('debounces search when the terms field has content', async () => {
+  it.each(['searchBtn', 'terms', 'minLikes'])('%s submits immediately and cancels the pending debounce', async (id) => {
     await bootApp();
-
-    const expansionCallsBeforeInput = mocks.search.updateExpansionSummary.mock.calls.length;
-    mocks.dom.termsInput.value = 'apple';
-    mocks.dom.termsInput.dispatch('input');
-
-    expect(mocks.search.updateExpansionSummary).toHaveBeenCalledTimes(expansionCallsBeforeInput + 1);
-    expect(mocks.search.clearSearchResults).not.toHaveBeenCalled();
-    expect(mocks.search.debouncedSearch).toHaveBeenCalledTimes(1);
+    elements.terms.value = 'apple';
+    dispatch('terms', 'input');
+    await dispatch(id, id === 'searchBtn' ? 'click' : 'keypress', { key: 'Enter' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(elements.results.querySelectorAll('.post')).toHaveLength(1);
+    const card = elements.results.querySelector('.post');
+    expect(state.searchDebounceTimer).toBe(null);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(elements.results.querySelector('.post')).toBe(card);
   });
 
-  it.each(['timeFilterSelect', 'expandTermsToggle'])('applies a %s change to the active search', async (control) => {
+  it.each(['timeFilter', 'expandTermsToggle'])('%s starts the pending search with the new filter and stays idle without terms', async (id) => {
     await bootApp();
-    mocks.dom.termsInput.value = 'apple pie';
-    mocks.dom[control].dispatch('change');
-    expect(mocks.search.cancelDebouncedSearch).toHaveBeenCalledTimes(1);
-    expect(mocks.search.performSearch).toHaveBeenCalledTimes(1);
-    expect(mocks.search.updateSearchURL).toHaveBeenCalledTimes(1);
+    dispatch(id, 'change');
+    expect(fetch).not.toHaveBeenCalled();
+    expect(elements.status.textContent).toBe('');
+
+    elements.terms.value = 'apple pie';
+    dispatch('terms', 'input');
+    if (id === 'timeFilter') elements.timeFilter.value = '6';
+    else elements.expandTermsToggle.checked = true;
+    dispatch(id, 'change');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(state.searchDebounceTimer).toBe(null);
+    expect(state.timeFilterHours).toBe(id === 'timeFilter' ? 6 : 24);
+    expect(state.searchTerms).toEqual(id === 'timeFilter' ? ['apple pie'] : ['apple pie', 'apple', 'pie']);
+    const count = searchRequests().length;
+    expect(count).toBe(state.searchTerms.length);
+    const card = elements.results.querySelector('.post');
+    await vi.advanceTimersByTimeAsync(300);
+    expect(searchRequests()).toHaveLength(count);
+    expect(elements.results.querySelector('.post')).toBe(card);
   });
 
-  it('does not show a validation error when a filter is changed before entering terms', async () => {
-    await bootApp();
-    mocks.dom.timeFilterSelect.dispatch('change');
-    mocks.dom.expandTermsToggle.dispatch('change');
-    expect(mocks.search.performSearch).not.toHaveBeenCalled();
+  it('starts a fresh cursor stream when sort changes and restores the top results when changed back', async () => {
+    let page = 0;
+    fetch.mockImplementation(async () => Response.json({ posts: [makePost(++page)], cursor: `cursor-${page}` }));
+    await bootApp('?terms=apple');
+    elements.sortSelect.value = 'latest';
+    dispatch('sortSelect', 'change');
+    await vi.advanceTimersByTimeAsync(0);
+    await search.loadMore();
+    const requests = searchRequests();
+    expect(requests.map((params) => params.get('sort'))).toEqual(['top', 'top', 'latest', 'latest', 'latest']);
+    expect(requests[2].has('cursor')).toBe(false);
+    expect(requests[4].get('cursor')).toBe('cursor-4');
+    expect(state.allPosts).toHaveLength(3);
+    expect(window.location.searchParams.get('searchSort')).toBe('latest');
+
+    elements.sortSelect.value = 'top';
+    dispatch('sortSelect', 'change');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(state.searchSort).toBe('top');
+    expect(state.currentCursors.apple).toBe('cursor-2');
+    expect(state.allPosts.map((post) => post.uri)).toEqual([1, 2].map((id) => makePost(id).uri));
+    expect(window.location.searchParams.has('searchSort')).toBe(false);
   });
 });
 
 describe('app URL initialization', () => {
-  let originalWindow;
-
-  beforeEach(() => {
-    vi.resetModules();
-    mocks.reset();
-    originalWindow = globalThis.window;
+  it('restores search filters and independent quote sort before fetching and rendering both searches', async () => {
+    await bootApp(`?terms=apple%20pie&minLikes=25&time=6&expand=1&searchSort=latest&post=${encodeURIComponent(postUrl)}&quoteSort=recent`);
+    expect(elements.terms.value).toBe('apple pie');
+    expect(elements.minLikes.value).toBe('25');
+    expect(elements.timeFilter.value).toBe('6');
+    expect(elements.expandTermsToggle.checked).toBe(true);
+    expect(state.minLikes).toBe(25);
+    expect(state.timeFilterHours).toBe(6);
+    expect(searchRequests().map((params) => [params.get('term'), params.get('sort')]))
+      .toEqual(['apple pie', 'apple', 'pie'].map((term) => [term, 'latest']));
+    expect(elements.results.querySelectorAll('.post')).toHaveLength(1);
+    expect(state.quoteSort).toBe('recent');
+    expect(state.activeQuoteUri).toBe('at://did:plc:test/app.bsky.feed.post/original');
+    expect(elements.quoteOriginal.querySelector('.quote-original')).toBeTruthy();
+    expect(elements.quoteTabs.querySelector('.active').dataset.sort).toBe('recent');
+    expect(window.location.searchParams.get('searchSort')).toBe('latest');
+    expect(window.location.searchParams.get('quoteSort')).toBe('recent');
   });
 
-  afterEach(() => {
-    if (originalWindow === undefined) {
-      delete globalThis.window;
-      return;
-    }
-    globalThis.window = originalWindow;
-  });
-
-  it('reads distinct searchSort and quoteSort params without collisions', async () => {
-    globalThis.window = {
-      location: {
-        search:
-          '?searchSort=latest&post=https%3A%2F%2Fbsky.app%2Fprofile%2Falice%2Fpost%2F123&quoteSort=recent',
-      },
-    };
-
-    await bootApp();
-
-    expect(mocks.dom.sortSelect.value).toBe('latest');
-    expect(mocks.state.searchSort).toBe('latest');
-    expect(mocks.state.quoteSort).toBe('recent');
-    expect(mocks.quotes.updateQuoteTabs).toHaveBeenCalledTimes(1);
-    expect(mocks.quotes.performQuoteSearch).toHaveBeenCalledTimes(1);
-    expect(mocks.url.updateURLWithParams).not.toHaveBeenCalled();
-  });
-
-  it('automatically executes a restored search after all URL controls are initialized', async () => {
-    globalThis.window = { location: { search: '?terms=apple%20pie&minLikes=25&time=6&expand=1&searchSort=latest' } };
-    await bootApp();
-    expect(mocks.dom.termsInput.value).toBe('apple pie');
-    expect(mocks.dom.minLikesInput.value).toBe('25');
-    expect(mocks.dom.timeFilterSelect.value).toBe('6');
-    expect(mocks.dom.expandTermsToggle.checked).toBe(true);
-    expect(mocks.state.searchSort).toBe('latest');
-    expect(mocks.search.performSearch).toHaveBeenCalledTimes(1);
-  });
-
-  it('migrates legacy search sort links to searchSort', async () => {
-    globalThis.window = {
-      location: {
-        search: '?sort=latest',
-      },
-    };
-
-    await bootApp();
-
-    expect(mocks.dom.sortSelect.value).toBe('latest');
-    expect(mocks.state.searchSort).toBe('latest');
-    expect(mocks.state.quoteSort).toBe('likes');
-    expect(mocks.url.updateURLWithParams).toHaveBeenCalledTimes(1);
-    const params = mocks.url.updateURLWithParams.mock.calls[0][0];
-    expect(params.get('searchSort')).toBe('latest');
-    expect(params.get('sort')).toBe(null);
-  });
-
-  it('migrates legacy quote sort links to quoteSort', async () => {
-    globalThis.window = {
-      location: {
-        search:
-          '?post=https%3A%2F%2Fbsky.app%2Fprofile%2Falice%2Fpost%2F123&sort=recent',
-      },
-    };
-
-    await bootApp();
-
-    expect(mocks.state.quoteSort).toBe('recent');
-    expect(mocks.quotes.updateQuoteTabs).toHaveBeenCalledTimes(1);
-    expect(mocks.quotes.performQuoteSearch).toHaveBeenCalledTimes(1);
-    expect(mocks.url.updateURLWithParams).toHaveBeenCalledTimes(1);
-    const params = mocks.url.updateURLWithParams.mock.calls[0][0];
-    expect(params.get('post')).toBe('https://bsky.app/profile/alice/post/123');
-    expect(params.get('quoteSort')).toBe('recent');
-    expect(params.get('sort')).toBe(null);
+  it.each([['latest', 'searchSort'], ['recent', 'quoteSort']])('migrates legacy sort=%s links without losing the post', async (sort, key) => {
+    await bootApp(`?post=${encodeURIComponent(postUrl)}&sort=${sort}`);
+    expect(window.location.searchParams.get(key)).toBe(sort);
+    expect(window.location.searchParams.has('sort')).toBe(false);
+    expect(window.location.searchParams.get('post')).toBe(postUrl);
+    expect(state.searchSort).toBe(key === 'searchSort' ? 'latest' : 'top');
+    expect(state.quoteSort).toBe(key === 'quoteSort' ? 'recent' : 'likes');
+    expect(elements.quoteOriginal.querySelector('.quote-original')).toBeTruthy();
   });
 });

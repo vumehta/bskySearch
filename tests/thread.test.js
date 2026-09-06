@@ -1,32 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-class Element {
-  constructor(tag = 'div') {
-    this.tagName = tag;
-    this.children = [];
-    this.dataset = {};
-    this.attributes = new Map();
-    this.className = '';
-    this.textContent = '';
-    this.classList = { contains: (name) => this.className.split(' ').includes(name) };
-  }
-  setAttribute(name, value) { this.attributes.set(name, String(value)); }
-  getAttribute(name) { return this.attributes.get(name) ?? null; }
-  removeAttribute(name) { this.attributes.delete(name); }
-  get firstElementChild() { return this.children[0] || null; }
-  appendChild(child) { return this.insertBefore(child, null); }
-  insertBefore(child, before) {
-    child.parentNode = this;
-    const index = before ? this.children.indexOf(before) : this.children.length;
-    this.children.splice(index, 0, child);
-    return child;
-  }
-  remove() { this.parentNode.children.splice(this.parentNode.children.indexOf(this), 1); }
-  querySelector(selector) {
-    return this.children.find((child) => selector === 'button.thread-link' &&
-      child.tagName === 'button' && child.classList.contains('thread-link')) || null;
-  }
-}
+import { createTestDocument, TestNode } from './helpers/dom.mjs';
 
 const parent = (text = 'parent') => ({
   uri: 'at://did:plc:test/app.bsky.feed.post/parent123',
@@ -37,8 +10,8 @@ const parent = (text = 'parent') => ({
 const response = (data) => ({ ok: true, json: async () => data });
 const withParent = (text = 'parent') => response({ thread: { parent: { post: parent(text) } } });
 function createCard() {
-  const card = new Element();
-  const link = new Element('button');
+  const card = new TestNode();
+  const link = new TestNode('button');
   link.className = 'thread-link';
   card.appendChild(link);
   return { card, link };
@@ -53,7 +26,7 @@ beforeEach(async () => {
   vi.resetModules();
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-01-01T12:00:00Z'));
-  vi.stubGlobal('document', { createElement: (tag) => new Element(tag) });
+  vi.stubGlobal('document', createTestDocument([]).document);
   fetchMock = vi.fn(async () => withParent());
   vi.stubGlobal('fetch', fetchMock);
   thread = await import('../src/thread.mjs');

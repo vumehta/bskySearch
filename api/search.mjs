@@ -1,10 +1,6 @@
 import { isDatetimeString } from '@atproto/syntax';
 import { isRenderablePost } from '../src/post-data.mjs';
 
-function normalizeSortValue(raw) {
-  return raw === 'latest' ? 'latest' : 'top';
-}
-
 const BSKY_SERVICE = 'https://bsky.social/xrpc';
 
 // The deadline includes response headers and JSON body consumption.
@@ -68,7 +64,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = UPSTREAM_TIMEOUT_
         let payload;
         try {
           payload = await response.json();
-        } catch (error) {
+        } catch {
           throwIfAborted(controller.signal);
           if (response.ok) throw proxyError('Invalid response from Bluesky.', 502);
           // An HTML/non-JSON error body must not hide the upstream HTTP status.
@@ -159,14 +155,6 @@ function getRuntimeEnv(context) {
   return process.env;
 }
 
-function getRuntimeCredentials(context) {
-  const env = getRuntimeEnv(context);
-  return {
-    handle: env.BSKY_HANDLE,
-    appPassword: env.BSKY_APP_PASSWORD,
-  };
-}
-
 function stripControlChars(value) {
   if (typeof value !== 'string') return '';
   return value.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
@@ -214,7 +202,7 @@ function parseSearchInput(request) {
   const url = new URL(request.url);
   const term = stripControlChars(url.searchParams.get('term')).trim();
   const cursor = stripControlChars(url.searchParams.get('cursor'));
-  const sort = stripControlChars(url.searchParams.get('sort')).trim().toLowerCase();
+  const sort = stripControlChars(url.searchParams.get('sort')).trim().toLowerCase() || 'top';
   const since = stripControlChars(url.searchParams.get('since')).trim();
   return { term, cursor, sort, since };
 }
@@ -341,11 +329,7 @@ function getCachedSearchResult(cacheKey) {
 
 function enforceSearchCacheLimit() {
   while (searchResultsCache.size > MAX_SEARCH_CACHE_SIZE) {
-    const oldestKey = searchResultsCache.keys().next().value;
-    if (oldestKey === undefined) {
-      break;
-    }
-    searchResultsCache.delete(oldestKey);
+    searchResultsCache.delete(searchResultsCache.keys().next().value);
   }
 }
 
@@ -372,11 +356,10 @@ function resetModuleStateForTests() {
   admissionUpdatedAt = null;
 }
 
-async function searchPosts(term, cursor, accessJwt, sort, since, signal) {
-  const sortValue = normalizeSortValue(sort);
+async function searchPosts({ term, cursor, sort, since }, accessJwt, signal) {
   const params = new URLSearchParams({
     q: term,
-    sort: sortValue,
+    sort,
     limit: '100',
     lang: 'en', // Intentionally English-only; do not make configurable
   });
@@ -441,12 +424,12 @@ function admitSearch() {
   admissionTokens -= 1;
 }
 
-async function runSearch({ term, cursor, sort, since }, handle, appPassword, signal) {
+async function runSearch(input, handle, appPassword, signal) {
   let session = await ensureSession(handle, appPassword, signal);
-  let result = await searchPosts(term, cursor, session.accessJwt, sort, since, signal);
+  let result = await searchPosts(input, session.accessJwt, signal);
   if (result.response.status === 401) {
     session = await ensureSession(handle, appPassword, signal, session.accessJwt);
-    result = await searchPosts(term, cursor, session.accessJwt, sort, since, signal);
+    result = await searchPosts(input, session.accessJwt, signal);
   }
   const { response, payload } = result;
   if (!response.ok) {
@@ -468,12 +451,13 @@ export async function GET(request, context) {
     return jsonNoStore({ error: 'Method not allowed.' }, 405, { Allow: 'GET' });
   }
 
-  const { handle, appPassword } = getRuntimeCredentials(context);
+  const { BSKY_HANDLE: handle, BSKY_APP_PASSWORD: appPassword } = getRuntimeEnv(context);
   if (!handle || !appPassword) {
     return jsonNoStore({ error: 'Server missing BSKY_HANDLE or BSKY_APP_PASSWORD.' }, 500);
   }
 
-  const { term, cursor, sort, since } = parseSearchInput(request);
+  const input = parseSearchInput(request);
+  const { term, cursor, sort, since } = input;
 
   if (!term) {
     return jsonNoStore({ error: 'Missing term parameter.' }, 400);
@@ -487,7 +471,7 @@ export async function GET(request, context) {
     return jsonNoStore({ error: 'Cursor is too long.' }, 400);
   }
 
-  if (sort && !['top', 'latest'].includes(sort)) {
+  if (!['top', 'latest'].includes(sort)) {
     return jsonNoStore({ error: 'Invalid sort parameter.' }, 400);
   }
 
@@ -499,8 +483,7 @@ export async function GET(request, context) {
     return jsonNoStore({ error: 'Request cancelled.' }, 499);
   }
 
-  const sortValue = sort || 'top';
-  const cacheKey = getSearchCacheKey(term, cursor, sortValue, since);
+  const cacheKey = getSearchCacheKey(term, cursor, sort, since);
   const cachedResult = getCachedSearchResult(cacheKey);
   if (cachedResult) {
     return jsonNoStore(cachedResult, 200);
@@ -522,12 +505,7 @@ export async function GET(request, context) {
       admitSearch();
       operation = createSharedOperation(
         async (signal) => {
-          const payload = await runSearch(
-            { term, cursor, sort: sortValue, since },
-            handle,
-            appPassword,
-            signal,
-          );
+          const payload = await runSearch(input, handle, appPassword, signal);
           throwIfAborted(signal);
           searchResultsCache.set(cacheKey, { data: payload, timestamp: Date.now() });
           enforceSearchCacheLimit();

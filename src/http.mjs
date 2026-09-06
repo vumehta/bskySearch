@@ -40,7 +40,7 @@ export async function fetchJson(url, { signal, timeoutMs = 10000, ...options } =
       let payload;
       try {
         payload = await response.json();
-      } catch (error) {
+      } catch {
         if (controller.signal.aborted) throw controller.signal.reason;
         if (!response.ok) throw new HttpError(response.status, null);
         throw new HttpError(502, { error: 'The server returned an invalid response.' });
