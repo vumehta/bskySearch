@@ -5,7 +5,7 @@ phrase expansion, cursor pagination, inline thread context, and a quote finder.
 
 ## Development
 
-Use Node.js 22 and npm. On Windows PowerShell, use `npm.cmd` if execution policy
+Use Node.js 24 and npm. On Windows PowerShell, use `npm.cmd` if execution policy
 blocks the `npm.ps1` shim.
 
 ```sh
