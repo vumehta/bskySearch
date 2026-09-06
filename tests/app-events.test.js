@@ -38,7 +38,6 @@ const mocks = vi.hoisted(() => {
   };
 
   const state = {
-    pendingSearch: false,
     quoteSort: 'likes',
     searchSort: 'top',
   };
@@ -83,7 +82,6 @@ const mocks = vi.hoisted(() => {
     dom.themeSelect.reset({ value: 'system' });
     dom.timeFilterSelect.reset({ value: '24' });
 
-    state.pendingSearch = false;
     state.quoteSort = 'likes';
     state.searchSort = 'top';
 
@@ -185,7 +183,6 @@ describe('app search input handler', () => {
 
     const expansionCallsBeforeInput = mocks.search.updateExpansionSummary.mock.calls.length;
     mocks.dom.termsInput.value = '';
-    mocks.state.pendingSearch = true;
     mocks.dom.termsInput.dispatch('input');
 
     expect(mocks.search.updateExpansionSummary).toHaveBeenCalledTimes(expansionCallsBeforeInput + 1);
@@ -204,6 +201,22 @@ describe('app search input handler', () => {
     expect(mocks.search.updateExpansionSummary).toHaveBeenCalledTimes(expansionCallsBeforeInput + 1);
     expect(mocks.search.clearSearchResults).not.toHaveBeenCalled();
     expect(mocks.search.debouncedSearch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['timeFilterSelect', 'expandTermsToggle'])('applies a %s change to the active search', async (control) => {
+    await bootApp();
+    mocks.dom.termsInput.value = 'apple pie';
+    mocks.dom[control].dispatch('change');
+    expect(mocks.search.cancelDebouncedSearch).toHaveBeenCalledTimes(1);
+    expect(mocks.search.performSearch).toHaveBeenCalledTimes(1);
+    expect(mocks.search.updateSearchURL).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not show a validation error when a filter is changed before entering terms', async () => {
+    await bootApp();
+    mocks.dom.timeFilterSelect.dispatch('change');
+    mocks.dom.expandTermsToggle.dispatch('change');
+    expect(mocks.search.performSearch).not.toHaveBeenCalled();
   });
 });
 
@@ -240,6 +253,17 @@ describe('app URL initialization', () => {
     expect(mocks.quotes.updateQuoteTabs).toHaveBeenCalledTimes(1);
     expect(mocks.quotes.performQuoteSearch).toHaveBeenCalledTimes(1);
     expect(mocks.url.updateURLWithParams).not.toHaveBeenCalled();
+  });
+
+  it('automatically executes a restored search after all URL controls are initialized', async () => {
+    globalThis.window = { location: { search: '?terms=apple%20pie&minLikes=25&time=6&expand=1&searchSort=latest' } };
+    await bootApp();
+    expect(mocks.dom.termsInput.value).toBe('apple pie');
+    expect(mocks.dom.minLikesInput.value).toBe('25');
+    expect(mocks.dom.timeFilterSelect.value).toBe('6');
+    expect(mocks.dom.expandTermsToggle.checked).toBe(true);
+    expect(mocks.state.searchSort).toBe('latest');
+    expect(mocks.search.performSearch).toHaveBeenCalledTimes(1);
   });
 
   it('migrates legacy search sort links to searchSort', async () => {

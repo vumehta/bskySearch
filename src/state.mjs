@@ -7,7 +7,7 @@ export const searchCache = new Map();
 
 export const state = {
   allPosts: [],
-  currentCursors: {},
+  currentCursors: Object.create(null),
   rawSearchTerms: [],
   searchTerms: [],
   searchSort: 'top',
@@ -16,7 +16,6 @@ export const state = {
   searchSince: null,
   searchGeneration: 0,
   isLoading: false,
-  pendingSearch: false,
   renderLimit: INITIAL_RENDER_LIMIT,
   allQuotes: [],
   quoteSort: 'likes',

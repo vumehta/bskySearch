@@ -82,11 +82,6 @@ function initFromURL() {
     state.quoteSort = resolvedQuoteSort;
     updateQuoteTabs();
   }
-  if (postParam) {
-    postUrlInput.value = postParam;
-    performQuoteSearch();
-  }
-
   if (!hasValidSearchSort && hasValidLegacySearchSort) {
     params.set('searchSort', legacySortParam);
   }
@@ -99,6 +94,11 @@ function initFromURL() {
   }
 
   updateExpansionSummary();
+  if (termsInput.value.trim()) performSearch();
+  if (postParam) {
+    postUrlInput.value = postParam;
+    performQuoteSearch();
+  }
 }
 
 // Event listeners
@@ -159,6 +159,14 @@ minLikesInput.addEventListener('input', debouncedSearch);
 expandTermsToggle.addEventListener('change', () => {
   updateSearchURL();
   updateExpansionSummary();
+  cancelDebouncedSearch();
+  if (termsInput.value.trim()) performSearch();
+});
+
+timeFilterSelect.addEventListener('change', () => {
+  updateSearchURL();
+  cancelDebouncedSearch();
+  if (termsInput.value.trim()) performSearch();
 });
 
 // Initialize
