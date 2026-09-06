@@ -1,5 +1,3 @@
-// Engagement stat rendering shared by search results and quote cards.
-
 const LIKE_ICON = '♥ ';
 const REPOST_ICON = '↻ ';
 const REPLY_ICON = '💬 ';
@@ -17,7 +15,7 @@ export const QUOTE_STAT_CLASSES = {
   replies: 'quote-stat replies',
 };
 
-export function createStatElement(className, icon, count, noun) {
+function createStatElement(className, icon, count, noun) {
   const stat = document.createElement('span');
   stat.className = className;
   stat.setAttribute('aria-label', `${count} ${noun}`);

@@ -15,7 +15,6 @@ import {
 import {
   applySearchSortChange,
   cancelDebouncedSearch,
-  clearSearchResults,
   debouncedSearch,
   focusSearchInput,
   performSearch,
@@ -46,11 +45,9 @@ function initFromURL() {
   if (params.get('minLikes')) {
     minLikesInput.value = params.get('minLikes');
   }
-  if (params.get('time')) {
-    const timeValue = params.get('time');
-    if (['1', '6', '12', '24', '48', '168'].includes(timeValue)) {
-      timeFilterSelect.value = timeValue;
-    }
+  const timeValue = params.get('time');
+  if (['1', '6', '12', '24', '48', '168'].includes(timeValue)) {
+    timeFilterSelect.value = timeValue;
   }
   const searchSortParam = params.get('searchSort');
   const legacySortParam = params.get('sort');
@@ -101,11 +98,7 @@ function initFromURL() {
   }
 }
 
-// Event listeners
-searchBtn.addEventListener('click', () => {
-  cancelDebouncedSearch();
-  performSearch();
-});
+searchBtn.addEventListener('click', performSearch);
 
 quoteForm.addEventListener('submit', (event) => {
   event.preventDefault();
@@ -116,42 +109,24 @@ themeSelect.addEventListener('change', (event) => {
   handleThemeChange(event.target.value);
 });
 
-prefersDarkScheme.addEventListener('change', () => {
-  handleSystemThemeChange();
-});
+prefersDarkScheme.addEventListener('change', handleSystemThemeChange);
 
 sortSelect.addEventListener('change', () => {
   state.searchSort = normalizeSortValue(sortSelect.value);
-  updateSearchURL();
   applySearchSortChange();
 });
 
-quoteTabs.addEventListener('click', (event) => {
-  handleQuoteTabClick(event);
-});
+quoteTabs.addEventListener('click', handleQuoteTabClick);
 
-termsInput.addEventListener('keypress', (event) => {
-  if (event.key === 'Enter') {
-    cancelDebouncedSearch();
-    performSearch();
-  }
-});
+for (const input of [termsInput, minLikesInput]) {
+  input.addEventListener('keypress', (event) => {
+    if (event.key === 'Enter') performSearch();
+  });
+}
 
 termsInput.addEventListener('input', () => {
   updateExpansionSummary();
-  if (!termsInput.value.trim()) {
-    cancelDebouncedSearch();
-    clearSearchResults();
-    return;
-  }
   debouncedSearch();
-});
-
-minLikesInput.addEventListener('keypress', (event) => {
-  if (event.key === 'Enter') {
-    cancelDebouncedSearch();
-    performSearch();
-  }
 });
 
 minLikesInput.addEventListener('input', debouncedSearch);
@@ -169,7 +144,6 @@ timeFilterSelect.addEventListener('change', () => {
   if (termsInput.value.trim()) performSearch();
 });
 
-// Initialize
 initTheme();
 initFromURL();
 focusSearchInput();

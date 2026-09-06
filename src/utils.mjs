@@ -1,19 +1,10 @@
-// Safe text content setter (prevents XSS)
-export function setText(element, text) {
-  element.textContent = text;
-}
-
-// Validate URL is from allowed domains
 export function isValidBskyUrl(url) {
   if (!url) return false;
   try {
     const parsed = new URL(url);
     return (
       parsed.protocol === 'https:' &&
-      (parsed.hostname === 'bsky.app' ||
-        parsed.hostname.endsWith('.bsky.app') ||
-        parsed.hostname === 'cdn.bsky.app' ||
-        parsed.hostname.endsWith('.cdn.bsky.app'))
+      (parsed.hostname === 'bsky.app' || parsed.hostname.endsWith('.bsky.app'))
     );
   } catch {
     return false;
@@ -60,7 +51,6 @@ export function expandSearchTerms(terms, shouldExpandWords) {
   return expanded;
 }
 
-// Generate cache key for search requests
 export function getSearchCacheKey(term, cursor, sort, since = '') {
   return JSON.stringify([term, cursor || '', sort, since || '']);
 }
@@ -75,39 +65,10 @@ export function getSearchSince(hours, now = Date.now()) {
   return new Date(roundedTs).toISOString().replace(/\.\d{3}Z$/, 'Z');
 }
 
-// Deduplicate posts by URI
-export function deduplicatePosts(posts) {
-  const seen = new Map();
-
-  for (const post of posts) {
-    const uri = post.uri;
-    if (!seen.has(uri)) {
-      seen.set(uri, post);
-    } else {
-      const existing = seen.get(uri);
-      if (!existing.matchedTerms) {
-        existing.matchedTerms = [existing.matchedTerm];
-      }
-      if (!existing.matchedTerms.includes(post.matchedTerm)) {
-        existing.matchedTerms.push(post.matchedTerm);
-      }
-    }
-  }
-
-  return Array.from(seen.values()).map((post) => {
-    if (!post.matchedTerms) {
-      post.matchedTerms = [post.matchedTerm];
-    }
-    return post;
-  });
-}
-
-// Filter posts by minimum likes
 export function filterByLikes(posts, minLikes) {
   return posts.filter((post) => (post.likeCount || 0) >= minLikes);
 }
 
-// Filter posts by date (configurable hours)
 export function filterByDate(posts, hours) {
   const normalizedHours = Number.isFinite(hours) && hours > 0 ? hours : 24;
   const cutoffTs = Date.now() - normalizedHours * 3600000;
@@ -118,7 +79,6 @@ export function normalizeSortValue(raw) {
   return raw === 'latest' ? 'latest' : 'top';
 }
 
-// Sort posts by selected mode
 export function sortPosts(posts, sortMode = 'top') {
   const sorted = [...posts];
   if (sortMode === 'latest') {
@@ -129,7 +89,6 @@ export function sortPosts(posts, sortMode = 'top') {
   return sorted;
 }
 
-// Format relative time
 export function formatRelativeTime(dateString) {
   const date = new Date(dateString);
   const now = new Date();
@@ -143,7 +102,6 @@ export function formatRelativeTime(dateString) {
   return date.toLocaleDateString();
 }
 
-// Extract post URL from URI
 export function getPostUrl(post) {
   const parts = post.uri.split('/');
   const postId = parts[parts.length - 1];

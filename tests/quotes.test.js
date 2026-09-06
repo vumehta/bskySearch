@@ -17,7 +17,7 @@ let state;
 beforeEach(async () => {
   vi.resetModules();
   const fixture = createTestDocument([
-    'postUrl', 'quoteSearchBtn', 'quoteStatus', 'quoteTabs', 'quoteOriginal', 'quoteCount', 'quoteResults', 'quoteLoadMore',
+    'postUrl', 'quoteStatus', 'quoteTabs', 'quoteOriginal', 'quoteCount', 'quoteResults', 'quoteLoadMore',
   ]);
   elements = fixture.elements;
   for (const mode of ['likes', 'recent', 'oldest']) {
@@ -69,6 +69,27 @@ describe('quote search and pagination', () => {
     expect(state.allQuotes).toHaveLength(1);
     expect(elements.quoteCount.textContent).toBe('Loaded 1 of 1 quote');
     expect(state.quoteCursor).toBeNull();
+  });
+
+  it('reuses cards for appended quotes and rerenders when pagination changes their order', async () => {
+    mockInitial({ posts: [post('q1', 3), post('q2', 2)], cursor: 'c1' });
+    await quotes.performQuoteSearch();
+    const firstCard = elements.quoteResults.children[0];
+    const secondCard = elements.quoteResults.children[1];
+
+    fetch.mockResolvedValueOnce(response({ posts: [post('q3', 1)], cursor: 'c2' }));
+    await quotes.loadMoreQuotes();
+    expect(elements.quoteResults.children).toHaveLength(3);
+    expect(elements.quoteResults.children[0]).toBe(firstCard);
+    expect(elements.quoteResults.children[1]).toBe(secondCard);
+
+    fetch.mockResolvedValueOnce(response({ posts: [post('q4', 4)] }));
+    await quotes.loadMoreQuotes();
+    expect(elements.quoteResults.querySelectorAll('.quote-text').map((node) => node.textContent))
+      .toEqual(['q4', 'q1', 'q2', 'q3']);
+    expect(elements.quoteResults.children[1]).not.toBe(firstCard);
+    expect(state.quoteCursor).toBeNull();
+    expect(document.getElementById('quoteLoadMoreBtn')).toBeNull();
   });
 
   it('replaces pagination with a new post search and ignores the obsolete response', async () => {

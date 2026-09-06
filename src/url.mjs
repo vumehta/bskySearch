@@ -1,6 +1,6 @@
 export function updateURLWithParams(params) {
-  const newURL =
-    window.location.pathname + (params.toString() ? `?${params.toString()}` : '');
+  const query = params.toString();
+  const newURL = window.location.pathname + (query ? `?${query}` : '');
   window.history.replaceState({}, '', newURL);
 }
 

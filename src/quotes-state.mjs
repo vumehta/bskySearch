@@ -11,8 +11,7 @@ export function trackQuoteCursor(nextCursor) {
   return nextCursor;
 }
 
-// Replacing overlapping records also refreshes engagement counts. Return a new
-// array so sorting/render caches can detect a changed collection.
+// Replacing overlapping records also refreshes engagement counts.
 export function mergeQuotes(existing, incoming) {
   const byUri = new Map(existing.map((post) => [post.uri, post]));
   incoming.forEach((post) => byUri.set(post.uri, post));

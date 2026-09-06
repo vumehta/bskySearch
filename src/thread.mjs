@@ -10,7 +10,6 @@ const toggleStates = new WeakMap();
 const pendingToggles = new Set();
 let nextContextId = 0;
 
-// Thread Explorer functions
 export function isReplyPost(post) {
   return !!post.record?.reply;
 }
@@ -29,10 +28,10 @@ function extractParentChain(thread) {
   let current = thread.thread?.parent;
   while (current?.post) {
     if (!isRenderablePost(current.post)) throw new Error('Thread contained an invalid post.');
-    parents.unshift(current.post);
+    parents.push(current.post);
     current = current.parent;
   }
-  return parents;
+  return parents.reverse();
 }
 
 function createThreadParentElement(post) {

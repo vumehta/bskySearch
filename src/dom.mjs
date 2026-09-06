@@ -10,7 +10,6 @@ export const expandTermsToggle = document.getElementById('expandTermsToggle');
 export const expandSummary = document.getElementById('expandSummary');
 export const quoteForm = document.getElementById('quoteForm');
 export const postUrlInput = document.getElementById('postUrl');
-export const quoteSearchBtn = document.getElementById('quoteSearchBtn');
 export const quoteStatusDiv = document.getElementById('quoteStatus');
 export const quoteTabs = document.getElementById('quoteTabs');
 export const quoteOriginalDiv = document.getElementById('quoteOriginal');
