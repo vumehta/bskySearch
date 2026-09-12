@@ -1,5 +1,6 @@
 import { isDatetimeString } from '@atproto/syntax';
 import { isRenderablePost } from '../src/post-data.mjs';
+import { SEARCH_JOB_TIMEOUT_MS } from '../src/constants.mjs';
 
 const BSKY_SERVICE = 'https://bsky.social/xrpc';
 
@@ -97,19 +98,30 @@ async function fetchWithTimeout(url, { onResponse, ...options } = {}, timeoutMs 
 // Searches and authentication have independent subscribers. One cancelled
 // request only detaches itself; the upstream work is aborted when nobody needs
 // it. In particular, one search cannot cancel another search's shared login.
-function createSharedOperation(start, onSettled) {
+function createSharedOperation(start, onSettled, timeoutMs) {
   const operation = {
     controller: new AbortController(),
     subscribers: 0,
     settled: false,
     promise: null,
   };
-  operation.promise = Promise.resolve()
+  const work = Promise.resolve()
     .then(() => {
       throwIfAborted(operation.controller.signal);
       return start(operation.controller.signal);
-    })
+    });
+  let timer;
+  // Only search jobs have a complete-operation deadline. Shared authentication
+  // remains alive when a different search still subscribes to it.
+  const deadline = timeoutMs === undefined ? null : new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      reject(createUpstreamTimeoutError());
+      operation.controller.abort();
+    }, timeoutMs);
+  });
+  operation.promise = (deadline ? Promise.race([work, deadline]) : work)
     .finally(() => {
+      clearTimeout(timer);
       operation.settled = true;
       onSettled(operation);
     });
@@ -477,7 +489,10 @@ function admitSearch() {
 async function runSearch(input, handle, appPassword, signal) {
   let session = await ensureSession(handle, appPassword, signal);
   let result = await searchPosts(input, session.accessJwt, signal);
-  if (result.response.status === 401) {
+  if (
+    result.response.status === 401 ||
+    (result.response.status === 400 && result.payload?.error === 'ExpiredToken')
+  ) {
     session = await ensureSession(handle, appPassword, signal, session.accessJwt);
     result = await searchPosts(input, session.accessJwt, signal);
   }
@@ -564,6 +579,7 @@ export async function GET(request, context) {
         (completed) => {
           if (pendingSearches.get(cacheKey) === completed) pendingSearches.delete(cacheKey);
         },
+        SEARCH_JOB_TIMEOUT_MS,
       );
       pendingSearches.set(cacheKey, operation);
     }
@@ -591,10 +607,7 @@ export async function GET(request, context) {
 export const testUtils =
   process.env.NODE_ENV === 'test'
     ? {
-        stripControlChars,
-        getSearchCacheKey,
         isValidSince,
-        isSessionExpired,
         getCachedSearchResult,
         cleanupSearchCache,
         enforceSearchCacheLimit,
@@ -602,13 +615,9 @@ export const testUtils =
         SEARCH_CACHE_TTL_MS,
         MAX_SEARCH_CACHE_SIZE,
         UPSTREAM_TIMEOUT_MS,
-        UPSTREAM_TIMEOUT_ERROR_CODE,
         SESSION_TTL_MS,
         AUTH_RETRY_DEFAULT_MS,
         AUTH_RETRY_MAX_MS,
-        pendingSearches,
-        fetchWithTimeout,
-        isUpstreamTimeoutError,
         resetModuleStateForTests,
       }
     : undefined;

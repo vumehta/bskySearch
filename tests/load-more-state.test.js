@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestDocument, deferred } from './helpers/dom.mjs';
+import { SEARCH_REQUEST_TIMEOUT_MS } from '../src/constants.mjs';
 
 let testDocument;
 let elements;
@@ -336,11 +337,26 @@ describe('search pagination and lifecycle', () => {
     expect(state.allPosts).toHaveLength(1);
   });
 
+  it('renders a proxy response that needs more than the old ten-second browser deadline', async () => {
+    vi.useFakeTimers();
+    globalThis.fetch = vi.fn(() => new Promise((resolve) => {
+      setTimeout(() => resolve(Response.json({ posts: [makePost('slow', 20)] })), 12000);
+    }));
+    const pending = search.performSearch();
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(state.isLoading).toBe(true);
+    await vi.advanceTimersByTimeAsync(2000);
+    await pending;
+    expect(state.allPosts.map((post) => post.uri)).toEqual([makePost('slow', 20).uri]);
+    expect(elements.status.style.display).toBe('none');
+    expect(state.isLoading).toBe(false);
+  });
+
   it('times out an unresponsive page and restores a retryable UI', async () => {
     vi.useFakeTimers();
     globalThis.fetch = vi.fn(() => new Promise(() => {}));
     const promise = search.performSearch();
-    await vi.advanceTimersByTimeAsync(10000);
+    await vi.advanceTimersByTimeAsync(SEARCH_REQUEST_TIMEOUT_MS);
     await promise;
     expect(state.isLoading).toBe(false);
     expect(state.currentCursors.apple).toBe('');

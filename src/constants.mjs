@@ -1,5 +1,8 @@
 export const PUBLIC_API = 'https://public.api.bsky.app/xrpc';
 export const SEARCH_API = '/api/search';
+// The browser allows transport time beyond the proxy's complete search budget.
+export const SEARCH_JOB_TIMEOUT_MS = 20000;
+export const SEARCH_REQUEST_TIMEOUT_MS = SEARCH_JOB_TIMEOUT_MS + 2000;
 export const INITIAL_RENDER_LIMIT = 200;
 export const RENDER_STEP = 100;
 export const SEARCH_DEBOUNCE_MS = 300;

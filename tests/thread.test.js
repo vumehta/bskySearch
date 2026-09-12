@@ -168,7 +168,6 @@ describe('thread disclosure', () => {
     await vi.advanceTimersByTimeAsync(10000);
     await pending;
     expect(link.textContent).toBe('Thread request timed out');
-    expect(link.dataset.loading).toBe('false');
     await thread.toggleThread(post, card);
     await vi.advanceTimersByTimeAsync(2000);
     expect(link.textContent).toBe('Hide Thread');

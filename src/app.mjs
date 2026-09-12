@@ -13,6 +13,7 @@ import {
   timeFilterSelect,
 } from './dom.mjs';
 import {
+  applyMinLikesFilter,
   applySearchSortChange,
   cancelDebouncedSearch,
   debouncedSearch,
@@ -118,18 +119,22 @@ sortSelect.addEventListener('change', () => {
 
 quoteTabs.addEventListener('click', handleQuoteTabClick);
 
-for (const input of [termsInput, minLikesInput]) {
-  input.addEventListener('keypress', (event) => {
-    if (event.key === 'Enter') performSearch();
-  });
-}
+termsInput.addEventListener('keypress', (event) => {
+  if (event.key === 'Enter') performSearch();
+});
+
+minLikesInput.addEventListener('keypress', (event) => {
+  if (event.key !== 'Enter') return;
+  if (state.searchDebounceTimer !== null || !state.searchTerms.length) performSearch();
+  else applyMinLikesFilter();
+});
 
 termsInput.addEventListener('input', () => {
   updateExpansionSummary();
   debouncedSearch();
 });
 
-minLikesInput.addEventListener('input', debouncedSearch);
+minLikesInput.addEventListener('input', applyMinLikesFilter);
 
 expandTermsToggle.addEventListener('change', () => {
   updateSearchURL();

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createTestDocument } from './helpers/dom.mjs';
+import { createTestDocument, deferred } from './helpers/dom.mjs';
 
 const postUrl = 'https://bsky.app/profile/did:plc:test/post/original';
 let elements;
@@ -130,6 +130,71 @@ describe('app search controls', () => {
     await vi.advanceTimersByTimeAsync(300);
     expect(searchRequests()).toHaveLength(count);
     expect(elements.results.querySelector('.post')).toBe(card);
+  });
+
+  it('filters every loaded page locally and preserves pagination after the cache expires', async () => {
+    fetch.mockImplementation(async (url) => {
+      const cursor = new URL(url, window.location).searchParams.get('cursor');
+      const page = cursor ? Number(cursor) + 1 : 1;
+      return Response.json({ posts: [makePost(page)], cursor: String(page) });
+    });
+    await bootApp('?terms=apple');
+    await search.loadMore();
+    const loadedUris = state.allPosts.map((post) => post.uri);
+    expect(loadedUris).toHaveLength(3);
+    await vi.advanceTimersByTimeAsync(31000);
+
+    for (const [threshold, count] of [['1', 3], ['60', 0], ['0', 3]]) {
+      elements.minLikes.value = threshold;
+      dispatch('minLikes', 'input');
+      expect(elements.results.querySelectorAll('.post')).toHaveLength(count);
+      expect(state.currentCursors.apple).toBe('3');
+      expect(window.location.searchParams.get('minLikes')).toBe(threshold);
+      await vi.advanceTimersByTimeAsync(300);
+      await dispatch('minLikes', 'keypress', { key: 'Enter' });
+      expect(fetch).toHaveBeenCalledTimes(3);
+    }
+    expect(state.allPosts.map((post) => post.uri)).toEqual(loadedUris);
+    await search.loadMore();
+    expect(searchRequests().at(-1).get('cursor')).toBe('3');
+    expect(state.allPosts).toHaveLength(4);
+  });
+
+  it('applies minimum likes to an in-flight page without cancelling it', async () => {
+    fetch.mockImplementation(async (url) => Response.json({
+      posts: [makePost()],
+      cursor: new URL(url, window.location).searchParams.has('cursor') ? 'c2' : 'c1',
+    }));
+    await bootApp('?terms=apple');
+    const pending = deferred();
+    fetch.mockReturnValueOnce(pending.promise);
+    const loading = search.loadMore();
+    const signal = fetch.mock.calls.at(-1)[1].signal;
+    elements.minLikes.value = '60';
+    dispatch('minLikes', 'input');
+    expect(signal.aborted).toBe(false);
+    expect(state.isLoading).toBe(true);
+    expect(elements.results.querySelectorAll('.post')).toHaveLength(0);
+
+    pending.resolve(Response.json({ posts: [{ ...makePost('new'), likeCount: 100 }] }));
+    await loading;
+    expect(state.allPosts.map((post) => post.uri)).toEqual([makePost('new').uri]);
+    expect(state.isLoading).toBe(false);
+    expect(state.currentCursors.apple).toBeNull();
+  });
+
+  it('keeps a pending term search scheduled when minimum likes changes', async () => {
+    await bootApp();
+    elements.terms.value = 'apple';
+    dispatch('terms', 'input');
+    await vi.advanceTimersByTimeAsync(200);
+    elements.minLikes.value = '60';
+    dispatch('minLikes', 'input');
+    await vi.advanceTimersByTimeAsync(100);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(state.minLikes).toBe(60);
+    expect(state.allPosts).toEqual([]);
+    expect(state.searchDebounceTimer).toBeNull();
   });
 
   it('starts a fresh cursor stream when sort changes and restores the top results when changed back', async () => {

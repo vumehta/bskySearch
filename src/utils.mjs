@@ -150,5 +150,5 @@ export function parseBlueskyPostUrl(urlString) {
     : rawHandle.includes('.')
       ? rawHandle
       : `${rawHandle}.bsky.social`;
-  return { actor, postId, rawHandle };
+  return { actor, postId };
 }

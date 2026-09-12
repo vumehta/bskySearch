@@ -388,7 +388,7 @@ describe('authentication lifecycle', () => {
     expect(handlers.search).toHaveBeenCalledTimes(operation === 'refresh' ? 1 : 0);
   });
 
-  it('stops reusing a rejected access token during refresh backoff while serving cached results', async () => {
+  it.each([400, 401])('stops reusing a token rejected with %i during refresh backoff while serving cached results', async (status) => {
     vi.useFakeTimers();
     vi.setSystemTime(limitedAt);
     const handlers = upstream({
@@ -398,7 +398,7 @@ describe('authentication lifecycle', () => {
       }),
       search: (url, options) =>
         url.searchParams.get('q') !== 'warm' && options.headers.Authorization === 'Bearer access-a'
-          ? Response.json({ error: 'ExpiredToken' }, { status: 401 })
+          ? Response.json({ error: 'ExpiredToken' }, { status })
           : Response.json(posts),
     });
     expect((await GET(request('warm'), context)).status).toBe(200);
@@ -429,13 +429,13 @@ describe('authentication lifecycle', () => {
     expect(handlers.search.mock.calls.at(-1)[1].headers.Authorization).toBe('Bearer access-b');
   });
 
-  it('shares an in-progress refresh among distinct searches', async () => {
+  it.each([400, 401])('shares an in-progress refresh after %i among distinct searches', async (status) => {
     const refresh = deferred();
     const handlers = upstream({
       refresh: () => refresh.promise,
       search: (url, options) =>
         url.searchParams.get('q') !== 'warm' && options.headers.Authorization === 'Bearer access-a'
-          ? Response.json({ error: 'ExpiredToken' }, { status: 401 })
+          ? Response.json({ error: 'ExpiredToken' }, { status })
           : Response.json(posts),
     });
     await GET(request('warm'), context);
@@ -447,7 +447,7 @@ describe('authentication lifecycle', () => {
     expect(handlers.refresh).toHaveBeenCalledTimes(1);
   });
 
-  it('reuses the new session for a delayed 401 from an older token', async () => {
+  it.each([400, 401])('reuses the new session for a delayed %i from an older token', async (status) => {
     const late = deferred();
     const handlers = upstream({
       search: (url, options) => {
@@ -456,25 +456,34 @@ describe('authentication lifecycle', () => {
           return Response.json(posts);
         }
         if (term === 'late') return late.promise;
-        return Response.json({ error: 'ExpiredToken' }, { status: 401 });
+        return Response.json({ error: 'ExpiredToken' }, { status });
       },
     });
     await GET(request('warm'), context);
     const early = GET(request('early'), context);
     const later = GET(request('late'), context);
     expect((await early).status).toBe(200);
-    late.resolve(Response.json({ error: 'ExpiredToken' }, { status: 401 }));
+    late.resolve(Response.json({ error: 'ExpiredToken' }, { status }));
     expect((await later).status).toBe(200);
     expect(handlers.refresh).toHaveBeenCalledTimes(1);
     expect(handlers.create).toHaveBeenCalledTimes(1);
   });
 
-  it('retries an unauthorized search only once', async () => {
-    const handlers = upstream({ search: () => Response.json({ error: 'Unauthorized' }, { status: 401 }) });
-    expect((await GET(request(), context)).status).toBe(401);
+  it.each([[400, 'ExpiredToken'], [401, 'Unauthorized']])('retries a search rejected with %i %s only once', async (status, error) => {
+    const handlers = upstream({ search: () => Response.json({ error }, { status }) });
+    expect((await GET(request(), context)).status).toBe(status);
     expect(handlers.search).toHaveBeenCalledTimes(2);
     expect(handlers.refresh).toHaveBeenCalledTimes(1);
     expect(handlers.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not refresh a session for an ordinary bad search request', async () => {
+    const handlers = upstream({ search: () => Response.json({ error: 'InvalidRequest', message: 'Invalid cursor' }, { status: 400 }) });
+    const response = await GET(request(), context);
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: 'Invalid cursor' });
+    expect(handlers.refresh).not.toHaveBeenCalled();
+    expect(handlers.search).toHaveBeenCalledTimes(1);
   });
 });
 
