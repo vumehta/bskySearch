@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Save Bluesky searches and catch up on new matches in your personal inbox.">
+  <title>Search Inbox · Bluesky Term Search</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.min.css">
+</head>
+<body class="monitor-page">
+  <header class="page-header">
+    <div class="title-block"><p class="eyebrow">BLUESKY TERM SEARCH</p><h1>Search inbox</h1><p class="subtitle">Your searches keep going. Catch up here.</p></div>
+    <div class="monitor-header-actions">
+      <div class="theme-control"><label for="themeSelect">Theme</label><select id="themeSelect"><option value="light">Light</option><option value="dark">Dark</option><option value="system" selected>System</option></select></div>
+      <button type="button" id="signOut" class="button-quiet" hidden>Sign out</button>
+    </div>
+  </header>
+  <nav class="app-nav" aria-label="Main navigation"><a href="/">Search</a><a href="/monitor.html" aria-current="page">Inbox <span id="navUnread" class="count-badge" hidden></span></a></nav>
+  <div id="monitorStatus" role="status" aria-live="polite" class="monitor-message" hidden></div>
+  <section id="loginPanel" class="monitor-login" hidden>
+    <p class="eyebrow">YOUR PERSONAL INBOX</p><h2>Welcome back</h2><p class="subtitle">Sign in to manage your searches and read new matches.</p>
+    <form id="loginForm"><label for="monitorPassword">Dashboard password</label><input id="monitorPassword" type="password" autocomplete="current-password" required><button type="submit">Open inbox</button></form>
+    <p class="fine-print">Use your monitoring dashboard password, separate from your Bluesky password.</p>
+  </section>
+  <div id="monitorLoading" class="monitor-empty">Connecting to your inbox…</div>
+  <main id="monitorDashboard" hidden>
+    <div class="monitor-summary">
+      <div><span class="eyebrow">NEW MATCHES</span><div id="unreadTotal" class="monitor-total">0</div><p id="inboxSummary" class="subtitle">Ready when you are.</p></div>
+      <div class="collector-controls"><span id="collectorStatus" class="collector-status">Checks every 10 minutes</span><button type="button" id="checkNow">Check now</button></div>
+    </div>
+    <div class="monitor-layout">
+      <aside class="monitor-sidebar" aria-label="Saved searches">
+        <div class="section-heading"><h2>Saved searches</h2><span id="searchCount" class="fine-print">0 / 10</span></div>
+        <div id="savedSearches"></div>
+        <form id="saveSearchForm" class="save-search-form">
+          <h3>Add a search</h3>
+          <label for="monitorQuery">Search query</label><input id="monitorQuery" type="text" maxlength="500" placeholder='e.g. "local AI"' required autocomplete="off">
+          <label for="monitorName">Name <span class="fine-print">(optional)</span></label><input id="monitorName" type="text" maxlength="80" placeholder="e.g. Local AI news" autocomplete="off">
+          <button type="submit">Save search</button>
+          <p class="fine-print">Starts with the past hour, then collects new English-language matches. Use one Bluesky query per search.</p>
+        </form>
+        <p class="fine-print retention-note">Matches stay for 30 days. Searches continue when your browser is closed.</p>
+      </aside>
+      <section class="monitor-inbox" aria-labelledby="inboxHeading">
+        <div class="section-heading"><h2 id="inboxHeading">Your inbox</h2><button type="button" id="refreshInbox" class="button-quiet">Refresh inbox</button></div>
+        <div class="inbox-toolbar">
+          <div><label class="sr-only" for="inboxSearch">Filter by saved search</label><select id="inboxSearch"><option value="">All searches</option></select>
+          <label class="sr-only" for="inboxView">Read status</label><select id="inboxView"><option value="unread">Unread</option><option value="all">All matches</option></select></div>
+          <button type="button" id="markAllRead" class="button-quiet" disabled>Mark all as read</button>
+        </div>
+        <div id="inboxPosts" aria-live="polite"></div>
+        <button type="button" id="inboxMore" class="button-quiet inbox-more" hidden>Load more</button>
+      </section>
+    </div>
+  </main>
+  <script src="/monitor.min.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+# Copy to .dev.vars for local development. Never commit real credentials.
+MONITOR_PASSWORD="replace-with-a-long-private-password"
+BSKY_HANDLE="your-handle.bsky.social"
+BSKY_APP_PASSWORD="your-bluesky-app-password"
+# Only needed when keeping the frontend on Vercel:
+# APP_ORIGIN="https://your-existing-app.vercel.app"

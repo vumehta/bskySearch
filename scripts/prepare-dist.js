@@ -6,6 +6,9 @@ const files = [
   'bluesky-term-search.html',
   'app.min.js',
   'styles.min.css',
+  'monitor.html',
+  'monitor.min.js',
+  'favicon.svg',
 ];
 
 fs.mkdirSync(distDir, { recursive: true });
