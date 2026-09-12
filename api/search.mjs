@@ -138,6 +138,12 @@ let cachedSession = null;
 let sessionCreatedAt = null;
 let sessionOperation = null;
 
+// A rate-limited login or refresh blocks new session work until Bluesky's reset
+// time, so later searches fail fast instead of prolonging the account lockout.
+const AUTH_RETRY_DEFAULT_MS = 60 * 1000;
+const AUTH_RETRY_MAX_MS = 24 * 60 * 60 * 1000;
+let authBlockedUntil = 0;
+
 // Search results cache with 30s TTL and size cap
 const SEARCH_CACHE_TTL_MS = 30000;
 const SEARCH_CACHE_CLEANUP_INTERVAL_MS = 5000;
@@ -212,13 +218,35 @@ function retryHeaders(response) {
   return retryAfter ? { 'Retry-After': retryAfter } : {};
 }
 
+// atproto reports RateLimit-Reset as an epoch timestamp; the IETF draft uses
+// delta seconds. Without a usable reset time, wait a conservative default.
+function getRetryDelayMs(response) {
+  const retryAfter = response.headers?.get('Retry-After')?.trim();
+  const reset = response.headers?.get('RateLimit-Reset')?.trim();
+  let delay = NaN;
+  if (retryAfter) {
+    delay = /^\d+$/.test(retryAfter) ? Number(retryAfter) * 1000 : Date.parse(retryAfter) - Date.now();
+  } else if (reset && /^\d+$/.test(reset)) {
+    delay = Number(reset) > 1e9 ? Number(reset) * 1000 - Date.now() : Number(reset) * 1000;
+  }
+  if (!Number.isFinite(delay) || delay <= 0) delay = AUTH_RETRY_DEFAULT_MS;
+  return Math.min(delay, AUTH_RETRY_MAX_MS);
+}
+
+function authRateLimitError(delayMs) {
+  return proxyError('Bluesky login is rate limited. Please try again later.', 429, {
+    'Retry-After': String(Math.ceil(delayMs / 1000)),
+  });
+}
+
 function validateSession({ response, payload }) {
+  if (response.status === 429) {
+    const delay = getRetryDelayMs(response);
+    authBlockedUntil = Date.now() + delay;
+    throw authRateLimitError(delay);
+  }
   if (!response.ok) {
-    const error = proxyError(
-      'Bluesky authentication failed.',
-      response.status === 429 ? 429 : 502,
-      retryHeaders(response),
-    );
+    const error = proxyError('Bluesky authentication failed.', 502, retryHeaders(response));
     error.upstreamStatus = response.status;
     throw error;
   }
@@ -279,6 +307,8 @@ async function ensureSession(handle, appPassword, signal, rejectedAccessJwt = nu
     // already refreshed, without rotating the current token again.
     return cachedSession;
   }
+  const blockedMs = authBlockedUntil - Date.now();
+  if (blockedMs > 0) throw authRateLimitError(blockedMs);
 
   const previous = cachedSession;
   sessionOperation = createSharedOperation(
@@ -349,6 +379,7 @@ function resetModuleStateForTests() {
   cachedSession = null;
   sessionCreatedAt = null;
   sessionOperation = null;
+  authBlockedUntil = 0;
   searchResultsCache.clear();
   pendingSearches.clear();
   lastSearchCacheCleanupAt = 0;
@@ -554,6 +585,8 @@ export const testUtils =
         UPSTREAM_TIMEOUT_MS,
         UPSTREAM_TIMEOUT_ERROR_CODE,
         SESSION_TTL_MS,
+        AUTH_RETRY_DEFAULT_MS,
+        AUTH_RETRY_MAX_MS,
         pendingSearches,
         fetchWithTimeout,
         isUpstreamTimeoutError,

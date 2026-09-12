@@ -2,9 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GET, SEARCH_ADMISSION_LIMITS, testUtils } from '../api/search.mjs';
 
 const context = { env: { BSKY_HANDLE: 'test-handle', BSKY_APP_PASSWORD: 'test-password' } };
-const { resetModuleStateForTests, UPSTREAM_TIMEOUT_MS, SESSION_TTL_MS, searchResultsCache } =
-  testUtils;
+const {
+  resetModuleStateForTests,
+  UPSTREAM_TIMEOUT_MS,
+  SESSION_TTL_MS,
+  AUTH_RETRY_DEFAULT_MS,
+  AUTH_RETRY_MAX_MS,
+  searchResultsCache,
+} = testUtils;
 const originalFetch = globalThis.fetch;
+const limitedAt = Date.UTC(2026, 0, 1);
 const session = (suffix = 'a') => ({ accessJwt: `access-${suffix}`, refreshJwt: `refresh-${suffix}` });
 const post = {
   uri: 'at://did:plc:test/app.bsky.feed.post/one',
@@ -241,6 +248,59 @@ describe('authentication lifecycle', () => {
     expect(response.headers.get('Retry-After')).toBe('20');
     expect(handlers.create).toHaveBeenCalledTimes(1);
     expect(handlers.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['Retry-After seconds', { 'Retry-After': '30' }, 30],
+    ['a Retry-After date', { 'Retry-After': new Date(limitedAt + 45_000).toUTCString() }, 45],
+    ['a RateLimit-Reset timestamp', { 'RateLimit-Reset': String(limitedAt / 1000 + 90) }, 90],
+    ['RateLimit-Reset seconds', { 'RateLimit-Reset': '15' }, 15],
+    ['no reset header', {}, AUTH_RETRY_DEFAULT_MS / 1000],
+    ['an oversized reset', { 'Retry-After': '999999' }, AUTH_RETRY_MAX_MS / 1000],
+  ])('blocks new logins for %s after a rate-limited login', async (_label, headers, seconds) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(limitedAt);
+    const handlers = upstream({
+      create: () => Response.json({ error: 'RateLimitExceeded' }, { status: 429, headers }),
+    });
+    const first = await GET(request('one'), context);
+    expect(first.status).toBe(429);
+    expect(first.headers.get('Retry-After')).toBe(String(seconds));
+    vi.setSystemTime(limitedAt + seconds * 1000 - 1);
+    const blocked = await GET(request('two'), context);
+    expect(blocked.status).toBe(429);
+    await expect(blocked.json()).resolves.toEqual({
+      error: 'Bluesky login is rate limited. Please try again later.',
+    });
+    expect(handlers.create).toHaveBeenCalledTimes(1);
+    expect(handlers.search).not.toHaveBeenCalled();
+    handlers.create.mockImplementation(() => Response.json(session()));
+    vi.setSystemTime(limitedAt + seconds * 1000);
+    expect((await GET(request('three'), context)).status).toBe(200);
+    expect(handlers.create).toHaveBeenCalledTimes(2);
+  });
+
+  it('fails fast after a rate-limited refresh and reports the remaining wait', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(limitedAt);
+    const handlers = upstream({
+      refresh: () =>
+        Response.json({ error: 'RateLimitExceeded' }, { status: 429, headers: { 'Retry-After': '20' } }),
+    });
+    await GET(request('warm'), context);
+    const expiredAt = limitedAt + SESSION_TTL_MS + 1;
+    vi.setSystemTime(expiredAt);
+    expect((await GET(request('first'), context)).status).toBe(429);
+    vi.setSystemTime(expiredAt + 5000);
+    const blocked = await GET(request('second'), context);
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get('Retry-After')).toBe('15');
+    expect(handlers.refresh).toHaveBeenCalledTimes(1);
+    handlers.refresh.mockImplementation(() => Response.json(session('b')));
+    vi.setSystemTime(expiredAt + 20_000);
+    expect((await GET(request('third'), context)).status).toBe(200);
+    expect(handlers.refresh).toHaveBeenCalledTimes(2);
+    expect(handlers.create).toHaveBeenCalledTimes(1);
   });
 
   it('shares an in-progress refresh among distinct searches', async () => {
