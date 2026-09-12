@@ -218,18 +218,19 @@ function retryHeaders(response) {
   return retryAfter ? { 'Retry-After': retryAfter } : {};
 }
 
-// atproto reports RateLimit-Reset as an epoch timestamp; the IETF draft uses
-// delta seconds. Without a usable reset time, wait a conservative default.
+// Use the first usable of Retry-After and RateLimit-Reset. atproto reports
+// RateLimit-Reset as an epoch timestamp; the IETF draft uses delta seconds.
+// Without a usable reset time, wait a conservative default.
 function getRetryDelayMs(response) {
-  const retryAfter = response.headers?.get('Retry-After')?.trim();
-  const reset = response.headers?.get('RateLimit-Reset')?.trim();
-  let delay = NaN;
-  if (retryAfter) {
-    delay = /^\d+$/.test(retryAfter) ? Number(retryAfter) * 1000 : Date.parse(retryAfter) - Date.now();
-  } else if (reset && /^\d+$/.test(reset)) {
-    delay = Number(reset) > 1e9 ? Number(reset) * 1000 - Date.now() : Number(reset) * 1000;
-  }
-  if (!Number.isFinite(delay) || delay <= 0) delay = AUTH_RETRY_DEFAULT_MS;
+  const now = Date.now();
+  const retryAfter = response.headers?.get('Retry-After')?.trim() || '';
+  const reset = response.headers?.get('RateLimit-Reset')?.trim() || '';
+  const resetSeconds = /^\d+$/.test(reset) ? Number(reset) : NaN;
+  const delays = [
+    /^\d+$/.test(retryAfter) ? Number(retryAfter) * 1000 : Date.parse(retryAfter) - now,
+    resetSeconds > 1e9 ? resetSeconds * 1000 - now : resetSeconds * 1000,
+  ];
+  const delay = delays.find((ms) => Number.isFinite(ms) && ms > 0) ?? AUTH_RETRY_DEFAULT_MS;
   return Math.min(delay, AUTH_RETRY_MAX_MS);
 }
 

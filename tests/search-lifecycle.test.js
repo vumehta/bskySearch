@@ -255,6 +255,12 @@ describe('authentication lifecycle', () => {
     ['a Retry-After date', { 'Retry-After': new Date(limitedAt + 45_000).toUTCString() }, 45],
     ['a RateLimit-Reset timestamp', { 'RateLimit-Reset': String(limitedAt / 1000 + 90) }, 90],
     ['RateLimit-Reset seconds', { 'RateLimit-Reset': '15' }, 15],
+    [
+      'RateLimit-Reset behind a malformed Retry-After',
+      { 'Retry-After': 'soon', 'RateLimit-Reset': String(limitedAt / 1000 + 7200) },
+      7200,
+    ],
+    ['RateLimit-Reset behind a zero Retry-After', { 'Retry-After': '0', 'RateLimit-Reset': '120' }, 120],
     ['no reset header', {}, AUTH_RETRY_DEFAULT_MS / 1000],
     ['an oversized reset', { 'Retry-After': '999999' }, AUTH_RETRY_MAX_MS / 1000],
   ])('blocks new logins for %s after a rate-limited login', async (_label, headers, seconds) => {
