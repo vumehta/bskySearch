@@ -309,6 +309,126 @@ describe('authentication lifecycle', () => {
     expect(handlers.create).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    ['create', 'stalls'],
+    ['create', 'rejects'],
+    ['refresh', 'stalls'],
+    ['refresh', 'rejects'],
+  ])('handles a %s 429 without consuming its body when cancellation %s', async (operation, cancellation) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(limitedAt);
+    const cancel = vi.fn(() => cancellation === 'stalls'
+      ? new Promise(() => {})
+      : Promise.reject(new Error('Body cancellation failed')));
+    const limited = new Response(new ReadableStream({ cancel }), {
+      status: 429,
+      headers: { 'Retry-After': '20' },
+    });
+    const json = vi.spyOn(limited, 'json');
+    const handlers = upstream({ [operation]: () => limited });
+    if (operation === 'refresh') {
+      await GET(request('warm'), context);
+      vi.setSystemTime(limitedAt + SESSION_TTL_MS + 1);
+    }
+    const blockedAt = Date.now();
+    let response;
+    const pending = GET(request('limited'), context).then((result) => { response = result; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(response?.status).toBe(429);
+    await pending;
+    expect(response.headers.get('Retry-After')).toBe('20');
+    expect(json).not.toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+
+    vi.setSystemTime(blockedAt + 5000);
+    const blocked = await GET(request('blocked'), context);
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get('Retry-After')).toBe('15');
+    expect(handlers[operation]).toHaveBeenCalledTimes(1);
+    expect(handlers.search).toHaveBeenCalledTimes(operation === 'refresh' ? 1 : 0);
+
+    handlers[operation].mockImplementation(() => Response.json(session('b')));
+    vi.setSystemTime(blockedAt + 20_000);
+    expect((await GET(request('recovered'), context)).status).toBe(200);
+    expect(handlers[operation]).toHaveBeenCalledTimes(2);
+    expect(handlers.create).toHaveBeenCalledTimes(operation === 'refresh' ? 1 : 2);
+    expect(handlers.search.mock.calls.at(-1)[1].headers.Authorization).toBe('Bearer access-b');
+  });
+
+  it.each(['create', 'refresh'])('retains %s backoff when its caller cancels after 429 headers arrive', async (operation) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(limitedAt);
+    const controller = new AbortController();
+    const cancel = vi.fn(() => {
+      controller.abort();
+      return Promise.reject(new Error('Body cancellation failed'));
+    });
+    const limited = new Response(new ReadableStream({ cancel }), {
+      status: 429,
+      headers: { 'Retry-After': '20' },
+    });
+    const handlers = upstream({ [operation]: () => limited });
+    if (operation === 'refresh') {
+      await GET(request('warm'), context);
+      vi.setSystemTime(limitedAt + SESSION_TTL_MS + 1);
+    }
+    let response;
+    const pending = GET(request('limited', { signal: controller.signal }), context)
+      .then((result) => { response = result; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(response?.status).toBe(499);
+    await pending;
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+    const blocked = await GET(request('blocked'), context);
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get('Retry-After')).toBe('20');
+    expect(handlers[operation]).toHaveBeenCalledTimes(1);
+    expect(handlers.search).toHaveBeenCalledTimes(operation === 'refresh' ? 1 : 0);
+  });
+
+  it('stops reusing a rejected access token during refresh backoff while serving cached results', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(limitedAt);
+    const handlers = upstream({
+      refresh: () => Response.json({ error: 'RateLimitExceeded' }, {
+        status: 429,
+        headers: { 'Retry-After': '20' },
+      }),
+      search: (url, options) =>
+        url.searchParams.get('q') !== 'warm' && options.headers.Authorization === 'Bearer access-a'
+          ? Response.json({ error: 'ExpiredToken' }, { status: 401 })
+          : Response.json(posts),
+    });
+    expect((await GET(request('warm'), context)).status).toBe(200);
+    expect((await GET(request('rejected'), context)).status).toBe(429);
+    expect(handlers.search).toHaveBeenCalledTimes(2);
+
+    vi.setSystemTime(limitedAt + 5000);
+    const [cached, ...blocked] = await Promise.all([
+      GET(request('warm'), context),
+      GET(request('blocked-one'), context),
+      GET(request('blocked-two'), context),
+    ]);
+    expect(cached.status).toBe(200);
+    await expect(cached.json()).resolves.toEqual(posts);
+    expect(blocked.map((response) => response.status)).toEqual([429, 429]);
+    expect(blocked.map((response) => response.headers.get('Retry-After'))).toEqual(['15', '15']);
+    expect(handlers.search).toHaveBeenCalledTimes(2);
+    expect(handlers.refresh).toHaveBeenCalledTimes(1);
+    expect(handlers.create).toHaveBeenCalledTimes(1);
+
+    handlers.refresh.mockImplementation(() => Response.json(session('b')));
+    vi.setSystemTime(limitedAt + 20_000);
+    expect((await GET(request('recovered'), context)).status).toBe(200);
+    expect(handlers.search).toHaveBeenCalledTimes(3);
+    expect(handlers.refresh).toHaveBeenCalledTimes(2);
+    expect(handlers.create).toHaveBeenCalledTimes(1);
+    expect(handlers.refresh.mock.calls.at(-1)[0].headers.Authorization).toBe('Bearer refresh-a');
+    expect(handlers.search.mock.calls.at(-1)[1].headers.Authorization).toBe('Bearer access-b');
+  });
+
   it('shares an in-progress refresh among distinct searches', async () => {
     const refresh = deferred();
     const handlers = upstream({

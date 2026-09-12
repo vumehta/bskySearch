@@ -41,7 +41,7 @@ function isUpstreamTimeoutError(error) {
   return Boolean(error && error.code === UPSTREAM_TIMEOUT_ERROR_CODE);
 }
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = UPSTREAM_TIMEOUT_MS) {
+async function fetchWithTimeout(url, { onResponse, ...options } = {}, timeoutMs = UPSTREAM_TIMEOUT_MS) {
   throwIfAborted(options.signal);
   const controller = new AbortController();
   let timedOut = false;
@@ -61,6 +61,14 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = UPSTREAM_TIMEOUT_
     return await Promise.race([
       (async () => {
         const response = await fetch(url, { ...options, signal: controller.signal });
+        try {
+          onResponse?.(response);
+        } catch (error) {
+          // Header-only failures must not wait for a stalled error body. Release
+          // it without allowing cancellation failure to hide the HTTP error.
+          void response.body?.cancel().catch(() => {});
+          throw error;
+        }
         let payload;
         try {
           payload = await response.json();
@@ -240,12 +248,15 @@ function authRateLimitError(delayMs) {
   });
 }
 
-function validateSession({ response, payload }) {
+function checkAuthRateLimit(response) {
   if (response.status === 429) {
     const delay = getRetryDelayMs(response);
     authBlockedUntil = Date.now() + delay;
     throw authRateLimitError(delay);
   }
+}
+
+function validateSession({ response, payload }) {
   if (!response.ok) {
     const error = proxyError('Bluesky authentication failed.', 502, retryHeaders(response));
     error.upstreamStatus = response.status;
@@ -274,6 +285,7 @@ async function createSession(handle, appPassword, signal) {
       password: appPassword,
     }),
     signal,
+    onResponse: checkAuthRateLimit,
   });
   return validateSession(result);
 }
@@ -285,6 +297,7 @@ async function refreshSession(refreshJwt, signal) {
       Authorization: `Bearer ${refreshJwt}`,
     },
     signal,
+    onResponse: checkAuthRateLimit,
   });
   return validateSession(result);
 }
@@ -296,6 +309,11 @@ function isSessionExpired() {
 
 async function ensureSession(handle, appPassword, signal, rejectedAccessJwt = null) {
   throwIfAborted(signal);
+  if (rejectedAccessJwt && cachedSession?.accessJwt === rejectedAccessJwt) {
+    // Keep refresh credentials, but never reuse an access token Bluesky rejected
+    // while a failed refresh is waiting for its cooldown to expire.
+    sessionCreatedAt = null;
+  }
   if (sessionOperation && !sessionOperation.controller.signal.aborted) {
     return subscribe(sessionOperation, signal);
   }
