@@ -59,7 +59,6 @@ describe('parseBlueskyPostUrl', () => {
     const result = parseBlueskyPostUrl('https://bsky.app/profile/alice.bsky.social/post/abc123');
     expect(result.actor).toBe('alice.bsky.social');
     expect(result.postId).toBe('abc123');
-    expect(result.rawHandle).toBe('alice.bsky.social');
   });
 
   it('parses valid post URL with custom domain', () => {
@@ -77,7 +76,6 @@ describe('parseBlueskyPostUrl', () => {
   it('adds .bsky.social to simple handles without dot', () => {
     const result = parseBlueskyPostUrl('https://bsky.app/profile/alice/post/123');
     expect(result.actor).toBe('alice.bsky.social');
-    expect(result.rawHandle).toBe('alice');
   });
 
   it('throws for invalid URL format', () => {

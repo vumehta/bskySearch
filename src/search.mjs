@@ -5,6 +5,7 @@ import {
   SEARCH_API,
   SEARCH_DEBOUNCE_MS,
   SEARCH_CONCURRENCY,
+  SEARCH_REQUEST_TIMEOUT_MS,
 } from './constants.mjs';
 import { isCurrentSearchGeneration, searchCache, state } from './state.mjs';
 import {
@@ -118,7 +119,7 @@ async function searchTerm(term, cursor, { sort, since, signal }) {
   if (since) params.set('since', since);
   let data;
   try {
-    data = validateSearchPage(await fetchJson(`${SEARCH_API}?${params}`, { signal }));
+    data = validateSearchPage(await fetchJson(`${SEARCH_API}?${params}`, { signal, timeoutMs: SEARCH_REQUEST_TIMEOUT_MS }));
   } catch (error) {
     if (error.name === 'AbortError') throw error;
     throw new Error(`Search failed for "${term}": ${error.message}`, { cause: error });
@@ -649,6 +650,14 @@ export async function loadMore() {
   if (!terms.length) return;
   showStatus('Loading more results…', 'loading');
   await runSearchPages(terms, 1, createSearchContext(), { loadingMore: true });
+}
+
+export function applyMinLikesFilter() {
+  state.minLikes = Math.max(0, parseInt(minLikesInput.value, 10) || 0);
+  updateSearchURL();
+  if (!state.searchTerms.length) return;
+  flushDerivedPostsRebuild();
+  renderResults();
 }
 
 export function debouncedSearch() {

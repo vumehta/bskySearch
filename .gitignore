@@ -8,4 +8,6 @@ node_modules/
 app.min.js
 styles.min.css
 dist/
+playwright-report/
+test-results/
 tasks/lessons.md

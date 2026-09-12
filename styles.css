@@ -791,12 +791,6 @@ button:disabled {
     outline-offset: 2px;
 }
 
-.thread-link:disabled {
-    color: var(--muted);
-    cursor: not-allowed;
-    text-decoration: none;
-}
-
 .link-actions {
     display: flex;
     gap: 16px;

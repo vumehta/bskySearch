@@ -1,5 +1,6 @@
 import { isDatetimeString } from '@atproto/syntax';
 import { isRenderablePost } from '../src/post-data.mjs';
+import { SEARCH_JOB_TIMEOUT_MS } from '../src/constants.mjs';
 
 const BSKY_SERVICE = 'https://bsky.social/xrpc';
 
@@ -41,7 +42,7 @@ function isUpstreamTimeoutError(error) {
   return Boolean(error && error.code === UPSTREAM_TIMEOUT_ERROR_CODE);
 }
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = UPSTREAM_TIMEOUT_MS) {
+async function fetchWithTimeout(url, { onResponse, ...options } = {}, timeoutMs = UPSTREAM_TIMEOUT_MS) {
   throwIfAborted(options.signal);
   const controller = new AbortController();
   let timedOut = false;
@@ -61,6 +62,14 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = UPSTREAM_TIMEOUT_
     return await Promise.race([
       (async () => {
         const response = await fetch(url, { ...options, signal: controller.signal });
+        try {
+          onResponse?.(response);
+        } catch (error) {
+          // Header-only failures must not wait for a stalled error body. Release
+          // it without allowing cancellation failure to hide the HTTP error.
+          void response.body?.cancel().catch(() => {});
+          throw error;
+        }
         let payload;
         try {
           payload = await response.json();
@@ -89,19 +98,30 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = UPSTREAM_TIMEOUT_
 // Searches and authentication have independent subscribers. One cancelled
 // request only detaches itself; the upstream work is aborted when nobody needs
 // it. In particular, one search cannot cancel another search's shared login.
-function createSharedOperation(start, onSettled) {
+function createSharedOperation(start, onSettled, timeoutMs) {
   const operation = {
     controller: new AbortController(),
     subscribers: 0,
     settled: false,
     promise: null,
   };
-  operation.promise = Promise.resolve()
+  const work = Promise.resolve()
     .then(() => {
       throwIfAborted(operation.controller.signal);
       return start(operation.controller.signal);
-    })
+    });
+  let timer;
+  // Only search jobs have a complete-operation deadline. Shared authentication
+  // remains alive when a different search still subscribes to it.
+  const deadline = timeoutMs === undefined ? null : new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      reject(createUpstreamTimeoutError());
+      operation.controller.abort();
+    }, timeoutMs);
+  });
+  operation.promise = (deadline ? Promise.race([work, deadline]) : work)
     .finally(() => {
+      clearTimeout(timer);
       operation.settled = true;
       onSettled(operation);
     });
@@ -137,6 +157,12 @@ const SESSION_TTL_MS = 2 * 60 * 60 * 1000;
 let cachedSession = null;
 let sessionCreatedAt = null;
 let sessionOperation = null;
+
+// A rate-limited login or refresh blocks new session work until Bluesky's reset
+// time, so later searches fail fast instead of prolonging the account lockout.
+const AUTH_RETRY_DEFAULT_MS = 60 * 1000;
+const AUTH_RETRY_MAX_MS = 24 * 60 * 60 * 1000;
+let authBlockedUntil = 0;
 
 // Search results cache with 30s TTL and size cap
 const SEARCH_CACHE_TTL_MS = 30000;
@@ -212,13 +238,39 @@ function retryHeaders(response) {
   return retryAfter ? { 'Retry-After': retryAfter } : {};
 }
 
+// Use the first usable of Retry-After and RateLimit-Reset. atproto reports
+// RateLimit-Reset as an epoch timestamp; the IETF draft uses delta seconds.
+// Without a usable reset time, wait a conservative default.
+function getRetryDelayMs(response) {
+  const now = Date.now();
+  const retryAfter = response.headers?.get('Retry-After')?.trim() || '';
+  const reset = response.headers?.get('RateLimit-Reset')?.trim() || '';
+  const resetSeconds = /^\d+$/.test(reset) ? Number(reset) : NaN;
+  const delays = [
+    /^\d+$/.test(retryAfter) ? Number(retryAfter) * 1000 : Date.parse(retryAfter) - now,
+    resetSeconds > 1e9 ? resetSeconds * 1000 - now : resetSeconds * 1000,
+  ];
+  const delay = delays.find((ms) => Number.isFinite(ms) && ms > 0) ?? AUTH_RETRY_DEFAULT_MS;
+  return Math.min(delay, AUTH_RETRY_MAX_MS);
+}
+
+function authRateLimitError(delayMs) {
+  return proxyError('Bluesky login is rate limited. Please try again later.', 429, {
+    'Retry-After': String(Math.ceil(delayMs / 1000)),
+  });
+}
+
+function checkAuthRateLimit(response) {
+  if (response.status === 429) {
+    const delay = getRetryDelayMs(response);
+    authBlockedUntil = Date.now() + delay;
+    throw authRateLimitError(delay);
+  }
+}
+
 function validateSession({ response, payload }) {
   if (!response.ok) {
-    const error = proxyError(
-      'Bluesky authentication failed.',
-      response.status === 429 ? 429 : 502,
-      retryHeaders(response),
-    );
+    const error = proxyError('Bluesky authentication failed.', 502, retryHeaders(response));
     error.upstreamStatus = response.status;
     throw error;
   }
@@ -245,6 +297,7 @@ async function createSession(handle, appPassword, signal) {
       password: appPassword,
     }),
     signal,
+    onResponse: checkAuthRateLimit,
   });
   return validateSession(result);
 }
@@ -256,6 +309,7 @@ async function refreshSession(refreshJwt, signal) {
       Authorization: `Bearer ${refreshJwt}`,
     },
     signal,
+    onResponse: checkAuthRateLimit,
   });
   return validateSession(result);
 }
@@ -267,6 +321,11 @@ function isSessionExpired() {
 
 async function ensureSession(handle, appPassword, signal, rejectedAccessJwt = null) {
   throwIfAborted(signal);
+  if (rejectedAccessJwt && cachedSession?.accessJwt === rejectedAccessJwt) {
+    // Keep refresh credentials, but never reuse an access token Bluesky rejected
+    // while a failed refresh is waiting for its cooldown to expire.
+    sessionCreatedAt = null;
+  }
   if (sessionOperation && !sessionOperation.controller.signal.aborted) {
     return subscribe(sessionOperation, signal);
   }
@@ -279,6 +338,8 @@ async function ensureSession(handle, appPassword, signal, rejectedAccessJwt = nu
     // already refreshed, without rotating the current token again.
     return cachedSession;
   }
+  const blockedMs = authBlockedUntil - Date.now();
+  if (blockedMs > 0) throw authRateLimitError(blockedMs);
 
   const previous = cachedSession;
   sessionOperation = createSharedOperation(
@@ -349,6 +410,7 @@ function resetModuleStateForTests() {
   cachedSession = null;
   sessionCreatedAt = null;
   sessionOperation = null;
+  authBlockedUntil = 0;
   searchResultsCache.clear();
   pendingSearches.clear();
   lastSearchCacheCleanupAt = 0;
@@ -427,7 +489,10 @@ function admitSearch() {
 async function runSearch(input, handle, appPassword, signal) {
   let session = await ensureSession(handle, appPassword, signal);
   let result = await searchPosts(input, session.accessJwt, signal);
-  if (result.response.status === 401) {
+  if (
+    result.response.status === 401 ||
+    (result.response.status === 400 && result.payload?.error === 'ExpiredToken')
+  ) {
     session = await ensureSession(handle, appPassword, signal, session.accessJwt);
     result = await searchPosts(input, session.accessJwt, signal);
   }
@@ -514,6 +579,7 @@ export async function GET(request, context) {
         (completed) => {
           if (pendingSearches.get(cacheKey) === completed) pendingSearches.delete(cacheKey);
         },
+        SEARCH_JOB_TIMEOUT_MS,
       );
       pendingSearches.set(cacheKey, operation);
     }
@@ -541,10 +607,7 @@ export async function GET(request, context) {
 export const testUtils =
   process.env.NODE_ENV === 'test'
     ? {
-        stripControlChars,
-        getSearchCacheKey,
         isValidSince,
-        isSessionExpired,
         getCachedSearchResult,
         cleanupSearchCache,
         enforceSearchCacheLimit,
@@ -552,11 +615,9 @@ export const testUtils =
         SEARCH_CACHE_TTL_MS,
         MAX_SEARCH_CACHE_SIZE,
         UPSTREAM_TIMEOUT_MS,
-        UPSTREAM_TIMEOUT_ERROR_CODE,
         SESSION_TTL_MS,
-        pendingSearches,
-        fetchWithTimeout,
-        isUpstreamTimeoutError,
+        AUTH_RETRY_DEFAULT_MS,
+        AUTH_RETRY_MAX_MS,
         resetModuleStateForTests,
       }
     : undefined;

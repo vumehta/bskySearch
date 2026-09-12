@@ -129,7 +129,6 @@ function resetPendingToggle(toggleState) {
   clearStatusTimer(toggleState);
   toggleState.controller?.abort();
   toggleState.controller = null;
-  toggleState.link.dataset.loading = 'false';
   toggleState.link.removeAttribute('aria-busy');
   toggleState.link.textContent = 'View Thread';
   pendingToggles.delete(toggleState);
@@ -197,7 +196,6 @@ export async function toggleThread(post, postElement) {
   const controller = new AbortController();
   toggleState.controller = controller;
   pendingToggles.add(toggleState);
-  link.dataset.loading = 'true';
   link.setAttribute('aria-busy', 'true');
   link.textContent = 'Cancel loading';
 
@@ -226,7 +224,6 @@ export async function toggleThread(post, postElement) {
   } finally {
     if (toggleState.controller === controller) {
       toggleState.controller = null;
-      link.dataset.loading = 'false';
       link.removeAttribute('aria-busy');
       if (!toggleState.statusTimer) pendingToggles.delete(toggleState);
     }
