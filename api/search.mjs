@@ -3,6 +3,8 @@ import { isRenderablePost } from '../src/post-data.mjs';
 import { SEARCH_JOB_TIMEOUT_MS } from '../src/constants.mjs';
 
 const BSKY_SERVICE = 'https://bsky.social/xrpc';
+// The PDS forwards AppView methods to the service named here.
+const APPVIEW_PROXY = 'did:web:api.bsky.app#bsky_appview';
 
 // The deadline includes response headers and JSON body consumption.
 const UPSTREAM_TIMEOUT_MS = 8000;
@@ -152,8 +154,11 @@ function subscribe(operation, signal) {
   });
 }
 
-// Session cache with TTL (2 hours, refresh tokens last longer)
-const SESSION_TTL_MS = 2 * 60 * 60 * 1000;
+// Access tokens last 120 minutes. A search that crosses the boundary is retried
+// after ExpiredToken, so the cache is not expired early: with a shorter TTL a
+// transient refresh failure would discard a still-valid token. Refresh tokens
+// last longer.
+const SESSION_TTL_MS = 120 * 60 * 1000;
 let cachedSession = null;
 let sessionCreatedAt = null;
 let sessionOperation = null;
@@ -439,6 +444,7 @@ async function searchPosts({ term, cursor, sort, since }, accessJwt, signal) {
   return fetchWithTimeout(`${BSKY_SERVICE}/app.bsky.feed.searchPosts?${params}`, {
     headers: {
       Authorization: `Bearer ${accessJwt}`,
+      'atproto-proxy': APPVIEW_PROXY,
     },
     signal,
   });
@@ -456,7 +462,6 @@ function isValidSearchResult(payload) {
     payload.posts.every(
       (post) =>
         isRenderablePost(post) &&
-        typeof post.author.did === 'string' &&
         isObject(post.record) &&
         typeof post.record.text === 'string',
     ) &&

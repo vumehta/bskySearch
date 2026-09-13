@@ -102,14 +102,18 @@ export function formatRelativeTime(dateString) {
   return date.toLocaleDateString();
 }
 
+// The AppView reports `handle.invalid` when it could not verify the handle;
+// bsky.app also resolves profiles by DID. The DID is not percent-encoded: its
+// syntax already is, and bsky.app does not resolve a re-encoded `did%3A` prefix.
+export function getProfileUrl(author) {
+  const actor = author.handle === 'handle.invalid' ? author.did : encodeURIComponent(author.handle);
+  return `https://bsky.app/profile/${actor}`;
+}
+
 export function getPostUrl(post) {
-  const parts = post.uri.split('/');
-  const postId = parts[parts.length - 1];
-  const handle = post.author.handle;
-  if (!/^[a-zA-Z0-9._-]+$/.test(handle) || !/^[a-zA-Z0-9]+$/.test(postId)) {
-    return null;
-  }
-  return `https://bsky.app/profile/${encodeURIComponent(handle)}/post/${encodeURIComponent(postId)}`;
+  const postId = post.uri.split('/').pop();
+  if (!/^[a-zA-Z0-9]+$/.test(postId)) return null;
+  return `${getProfileUrl(post.author)}/post/${postId}`;
 }
 
 export function formatDateTime(dateString) {

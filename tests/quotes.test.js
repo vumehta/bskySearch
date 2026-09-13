@@ -3,7 +3,7 @@ import { createTestDocument, deferred, TestNode } from './helpers/dom.mjs';
 
 const post = (id, likes = 1) => ({
   uri: `at://did:plc:test/app.bsky.feed.post/${id}`,
-  author: { handle: 'alice.bsky.social' },
+  author: { did: 'did:plc:test', handle: 'alice.bsky.social' },
   record: { text: id, createdAt: '2026-09-05T00:00:00Z' },
   likeCount: likes,
   quoteCount: 1,
@@ -85,6 +85,12 @@ describe('quote search and pagination', () => {
     expect(paramsFor('app.bsky.actor.getProfile', 'actor')).toEqual(['alice.bsky.social']);
     expect(paramsFor('app.bsky.feed.getPosts', 'uris')).toEqual([originalUri, nextUri]);
     expect(paramsFor('app.bsky.feed.getQuotes', 'uri')).toEqual([originalUri, nextUri]);
+  });
+
+  it('links a quote from an author with an unverified handle by DID', async () => {
+    mockInitial({ posts: [{ ...post('q1'), author: { did: 'did:plc:test', handle: 'handle.invalid' } }] });
+    await quotes.performQuoteSearch();
+    expect(elements.quoteResults.querySelector('.thread-link').href).toBe('https://bsky.app/profile/did:plc:test/post/q1');
   });
 
   it.each([

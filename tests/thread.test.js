@@ -3,7 +3,7 @@ import { createTestDocument, TestNode } from './helpers/dom.mjs';
 
 const parent = (text = 'parent') => ({
   uri: 'at://did:plc:test/app.bsky.feed.post/parent123',
-  author: { handle: 'example.bsky.social' },
+  author: { did: 'did:plc:test', handle: 'example.bsky.social' },
   record: { text, createdAt: '2026-01-01T11:00:00Z' },
   indexedAt: '2026-01-01T12:00:00Z',
 });

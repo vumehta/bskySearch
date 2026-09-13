@@ -9,7 +9,7 @@ function makePost(id, likeCount) {
   const now = new Date().toISOString();
   return {
     uri: `at://did:plc:test/app.bsky.feed.post/${id}`,
-    author: { handle: 'alice.bsky.social', displayName: 'Alice' },
+    author: { did: 'did:plc:test', handle: 'alice.bsky.social', displayName: 'Alice' },
     record: { text: `post ${id} about apple`, createdAt: now },
     indexedAt: now,
     likeCount,
@@ -407,5 +407,54 @@ describe('search pagination and lifecycle', () => {
       expect(toggle.getAttribute('aria-controls')).toMatch(/^thread-context-/);
     }
     if (field === 'embed') expect(nextCard.querySelector('.image-placeholder')).toBeTruthy();
+  });
+
+  it.each([
+    [
+      'a gallery',
+      { $type: 'app.bsky.embed.gallery#view', items: [{ thumbnail: 'https://cdn.bsky.app/one.jpg', alt: 'One' }, { thumbnail: 'https://cdn.bsky.app/two.jpg', alt: 'Two' }] },
+      'Show 2 images',
+      ['https://cdn.bsky.app/one.jpg', 'https://cdn.bsky.app/two.jpg'],
+    ],
+    [
+      'a video',
+      { $type: 'app.bsky.embed.video#view', thumbnail: 'https://video.bsky.app/thumbnail.jpg', alt: 'Clip' },
+      'Show video preview',
+      ['https://video.bsky.app/thumbnail.jpg'],
+    ],
+    [
+      'a quote post with images',
+      { $type: 'app.bsky.embed.recordWithMedia#view', record: {}, media: { $type: 'app.bsky.embed.images#view', images: [{ thumb: 'https://cdn.bsky.app/quoted.jpg', alt: 'Quoted' }] } },
+      'Show 1 image',
+      ['https://cdn.bsky.app/quoted.jpg'],
+    ],
+  ])('reveals the previews of %s on request', async (_kind, embed, buttonText, sources) => {
+    globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ posts: [{ ...makePost('media', 20), embed }] }) }));
+    await search.performSearch();
+    const card = elements.results.querySelector('.post');
+    const button = card.querySelector('.image-placeholder').firstElementChild;
+    expect(button.textContent).toBe(buttonText);
+    button.listeners.get('click')();
+    expect(card.querySelector('.image-placeholder')).toBe(null);
+    expect(card.querySelectorAll('.post-image').map((image) => image.src)).toEqual(sources);
+  });
+
+  it.each([
+    ['a video without a thumbnail', { $type: 'app.bsky.embed.video#view', playlist: 'https://video.bsky.app/playlist.m3u8' }],
+    ['a quote post with a link card', { $type: 'app.bsky.embed.recordWithMedia#view', record: {}, media: { $type: 'app.bsky.embed.external#view', external: { thumb: 'https://cdn.bsky.app/link.jpg' } } }],
+  ])('shows no preview button for %s', async (_kind, embed) => {
+    globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ posts: [{ ...makePost('media', 20), embed }] }) }));
+    await search.performSearch();
+    expect(elements.results.querySelector('.post')).not.toBe(null);
+    expect(elements.results.querySelector('.image-placeholder')).toBe(null);
+  });
+
+  it('links an author with an unverified handle by DID', async () => {
+    const post = { ...makePost('unverified', 20), author: { did: 'did:plc:test', handle: 'handle.invalid' } };
+    globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ posts: [post] }) }));
+    await search.performSearch();
+    const card = elements.results.querySelector('.post');
+    expect(card.querySelector('.display-name').href).toBe('https://bsky.app/profile/did:plc:test');
+    expect(card.querySelector('a.thread-link').href).toBe('https://bsky.app/profile/did:plc:test/post/unverified');
   });
 });

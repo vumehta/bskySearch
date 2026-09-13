@@ -11,10 +11,28 @@ import {
   normalizeTerm,
   expandSearchTerms,
   getPostTimestamp,
+  getPostUrl,
+  getProfileUrl,
 } from '../src/utils.mjs';
 import { enforceDidCacheLimit, enforceSearchCacheLimit, getCachedDid } from '../src/cache.mjs';
 import { didCache, searchCache } from '../src/state.mjs';
 import { DID_CACHE_TTL_MS, MAX_DID_CACHE_SIZE, MAX_SEARCH_CACHE_SIZE } from '../src/constants.mjs';
+
+describe('profile and post links', () => {
+  const uri = 'at://did:plc:abc123/app.bsky.feed.post/xyz';
+  const author = { did: 'did:plc:abc123', handle: 'alice.bsky.social' };
+
+  it('links a verified handle directly', () => {
+    expect(getProfileUrl(author)).toBe('https://bsky.app/profile/alice.bsky.social');
+    expect(getPostUrl({ uri, author })).toBe('https://bsky.app/profile/alice.bsky.social/post/xyz');
+  });
+
+  it('falls back to the DID when the AppView could not verify the handle', () => {
+    const unverified = { ...author, handle: 'handle.invalid' };
+    expect(getProfileUrl(unverified)).toBe('https://bsky.app/profile/did:plc:abc123');
+    expect(getPostUrl({ uri, author: unverified })).toBe('https://bsky.app/profile/did:plc:abc123/post/xyz');
+  });
+});
 
 describe('isValidBskyUrl', () => {
   it('returns true for valid bsky.app URLs', () => {
