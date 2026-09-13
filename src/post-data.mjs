@@ -1,5 +1,6 @@
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const optionalString = (value) => value == null || typeof value === 'string';
+const optionalObject = (value) => value == null || isObject(value);
 const optionalCount = (value) => value == null || (Number.isFinite(value) && value >= 0);
 
 function previewSource(embed) {
@@ -41,10 +42,13 @@ export function isRenderablePost(post) {
     && /^[a-zA-Z0-9._-]+$/.test(post.author.handle)
     && optionalString(post.author.displayName)
     && optionalString(post.author.avatar)
+    && optionalString(post.author.pronouns)
+    && optionalObject(post.author.verification)
+    && optionalObject(post.author.status)
     && optionalString(post.indexedAt)
     && hasSafeEmbedPreviews(post.embed)
     && (post.record == null || (isObject(post.record)
       && optionalString(post.record.createdAt)
       && optionalString(post.record.text)))
-    && ['likeCount', 'repostCount', 'replyCount', 'quoteCount'].every((key) => optionalCount(post[key]));
+    && ['likeCount', 'repostCount', 'replyCount', 'quoteCount', 'bookmarkCount'].every((key) => optionalCount(post[key]));
 }

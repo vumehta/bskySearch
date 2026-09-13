@@ -20,7 +20,7 @@ beforeEach(async () => {
     'postUrl', 'quoteStatus', 'quoteTabs', 'quoteOriginal', 'quoteCount', 'quoteResults', 'quoteLoadMore',
   ]);
   elements = fixture.elements;
-  for (const mode of ['likes', 'recent', 'oldest']) {
+  for (const mode of ['likes', 'recent', 'oldest', 'bookmarks']) {
     const tab = new TestNode('button');
     tab.className = 'quote-tab';
     tab.dataset.sort = mode;
@@ -114,6 +114,21 @@ describe('quote search and pagination', () => {
     await quotes.loadMoreQuotes();
     expect(renderedOrder()).toEqual(pagedOrder);
     expect(state.quoteCursor).toBeNull();
+  });
+
+  it('orders quotes by saves, then likes, and shows the save count', async () => {
+    mockInitial({ posts: [post('liked', 9), { ...post('saved', 1), bookmarkCount: 3 }, { ...post('both', 5), bookmarkCount: 3 }] });
+    await quotes.performQuoteSearch();
+    quotes.handleQuoteTabClick({ target: elements.quoteTabs.children.find((node) => node.dataset.sort === 'bookmarks') });
+    expect(elements.quoteResults.querySelectorAll('.quote-text').map((node) => node.textContent)).toEqual(['both', 'saved', 'liked']);
+    expect(elements.quoteResults.querySelector('.quote-stats').children.at(-1).getAttribute('aria-label')).toBe('3 saves');
+  });
+
+  it('shows author badges on quote cards', async () => {
+    const author = { ...post('q1').author, verification: { verifiedStatus: 'valid', trustedVerifierStatus: 'none' } };
+    mockInitial({ posts: [{ ...post('q1'), author }] });
+    await quotes.performQuoteSearch();
+    expect(elements.quoteResults.querySelector('.quote-author').querySelector('.badge').textContent).toBe('Verified');
   });
 
   it('deduplicates overlapping pages, refreshes changed cards, and stops repeated cursors', async () => {

@@ -55,6 +55,9 @@ export function getPostRenderFingerprint(post) {
     post.author?.handle || '',
     post.author?.displayName || '',
     post.author?.avatar || '',
+    post.author?.pronouns || '',
+    post.author?.verification || null,
+    post.author?.status || null,
     post.indexedAt || '',
     post.record?.createdAt || '',
     post.record?.text || '',
@@ -63,6 +66,7 @@ export function getPostRenderFingerprint(post) {
     post.likeCount || 0,
     post.repostCount || 0,
     post.replyCount || 0,
+    post.bookmarkCount || 0,
     getMatchedTermsForPost(post),
   ]);
 }

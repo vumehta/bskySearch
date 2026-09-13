@@ -30,6 +30,8 @@ describe('text contrast', () => {
         ['--button-text', '--accent'],
         ['--button-text', '--accent-strong'],
         ['--button-disabled-text', '--button-disabled'],
+        ['--button-text', '--likes-text'],
+        ['--accent-text', '--tag-bg'],
         ...['--text', '--muted', '--muted-2', '--accent', '--likes-text', '--reposts-text']
           .flatMap((foreground) => ['--card-bg', '--accent-soft'].map((background) => [foreground, background])),
       ];

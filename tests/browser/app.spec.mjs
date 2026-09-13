@@ -82,8 +82,8 @@ test('built page loads and minimum likes preserves loaded pages and pagination',
 test('normal handle URL submits the quote form and all sort controls reorder real cards', async ({ page }, testInfo) => {
   const calls = [];
   const quotes = [
-    post('newest', 'Newest quote', 10, 1),
-    post('oldest', 'Oldest quote', 30, 3),
+    { ...post('newest', 'Newest quote', 10, 1), bookmarkCount: 5 },
+    { ...post('oldest', 'Oldest quote', 30, 3), bookmarkCount: 3 },
     post('popular', 'Popular quote', 90, 2),
   ];
   await page.route('https://public.api.bsky.app/xrpc/**', async (route) => {
@@ -117,6 +117,8 @@ test('normal handle URL submits the quote form and all sort controls reorder rea
   await expect(page.getByRole('button', { name: 'Most Recent', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await page.getByRole('button', { name: 'Oldest First', exact: true }).click();
   await expect(texts).toHaveText(['Oldest quote', 'Popular quote', 'Newest quote']);
+  await page.getByRole('button', { name: 'Most Saved', exact: true }).click();
+  await expect(texts).toHaveText(['Newest quote', 'Oldest quote', 'Popular quote']);
   await page.getByRole('button', { name: 'Most Likes', exact: true }).click();
   await expect(texts).toHaveText(['Popular quote', 'Oldest quote', 'Newest quote']);
   expect(calls.sort()).toEqual(['app.bsky.actor.getProfile', 'app.bsky.feed.getPosts', 'app.bsky.feed.getQuotes']);

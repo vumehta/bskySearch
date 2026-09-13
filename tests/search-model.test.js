@@ -53,7 +53,7 @@ describe('production search transformations', () => {
       .not.toBe(getPostRenderFingerprint({ matchedTerms: ['a', 'b'] }));
   });
 
-  it.each(['author.displayName', 'author.avatar', 'indexedAt', 'record.createdAt', 'record.text', 'likeCount', 'repostCount', 'replyCount', 'quoteCount'])
+  it.each(['author.displayName', 'author.avatar', 'author.pronouns', 'indexedAt', 'record.createdAt', 'record.text', 'likeCount', 'repostCount', 'replyCount', 'quoteCount', 'bookmarkCount'])
   ('rejects a malformed rendered %s field before accepting a page', (path) => {
     const post = renderablePost();
     const parts = path.split('.');
@@ -67,10 +67,13 @@ describe('production search transformations', () => {
     const post = renderablePost();
     post.author.displayName = null;
     post.author.avatar = null;
+    post.author.pronouns = null;
+    post.author.verification = null;
+    post.author.status = null;
     post.indexedAt = null;
     post.record.createdAt = null;
     post.record.text = null;
-    for (const key of ['likeCount', 'repostCount', 'replyCount', 'quoteCount']) post[key] = null;
+    for (const key of ['likeCount', 'repostCount', 'replyCount', 'quoteCount', 'bookmarkCount']) post[key] = null;
     expect(isRenderablePost(post)).toBe(true);
     expect(validateSearchPage({ posts: [post] }).posts).toEqual([post]);
     expect(isRenderablePost({ ...post, record: null })).toBe(true);
@@ -82,6 +85,24 @@ describe('production search transformations', () => {
     expect(isRenderablePost({ ...post, author: { ...post.author, displayName: () => 'Alice' } })).toBe(false);
     expect(isRenderablePost({ ...post, likeCount: Infinity })).toBe(false);
     expect(isRenderablePost({ ...post, replyCount: '2' })).toBe(false);
+  });
+
+  it('rejects author verification and status that are not objects', () => {
+    const post = renderablePost();
+    expect(isRenderablePost({ ...post, author: { ...post.author, verification: 'valid' } })).toBe(false);
+    expect(isRenderablePost({ ...post, author: { ...post.author, status: 'app.bsky.actor.status#live' } })).toBe(false);
+  });
+
+  it('changes the render fingerprint when saves or author badge fields change', () => {
+    const base = renderablePost();
+    for (const changed of [
+      { ...base, bookmarkCount: 1 },
+      { ...base, author: { ...base.author, pronouns: 'she/her' } },
+      { ...base, author: { ...base.author, verification: { verifiedStatus: 'valid' } } },
+      { ...base, author: { ...base.author, status: { status: 'app.bsky.actor.status#live' } } },
+    ]) {
+      expect(getPostRenderFingerprint(changed)).not.toBe(getPostRenderFingerprint(base));
+    }
   });
 
   it.each([undefined, null, 'plc:test', 'did:plc:', 'did:PLC:test', 'did:plc:te st'])

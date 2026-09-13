@@ -62,6 +62,15 @@ describe('thread disclosure', () => {
     expect(context(card)).toBeDefined();
   });
 
+  it('shows pronouns and badges on thread parents', async () => {
+    const { card } = createCard();
+    const author = { ...parent().author, pronouns: 'they/them', verification: { verifiedStatus: 'valid', trustedVerifierStatus: 'none' } };
+    fetchMock.mockResolvedValueOnce(response({ thread: { parent: { post: { ...parent(), author } } } }));
+    await thread.toggleThread(post, card);
+    expect(context(card).querySelector('.pronouns').textContent).toBe('they/them');
+    expect(context(card).querySelector('.badge').textContent).toBe('Verified');
+  });
+
   it('refreshes cached parents after the cache lifetime', async () => {
     const { card } = createCard();
     await thread.toggleThread(post, card);

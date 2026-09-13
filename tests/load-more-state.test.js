@@ -449,6 +449,29 @@ describe('search pagination and lifecycle', () => {
     expect(elements.results.querySelector('.image-placeholder')).toBe(null);
   });
 
+  it('shows pronouns, badges and the save count on a search result, dropping LIVE at expiry', async () => {
+    vi.useFakeTimers();
+    const post = {
+      ...makePost('badged', 20),
+      bookmarkCount: 4,
+      author: {
+        did: 'did:plc:test',
+        handle: 'alice.bsky.social',
+        pronouns: 'she/her',
+        verification: { verifiedStatus: 'none', trustedVerifierStatus: 'valid' },
+        status: { status: 'app.bsky.actor.status#live', expiresAt: new Date(Date.now() + 3600000).toISOString() },
+      },
+    };
+    globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ posts: [post] }) }));
+    await search.performSearch();
+    const card = elements.results.querySelector('.post');
+    const authorDetails = () => card.querySelector('.author-info').children.map((node) => node.textContent).slice(2);
+    expect(authorDetails()).toEqual(['she/her', 'Verifier', 'LIVE']);
+    expect(card.querySelector('.post-stats').children.at(-1).getAttribute('aria-label')).toBe('4 saves');
+    vi.advanceTimersByTime(3600000);
+    expect(authorDetails()).toEqual(['she/her', 'Verifier']);
+  });
+
   it('links an author with an unverified handle by DID', async () => {
     const post = { ...makePost('unverified', 20), author: { did: 'did:plc:test', handle: 'handle.invalid' } };
     globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ posts: [post] }) }));

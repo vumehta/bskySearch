@@ -10,17 +10,21 @@ import {
   quoteLoadMoreDiv,
 } from './dom.mjs';
 import {
+  compareByBookmarks,
   formatDateTime,
   getPostTimestamp,
   getPostUrl,
   parseBlueskyPostUrl,
 } from './utils.mjs';
+import { appendAuthorBadges } from './author-badges.mjs';
 import { appendEngagementStats, QUOTE_STAT_CLASSES } from './post-stats.mjs';
 import { enforceDidCacheLimit, getCachedDid } from './cache.mjs';
 import { setQueryParam, updateURLWithParams } from './url.mjs';
 import { mergeQuotes, trackQuoteCursor } from './quotes-state.mjs';
 import { fetchJson } from './http.mjs';
 import { isRenderablePost } from './post-data.mjs';
+
+export const QUOTE_SORT_VALUES = ['likes', 'recent', 'oldest', 'bookmarks'];
 
 let lastRenderedQuoteSort = null;
 let lastRenderedQuotes = [];
@@ -79,6 +83,9 @@ function sortQuotes(quotes, sortMode) {
     case 'oldest':
       sorted.sort((a, b) => getPostTimestamp(a) - getPostTimestamp(b));
       break;
+    case 'bookmarks':
+      sorted.sort(compareByBookmarks);
+      break;
     default:
       break;
   }
@@ -107,6 +114,7 @@ function createQuoteCard(post, { className, label = '', includeQuoteCount = fals
   author.className = 'quote-author';
   const authorName = post.author.displayName || post.author.handle;
   author.textContent = `${authorName} (@${post.author.handle})`;
+  appendAuthorBadges(author, post.author);
   wrapper.appendChild(author);
 
   const meta = document.createElement('div');
@@ -378,7 +386,7 @@ export async function performQuoteSearch() {
 export function handleQuoteTabClick(event) {
   if (!event.target.classList.contains('quote-tab')) return;
   const nextSort = event.target.dataset.sort;
-  if (['likes', 'recent', 'oldest'].includes(nextSort) && nextSort !== state.quoteSort) {
+  if (QUOTE_SORT_VALUES.includes(nextSort) && nextSort !== state.quoteSort) {
     state.quoteSort = nextSort;
     updateQuoteTabs();
     updateQuoteURL();

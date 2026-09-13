@@ -75,17 +75,26 @@ export function filterByDate(posts, hours) {
   return posts.filter((post) => getPostTimestamp(post) >= cutoffTs);
 }
 
+export const SEARCH_SORT_VALUES = ['top', 'latest', 'bookmarks'];
+
 export function normalizeSortValue(raw) {
-  return raw === 'latest' ? 'latest' : 'top';
+  return SEARCH_SORT_VALUES.includes(raw) ? raw : 'top';
+}
+
+// Bookmarks are sparse, so equal counts fall back to likes.
+export function compareByBookmarks(a, b) {
+  return (b.bookmarkCount || 0) - (a.bookmarkCount || 0) || (b.likeCount || 0) - (a.likeCount || 0);
 }
 
 export function sortPosts(posts, sortMode = 'top') {
   const sorted = [...posts];
   if (sortMode === 'latest') {
     sorted.sort((a, b) => getPostTimestamp(b) - getPostTimestamp(a));
-    return sorted;
+  } else if (sortMode === 'bookmarks') {
+    sorted.sort(compareByBookmarks);
+  } else {
+    sorted.sort((a, b) => (b.likeCount || 0) - (a.likeCount || 0));
   }
-  sorted.sort((a, b) => (b.likeCount || 0) - (a.likeCount || 0));
   return sorted;
 }
 

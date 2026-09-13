@@ -1,18 +1,22 @@
 const LIKE_ICON = '♥ ';
 const REPOST_ICON = '↻ ';
 const REPLY_ICON = '💬 ';
+// Bluesky calls bookmarks "saves" in its own app.
+const SAVE_ICON = '🔖 ';
 
-// Search results only style `.stat.likes`, so reposts and replies stay unmodified.
+// Search results only style `.stat.likes`, so the other stats stay unmodified.
 export const SEARCH_STAT_CLASSES = {
   likes: 'stat likes',
   reposts: 'stat',
   replies: 'stat',
+  saves: 'stat',
 };
 
 export const QUOTE_STAT_CLASSES = {
   likes: 'quote-stat likes',
   reposts: 'quote-stat reposts',
   replies: 'quote-stat replies',
+  saves: 'quote-stat',
 };
 
 function createStatElement(className, icon, count, noun) {
@@ -38,5 +42,8 @@ export function appendEngagementStats(container, post, classNames) {
   );
   container.appendChild(
     createStatElement(classNames.replies, REPLY_ICON, post.replyCount || 0, 'replies')
+  );
+  container.appendChild(
+    createStatElement(classNames.saves, SAVE_ICON, post.bookmarkCount || 0, 'saves')
   );
 }
