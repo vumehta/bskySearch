@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestDocument, TestNode } from './helpers/dom.mjs';
-import { appendAuthorBadges, isLive } from '../src/author-badges.mjs';
+import { appendAuthorBadges } from '../src/author-badges.mjs';
 
-const live = (overrides = {}) => ({ status: 'app.bsky.actor.status#live', record: {}, ...overrides });
+const live = (overrides = {}) => ({ status: 'app.bsky.actor.status#live', expiresAt: '2026-09-13T13:00:00Z', ...overrides });
 
 function render(author) {
   const container = new TestNode();
@@ -38,14 +38,19 @@ describe('author badges', () => {
     expect(render({ verification })).toEqual([]);
   });
 
-  it('shows LIVE only for an active, enabled live status', () => {
+  it('shows LIVE for a live status that expires in the future', () => {
     expect(render({ status: live() })).toEqual([['badge live', 'LIVE']]);
-    expect(isLive(live({ expiresAt: '2026-09-13T13:00:00Z', isActive: true }))).toBe(true);
-    expect(isLive(live({ expiresAt: '2026-09-13T11:00:00Z', isActive: true }))).toBe(false);
-    expect(isLive(live({ isActive: false }))).toBe(false);
-    expect(isLive(live({ isDisabled: true }))).toBe(false);
-    expect(isLive({ status: 'app.bsky.actor.status#away', record: {} })).toBe(false);
-    expect(isLive(undefined)).toBe(false);
+  });
+
+  it.each([
+    ['no expiry', live({ expiresAt: undefined })],
+    ['an expired status', live({ expiresAt: '2026-09-13T11:00:00Z' })],
+    ['a malformed expiry', live({ expiresAt: 'soon' })],
+    ['an inactive status', live({ isActive: false })],
+    ['a disabled status', live({ isDisabled: true })],
+    ['another status kind', live({ status: 'app.bsky.actor.status#away' })],
+  ])('shows no LIVE badge for %s', (_kind, status) => {
+    expect(render({ status })).toEqual([]);
   });
 
   it('lists pronouns before the badges', () => {

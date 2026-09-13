@@ -81,13 +81,8 @@ export function normalizeSortValue(raw) {
   return SEARCH_SORT_VALUES.includes(raw) ? raw : 'top';
 }
 
-// The API ranks by top or latest; saves re-rank the top results locally.
-export function getApiSort(sortMode) {
-  return sortMode === 'latest' ? 'latest' : 'top';
-}
-
-// Saves are sparse, so equal counts fall back to likes.
-export function compareBySaves(a, b) {
+// Bookmarks are sparse, so equal counts fall back to likes.
+export function compareByBookmarks(a, b) {
   return (b.bookmarkCount || 0) - (a.bookmarkCount || 0) || (b.likeCount || 0) - (a.likeCount || 0);
 }
 
@@ -96,7 +91,7 @@ export function sortPosts(posts, sortMode = 'top') {
   if (sortMode === 'latest') {
     sorted.sort((a, b) => getPostTimestamp(b) - getPostTimestamp(a));
   } else if (sortMode === 'bookmarks') {
-    sorted.sort(compareBySaves);
+    sorted.sort(compareByBookmarks);
   } else {
     sorted.sort((a, b) => (b.likeCount || 0) - (a.likeCount || 0));
   }

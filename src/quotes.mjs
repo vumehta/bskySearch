@@ -10,7 +10,7 @@ import {
   quoteLoadMoreDiv,
 } from './dom.mjs';
 import {
-  compareBySaves,
+  compareByBookmarks,
   formatDateTime,
   getPostTimestamp,
   getPostUrl,
@@ -84,7 +84,7 @@ function sortQuotes(quotes, sortMode) {
       sorted.sort((a, b) => getPostTimestamp(a) - getPostTimestamp(b));
       break;
     case 'bookmarks':
-      sorted.sort(compareBySaves);
+      sorted.sort(compareByBookmarks);
       break;
     default:
       break;

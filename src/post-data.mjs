@@ -1,5 +1,6 @@
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const optionalString = (value) => value == null || typeof value === 'string';
+const optionalObject = (value) => value == null || isObject(value);
 const optionalCount = (value) => value == null || (Number.isFinite(value) && value >= 0);
 
 function previewSource(embed) {
@@ -42,8 +43,8 @@ export function isRenderablePost(post) {
     && optionalString(post.author.displayName)
     && optionalString(post.author.avatar)
     && optionalString(post.author.pronouns)
-    && (post.author.verification == null || isObject(post.author.verification))
-    && (post.author.status == null || isObject(post.author.status))
+    && optionalObject(post.author.verification)
+    && optionalObject(post.author.status)
     && optionalString(post.indexedAt)
     && hasSafeEmbedPreviews(post.embed)
     && (post.record == null || (isObject(post.record)

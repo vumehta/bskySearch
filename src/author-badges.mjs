@@ -1,7 +1,7 @@
 const LIVE_STATUS = 'app.bsky.actor.status#live';
 
-// Mirrors the official app: either valid status earns a badge, and an account
-// with any trusted-verifier record shows the verifier badge instead.
+// Mirrors the official app: a valid status of either kind earns a badge, and a
+// verifier keeps the verifier style even after its own status lapses ('invalid').
 function getVerificationBadge(verification) {
   if (verification?.verifiedStatus !== 'valid' && verification?.trustedVerifierStatus !== 'valid') return null;
   return ['valid', 'invalid'].includes(verification.trustedVerifierStatus)
@@ -9,11 +9,12 @@ function getVerificationBadge(verification) {
     : { className: 'verified', text: 'Verified', title: 'Verified account' };
 }
 
-export function isLive(status) {
+// As in the official app, a live status without a future expiry is not shown.
+function isLive(status) {
   return status?.status === LIVE_STATUS
     && !status.isDisabled
     && status.isActive !== false
-    && (!status.expiresAt || Date.parse(status.expiresAt) > Date.now());
+    && Date.parse(status.expiresAt) > Date.now();
 }
 
 function createBadge({ className, text, title }) {

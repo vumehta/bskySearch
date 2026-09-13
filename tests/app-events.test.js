@@ -233,6 +233,21 @@ describe('app search controls', () => {
     expect(state.allPosts.map((post) => post.uri)).toEqual([makePost('saved').uri, makePost('liked').uri]);
     expect(elements.results.querySelector('.results-header').textContent).toContain('Sorted by saves (high to low)');
   });
+
+  it('re-ranks cached top results when the sort changes to saves', async () => {
+    fetch.mockImplementation(async () => Response.json({ posts: [
+      { ...makePost('liked'), bookmarkCount: 1 },
+      { ...makePost('saved'), likeCount: 10, bookmarkCount: 9 },
+    ] }));
+    await bootApp('?terms=apple');
+    expect(state.allPosts.map((post) => post.uri)).toEqual([makePost('liked').uri, makePost('saved').uri]);
+    elements.sortSelect.value = 'bookmarks';
+    dispatch('sortSelect', 'change');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(searchRequests().map((params) => params.get('sort'))).toEqual(['top']);
+    expect(state.allPosts.map((post) => post.uri)).toEqual([makePost('saved').uri, makePost('liked').uri]);
+    expect(window.location.searchParams.get('searchSort')).toBe('bookmarks');
+  });
 });
 
 describe('app URL initialization', () => {
@@ -255,13 +270,14 @@ describe('app URL initialization', () => {
     expect(window.location.searchParams.get('quoteSort')).toBe('recent');
   });
 
-  it.each([['latest', 'searchSort'], ['recent', 'quoteSort']])('migrates legacy sort=%s links without losing the post', async (sort, key) => {
+  it.each([['latest', 'searchSort'], ['bookmarks', 'searchSort'], ['recent', 'quoteSort']])('migrates legacy sort=%s links without losing the post', async (sort, key) => {
     await bootApp(`?post=${encodeURIComponent(postUrl)}&sort=${sort}`);
     expect(window.location.searchParams.get(key)).toBe(sort);
     expect(window.location.searchParams.has('sort')).toBe(false);
+    expect(window.location.searchParams.get('quoteSort')).toBe(key === 'quoteSort' ? sort : null);
     expect(window.location.searchParams.get('post')).toBe(postUrl);
-    expect(state.searchSort).toBe(key === 'searchSort' ? 'latest' : 'top');
-    expect(state.quoteSort).toBe(key === 'quoteSort' ? 'recent' : 'likes');
+    expect(state.searchSort).toBe(key === 'searchSort' ? sort : 'top');
+    expect(state.quoteSort).toBe(key === 'quoteSort' ? sort : 'likes');
     expect(elements.quoteOriginal.querySelector('.quote-original')).toBeTruthy();
   });
 });

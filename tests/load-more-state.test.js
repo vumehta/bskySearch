@@ -458,7 +458,7 @@ describe('search pagination and lifecycle', () => {
         handle: 'alice.bsky.social',
         pronouns: 'she/her',
         verification: { verifiedStatus: 'none', trustedVerifierStatus: 'valid' },
-        status: { status: 'app.bsky.actor.status#live', record: {} },
+        status: { status: 'app.bsky.actor.status#live', expiresAt: '2999-01-01T00:00:00Z' },
       },
     };
     globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ posts: [post] }) }));

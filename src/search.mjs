@@ -24,7 +24,6 @@ import {
   filterByDate,
   filterByLikes,
   formatRelativeTime,
-  getApiSort,
   getPostUrl,
   getProfileUrl,
   getSearchCacheKey,
@@ -177,7 +176,8 @@ function createSearchContext() {
   return {
     generation: state.searchGeneration,
     signal: activeSearchController.signal,
-    sort: getApiSort(state.searchSort),
+    // The API ranks by top or latest; bookmarks re-rank the top results locally.
+    sort: state.searchSort === 'latest' ? 'latest' : 'top',
     since: state.searchSince,
   };
 }

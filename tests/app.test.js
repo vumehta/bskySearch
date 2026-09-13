@@ -14,7 +14,6 @@ import {
   getPostUrl,
   getProfileUrl,
   normalizeSortValue,
-  getApiSort,
 } from '../src/utils.mjs';
 import { enforceDidCacheLimit, enforceSearchCacheLimit, getCachedDid } from '../src/cache.mjs';
 import { didCache, searchCache } from '../src/state.mjs';
@@ -313,11 +312,10 @@ describe('sortPosts', () => {
   });
 });
 
-describe('search sort values', () => {
-  it('keeps known sorts, falls back to top, and requests the top ranking for saves', () => {
+describe('normalizeSortValue', () => {
+  it('keeps known sorts and falls back to top', () => {
     expect(['top', 'latest', 'bookmarks'].map(normalizeSortValue)).toEqual(['top', 'latest', 'bookmarks']);
     expect(normalizeSortValue('popular')).toBe('top');
-    expect(['top', 'latest', 'bookmarks'].map(getApiSort)).toEqual(['top', 'latest', 'top']);
   });
 });
 
