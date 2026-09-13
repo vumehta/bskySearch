@@ -25,6 +25,13 @@ function createBadge({ className, text, title }) {
   return badge;
 }
 
+// Cards are not rebuilt when a status lapses, so the badge removes itself.
+// Browsers run longer timeouts immediately, hence the clamp.
+const MAX_TIMEOUT_MS = 2 ** 31 - 1;
+function removeAtExpiry(badge, expiresAt) {
+  setTimeout(() => badge.remove(), Math.min(Date.parse(expiresAt) - Date.now(), MAX_TIMEOUT_MS));
+}
+
 export function appendAuthorBadges(container, author) {
   if (author.pronouns) {
     const pronouns = document.createElement('span');
@@ -35,6 +42,8 @@ export function appendAuthorBadges(container, author) {
   const verification = getVerificationBadge(author.verification);
   if (verification) container.appendChild(createBadge(verification));
   if (isLive(author.status)) {
-    container.appendChild(createBadge({ className: 'live', text: 'LIVE', title: 'Live now' }));
+    const badge = createBadge({ className: 'live', text: 'LIVE', title: 'Live now' });
+    removeAtExpiry(badge, author.status.expiresAt);
+    container.appendChild(badge);
   }
 }

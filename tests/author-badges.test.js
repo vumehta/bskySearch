@@ -38,8 +38,14 @@ describe('author badges', () => {
     expect(render({ verification })).toEqual([]);
   });
 
-  it('shows LIVE for a live status that expires in the future', () => {
-    expect(render({ status: live() })).toEqual([['badge live', 'LIVE']]);
+  it('shows LIVE until the status expires', () => {
+    const container = new TestNode();
+    appendAuthorBadges(container, { status: live() });
+    expect(container.children.map((node) => node.textContent)).toEqual(['LIVE']);
+    vi.advanceTimersByTime(60 * 60 * 1000 - 1);
+    expect(container.children).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    expect(container.children).toHaveLength(0);
   });
 
   it.each([
