@@ -10,7 +10,7 @@ const termResults = Array.from({ length: 10 }, (_, termIndex) =>
     matchedTerm: `term${termIndex}`,
     likeCount: (index * 7 + termIndex) % 500,
     indexedAt: new Date(now - (index % 72) * 3600000).toISOString(),
-    author: { handle: 'perf.bsky.social' },
+    author: { did: 'did:plc:test', handle: 'perf.bsky.social' },
     record: { text: `post ${index} for term${termIndex}` },
   }))
 );

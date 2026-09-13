@@ -9,7 +9,7 @@ let state;
 function makePost(id = 'result') {
   return {
     uri: `at://did:plc:test/app.bsky.feed.post/${id}`,
-    author: { handle: 'alice.bsky.social' },
+    author: { did: 'did:plc:test', handle: 'alice.bsky.social' },
     record: { text: 'An apple pie post', createdAt: new Date().toISOString() },
     likeCount: 50,
   };

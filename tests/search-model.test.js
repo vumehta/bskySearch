@@ -1,12 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { createHighlightMatcher, getPostRenderFingerprint, ingestSearchPosts, nextSearchCursor, validateSearchPage } from '../src/search-model.mjs';
-import { isRenderablePost } from '../src/post-data.mjs';
+import { getEmbedPreviews, isRenderablePost } from '../src/post-data.mjs';
 
 const renderablePost = () => ({
   uri: 'at://did:plc:test/app.bsky.feed.post/one',
-  author: { handle: 'alice.bsky.social' },
+  author: { did: 'did:plc:test', handle: 'alice.bsky.social' },
   record: { text: 'A post', createdAt: '2026-09-05T00:00:00Z' },
 });
+
+const previewEmbeds = () => ({
+  images: { $type: 'app.bsky.embed.images#view', images: [{ thumb: 'https://cdn.bsky.app/image', alt: 'Description' }] },
+  gallery: { $type: 'app.bsky.embed.gallery#view', items: [{ thumbnail: 'https://cdn.bsky.app/image', alt: 'Description' }] },
+  video: { $type: 'app.bsky.embed.video#view', thumbnail: 'https://video.bsky.app/thumbnail.jpg', alt: 'Description' },
+});
+const quoteWithMedia = (media) => ({ $type: 'app.bsky.embed.recordWithMedia#view', record: {}, media });
 
 describe('production search transformations', () => {
   it('merges overlapping pages and terms without mutating cached input posts', () => {
@@ -77,13 +84,48 @@ describe('production search transformations', () => {
     expect(isRenderablePost({ ...post, replyCount: '2' })).toBe(false);
   });
 
-  it('rejects malformed image fields before the reveal button can coerce them', () => {
+  it.each([undefined, null, 'plc:test', 'did:plc:', 'did:PLC:test', 'did:plc:te st'])
+  ('rejects a malformed author DID: %s', (did) => {
     const post = renderablePost();
-    post.embed = { $type: 'app.bsky.embed.images#view', images: [{ thumb: 'https://cdn.bsky.app/image', alt: 'Description' }] };
+    post.author.did = did;
+    expect(isRenderablePost(post)).toBe(false);
+  });
+
+  it.each([
+    ['images', (embed) => embed.images[0], 'thumb'],
+    ['gallery', (embed) => embed.items[0], 'thumbnail'],
+    ['video', (embed) => embed, 'thumbnail'],
+  ])('rejects malformed %s preview fields', (type, preview, thumbKey) => {
+    const post = renderablePost();
+    post.embed = previewEmbeds()[type];
     expect(isRenderablePost(post)).toBe(true);
-    post.embed.images[0].alt = { toString: 1, valueOf: 1 };
+    preview(post.embed).alt = { toString: 1, valueOf: 1 };
     expect(isRenderablePost(post)).toBe(false);
-    post.embed.images[0] = { thumb: {} };
+    preview(post.embed).alt = 'Description';
+    preview(post.embed)[thumbKey] = {};
     expect(isRenderablePost(post)).toBe(false);
+  });
+
+  it('validates the media of a quote post the same way', () => {
+    const post = renderablePost();
+    post.embed = quoteWithMedia(previewEmbeds().gallery);
+    expect(isRenderablePost(post)).toBe(true);
+    post.embed.media.items[0].thumbnail = {};
+    expect(isRenderablePost(post)).toBe(false);
+  });
+
+  it('extracts preview thumbnails from image, gallery, video and quote-post embeds', () => {
+    const { images, gallery, video } = previewEmbeds();
+    const image = { kind: 'image', images: [{ thumb: 'https://cdn.bsky.app/image', alt: 'Description' }] };
+    const clip = { kind: 'video', images: [{ thumb: 'https://video.bsky.app/thumbnail.jpg', alt: 'Description' }] };
+    expect(getEmbedPreviews(images)).toEqual(image);
+    expect(getEmbedPreviews(gallery)).toEqual(image);
+    expect(getEmbedPreviews(video)).toEqual(clip);
+    expect(getEmbedPreviews(quoteWithMedia(gallery))).toEqual(image);
+    expect(getEmbedPreviews(quoteWithMedia(video))).toEqual(clip);
+    const external = { $type: 'app.bsky.embed.external#view', external: { thumb: 'https://cdn.bsky.app/link' } };
+    expect(getEmbedPreviews(external)).toBe(null);
+    expect(getEmbedPreviews(quoteWithMedia(external))).toBe(null);
+    expect(getEmbedPreviews(undefined)).toBe(null);
   });
 });

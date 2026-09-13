@@ -25,6 +25,7 @@ import {
   filterByLikes,
   formatRelativeTime,
   getPostUrl,
+  getProfileUrl,
   getSearchCacheKey,
   getSearchSince,
   isValidBskyUrl,
@@ -35,6 +36,7 @@ import {
 import { appendEngagementStats, SEARCH_STAT_CLASSES } from './post-stats.mjs';
 import { enforceSearchCacheLimit, getCachedSearch } from './cache.mjs';
 import { fetchJson } from './http.mjs';
+import { getEmbedPreviews } from './post-data.mjs';
 import { createHighlightMatcher, getMatchedTermsForPost, getPostRenderFingerprint, ingestSearchPosts, nextSearchCursor, settleWithConcurrency, validateSearchPage } from './search-model.mjs';
 import { setQueryParam, updateURLWithParams } from './url.mjs';
 import { cancelThreadRequest, cancelThreadRequests, initializeThreadToggle, isReplyPost, toggleThread } from './thread.mjs';
@@ -338,10 +340,9 @@ function createPostElement(post) {
   const authorInfo = document.createElement('div');
   authorInfo.className = 'author-info';
 
-  const authorUrl = `https://bsky.app/profile/${encodeURIComponent(handle)}`;
   const nameLink = document.createElement('a');
   nameLink.className = 'display-name';
-  nameLink.href = authorUrl;
+  nameLink.href = getProfileUrl(post.author);
   nameLink.target = '_blank';
   nameLink.rel = 'noopener noreferrer';
   nameLink.textContent = displayName;
@@ -366,40 +367,41 @@ function createPostElement(post) {
   textDiv.appendChild(createHighlightedText(text, state.searchTerms));
   postDiv.appendChild(textDiv);
 
-  if (post.embed?.$type === 'app.bsky.embed.images#view' && Array.isArray(post.embed.images)) {
-    const validImages = post.embed.images.filter((img) => img?.thumb && isValidBskyUrl(img.thumb));
+  const previews = getEmbedPreviews(post.embed);
+  const validImages = previews?.images.filter((img) => img.thumb && isValidBskyUrl(img.thumb)) ?? [];
 
-    if (validImages.length > 0) {
-      const imagesContainer = document.createElement('div');
-      imagesContainer.className = 'post-images-container';
+  if (validImages.length > 0) {
+    const imagesContainer = document.createElement('div');
+    imagesContainer.className = 'post-images-container';
 
-      const placeholder = document.createElement('div');
-      placeholder.className = 'image-placeholder';
+    const placeholder = document.createElement('div');
+    placeholder.className = 'image-placeholder';
 
-      const showBtn = document.createElement('button');
-      showBtn.type = 'button';
-      const count = validImages.length;
-      showBtn.textContent = `Show ${count} image${count !== 1 ? 's' : ''}`;
-      showBtn.addEventListener('click', () => {
-        const imagesDiv = document.createElement('div');
-        imagesDiv.className = `post-images ${validImages.length === 1 ? 'single' : 'multiple'}`;
+    const showBtn = document.createElement('button');
+    showBtn.type = 'button';
+    const count = validImages.length;
+    showBtn.textContent = previews.kind === 'video'
+      ? 'Show video preview'
+      : `Show ${count} image${count !== 1 ? 's' : ''}`;
+    showBtn.addEventListener('click', () => {
+      const imagesDiv = document.createElement('div');
+      imagesDiv.className = `post-images ${count === 1 ? 'single' : 'multiple'}`;
 
-        validImages.forEach((img) => {
-          const imgEl = document.createElement('img');
-          imgEl.className = 'post-image';
-          imgEl.src = img.thumb;
-          imgEl.alt = img.alt || '';
-          imgEl.loading = 'lazy';
-          imagesDiv.appendChild(imgEl);
-        });
-
-        imagesContainer.replaceChild(imagesDiv, placeholder);
+      validImages.forEach((img) => {
+        const imgEl = document.createElement('img');
+        imgEl.className = 'post-image';
+        imgEl.src = img.thumb;
+        imgEl.alt = img.alt || '';
+        imgEl.loading = 'lazy';
+        imagesDiv.appendChild(imgEl);
       });
 
-      placeholder.appendChild(showBtn);
-      imagesContainer.appendChild(placeholder);
-      postDiv.appendChild(imagesContainer);
-    }
+      imagesContainer.replaceChild(imagesDiv, placeholder);
+    });
+
+    placeholder.appendChild(showBtn);
+    imagesContainer.appendChild(placeholder);
+    postDiv.appendChild(imagesContainer);
   }
 
   const statsDiv = document.createElement('div');

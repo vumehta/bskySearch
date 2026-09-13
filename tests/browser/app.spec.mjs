@@ -8,7 +8,7 @@ function post(id, text, likes, ageHours = 0) {
   const createdAt = new Date(Date.now() - ageHours * 3600000).toISOString();
   return {
     uri: `at://${did}/app.bsky.feed.post/${id}`,
-    author: { handle: 'alice.bsky.social', displayName: 'Alice' },
+    author: { did, handle: 'alice.bsky.social', displayName: 'Alice' },
     record: { text, createdAt },
     indexedAt: createdAt,
     likeCount: likes,

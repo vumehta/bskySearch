@@ -143,6 +143,7 @@ describe('upstream bodies and response validation', () => {
     { posts: [null] },
     { posts: [{}] },
     { posts: [{ ...post, author: null }] },
+    { posts: [{ ...post, author: { handle: 'test.bsky.social' } }] },
     { posts: [{ ...post, record: {} }] },
     { posts: [], cursor: 42 },
     { posts: Array.from({ length: 101 }, () => post) },
@@ -709,6 +710,12 @@ describe('handler input boundaries', () => {
     expect(params.get('lang')).toBe('en');
     expect(params.get('limit')).toBe('100');
     expect(params.has('since')).toBe(false);
+  });
+
+  it('names the AppView on the proxied search request', async () => {
+    const handlers = upstream();
+    await GET(request(), context);
+    expect(handlers.search.mock.calls[0][1].headers['atproto-proxy']).toBe('did:web:api.bsky.app#bsky_appview');
   });
 
   it('uses process credentials when no runtime context is supplied', async () => {

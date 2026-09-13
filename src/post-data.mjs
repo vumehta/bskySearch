@@ -2,10 +2,30 @@ const isObject = (value) => value !== null && typeof value === 'object' && !Arra
 const optionalString = (value) => value == null || typeof value === 'string';
 const optionalCount = (value) => value == null || (Number.isFinite(value) && value >= 0);
 
-function hasSafeImageFields(embed) {
-  if (embed?.$type !== 'app.bsky.embed.images#view') return true;
-  return Array.isArray(embed.images) && embed.images.every((image) =>
-    isObject(image) && optionalString(image.thumb) && optionalString(image.alt));
+function previewSource(embed) {
+  switch (embed?.$type) {
+    case 'app.bsky.embed.images#view': return { items: embed.images, thumbKey: 'thumb' };
+    case 'app.bsky.embed.gallery#view': return { items: embed.items, thumbKey: 'thumbnail' };
+    case 'app.bsky.embed.video#view': return { items: [embed], thumbKey: 'thumbnail', video: true };
+    case 'app.bsky.embed.recordWithMedia#view': return previewSource(embed.media);
+    default: return null;
+  }
+}
+
+// Embeds without previews are not rendered, so they need no checks.
+function hasSafeEmbedPreviews(embed) {
+  const source = previewSource(embed);
+  return !source || (Array.isArray(source.items) && source.items.every((item) =>
+    isObject(item) && optionalString(item[source.thumbKey]) && optionalString(item.alt)));
+}
+
+// Previews of a validated embed as { kind: 'image' | 'video', images: [{ thumb, alt }] }, or null.
+export function getEmbedPreviews(embed) {
+  const source = previewSource(embed);
+  return source && {
+    kind: source.video ? 'video' : 'image',
+    images: source.items.map((item) => ({ thumb: item[source.thumbKey], alt: item.alt })),
+  };
 }
 
 // Validate the fields consumed by post cards before caching or committing data.
@@ -15,12 +35,14 @@ export function isRenderablePost(post) {
     && typeof post.uri === 'string'
     && /^at:\/\/[^/\s]+\/app\.bsky\.feed\.post\/[^/\s]+$/.test(post.uri)
     && isObject(post.author)
+    && typeof post.author.did === 'string'
+    && /^did:[a-z]+:[A-Za-z0-9._:%-]*[A-Za-z0-9._-]$/.test(post.author.did)
     && typeof post.author.handle === 'string'
     && /^[a-zA-Z0-9._-]+$/.test(post.author.handle)
     && optionalString(post.author.displayName)
     && optionalString(post.author.avatar)
     && optionalString(post.indexedAt)
-    && hasSafeImageFields(post.embed)
+    && hasSafeEmbedPreviews(post.embed)
     && (post.record == null || (isObject(post.record)
       && optionalString(post.record.createdAt)
       && optionalString(post.record.text)))
