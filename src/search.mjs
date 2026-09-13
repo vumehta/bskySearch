@@ -24,6 +24,7 @@ import {
   filterByDate,
   filterByLikes,
   formatRelativeTime,
+  getApiSort,
   getPostUrl,
   getProfileUrl,
   getSearchCacheKey,
@@ -33,6 +34,7 @@ import {
   normalizeTerm,
   sortPosts,
 } from './utils.mjs';
+import { appendAuthorBadges } from './author-badges.mjs';
 import { appendEngagementStats, SEARCH_STAT_CLASSES } from './post-stats.mjs';
 import { enforceSearchCacheLimit, getCachedSearch } from './cache.mjs';
 import { fetchJson } from './http.mjs';
@@ -42,6 +44,11 @@ import { setQueryParam, updateURLWithParams } from './url.mjs';
 import { cancelThreadRequest, cancelThreadRequests, initializeThreadToggle, isReplyPost, toggleThread } from './thread.mjs';
 
 const DERIVE_THROTTLE_MS = 120;
+const SORT_LABELS = {
+  top: 'Sorted by likes (high to low)',
+  latest: 'Sorted by time (newest first)',
+  bookmarks: 'Sorted by saves (high to low)',
+};
 
 const ingestedPostsByUri = new Map();
 let activeSearchController = null;
@@ -170,7 +177,7 @@ function createSearchContext() {
   return {
     generation: state.searchGeneration,
     signal: activeSearchController.signal,
-    sort: state.searchSort,
+    sort: getApiSort(state.searchSort),
     since: state.searchSince,
   };
 }
@@ -352,6 +359,7 @@ function createPostElement(post) {
   handleSpan.className = 'handle';
   handleSpan.textContent = `@${handle}`;
   authorInfo.appendChild(handleSpan);
+  appendAuthorBadges(authorInfo, post.author);
 
   header.appendChild(authorInfo);
 
@@ -596,10 +604,7 @@ function renderResults() {
     visibleCount < totalCount
       ? `Showing ${visibleCount} of ${totalCount} ${totalLabel}`
       : `${totalCount} ${totalLabel} found`;
-  resultsSortEl.textContent =
-    state.searchSort === 'latest'
-      ? 'Sorted by time (newest first)'
-      : 'Sorted by likes (high to low)';
+  resultsSortEl.textContent = SORT_LABELS[state.searchSort];
 
   const visiblePosts = state.allPosts.slice(0, visibleCount);
   syncVisibleResultPosts(visiblePosts);

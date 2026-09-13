@@ -83,7 +83,7 @@ test('normal handle URL submits the quote form and all sort controls reorder rea
   const calls = [];
   const quotes = [
     post('newest', 'Newest quote', 10, 1),
-    post('oldest', 'Oldest quote', 30, 3),
+    { ...post('oldest', 'Oldest quote', 30, 3), bookmarkCount: 5 },
     post('popular', 'Popular quote', 90, 2),
   ];
   await page.route('https://public.api.bsky.app/xrpc/**', async (route) => {
@@ -116,6 +116,8 @@ test('normal handle URL submits the quote form and all sort controls reorder rea
   await expect(texts).toHaveText(['Newest quote', 'Popular quote', 'Oldest quote']);
   await expect(page.getByRole('button', { name: 'Most Recent', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await page.getByRole('button', { name: 'Oldest First', exact: true }).click();
+  await expect(texts).toHaveText(['Oldest quote', 'Popular quote', 'Newest quote']);
+  await page.getByRole('button', { name: 'Most Saved', exact: true }).click();
   await expect(texts).toHaveText(['Oldest quote', 'Popular quote', 'Newest quote']);
   await page.getByRole('button', { name: 'Most Likes', exact: true }).click();
   await expect(texts).toHaveText(['Popular quote', 'Oldest quote', 'Newest quote']);

@@ -1,4 +1,5 @@
 import { PUBLIC_API } from './constants.mjs';
+import { appendAuthorBadges } from './author-badges.mjs';
 import { fetchJson } from './http.mjs';
 import { isRenderablePost } from './post-data.mjs';
 import { formatRelativeTime, isValidBskyUrl } from './utils.mjs';
@@ -63,6 +64,7 @@ function createThreadParentElement(post) {
   handleSpan.className = 'thread-parent-handle';
   handleSpan.textContent = `@${post.author.handle}`;
   header.appendChild(handleSpan);
+  appendAuthorBadges(header, post.author);
 
   const timeSpan = document.createElement('span');
   timeSpan.className = 'thread-parent-time';

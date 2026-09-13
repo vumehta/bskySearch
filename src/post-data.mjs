@@ -41,10 +41,13 @@ export function isRenderablePost(post) {
     && /^[a-zA-Z0-9._-]+$/.test(post.author.handle)
     && optionalString(post.author.displayName)
     && optionalString(post.author.avatar)
+    && optionalString(post.author.pronouns)
+    && (post.author.verification == null || isObject(post.author.verification))
+    && (post.author.status == null || isObject(post.author.status))
     && optionalString(post.indexedAt)
     && hasSafeEmbedPreviews(post.embed)
     && (post.record == null || (isObject(post.record)
       && optionalString(post.record.createdAt)
       && optionalString(post.record.text)))
-    && ['likeCount', 'repostCount', 'replyCount', 'quoteCount'].every((key) => optionalCount(post[key]));
+    && ['likeCount', 'repostCount', 'replyCount', 'quoteCount', 'bookmarkCount'].every((key) => optionalCount(post[key]));
 }

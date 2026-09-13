@@ -1,5 +1,5 @@
 import { state } from './state.mjs';
-import { normalizeSortValue } from './utils.mjs';
+import { normalizeSortValue, SEARCH_SORT_VALUES } from './utils.mjs';
 import {
   expandTermsToggle,
   minLikesInput,
@@ -25,6 +25,7 @@ import {
 import {
   handleQuoteTabClick,
   performQuoteSearch,
+  QUOTE_SORT_VALUES,
   updateQuoteTabs,
 } from './quotes.mjs';
 import {
@@ -34,9 +35,6 @@ import {
   prefersDarkScheme,
 } from './theme.mjs';
 import { updateURLWithParams } from './url.mjs';
-
-const SEARCH_SORT_VALUES = ['top', 'latest'];
-const QUOTE_SORT_VALUES = ['likes', 'recent', 'oldest'];
 
 function initFromURL() {
   const params = new URLSearchParams(window.location.search);
