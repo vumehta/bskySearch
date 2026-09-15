@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestDocument, TestNode } from './helpers/dom.mjs';
-import { appendAuthorBadges } from '../src/author-badges.mjs';
+import { appendAuthorBadges, disposeAuthorBadges, updateAuthorBadges } from '../src/author-badges.mjs';
 
 const live = (overrides = {}) => ({ status: 'app.bsky.actor.status#live', expiresAt: '2026-09-13T13:00:00Z', ...overrides });
 
@@ -46,6 +46,30 @@ describe('author badges', () => {
     expect(container.children).toHaveLength(1);
     vi.advanceTimersByTime(1);
     expect(container.children).toHaveLength(0);
+  });
+
+  it('cancels replaced and disposed badge timers, including nested cards', () => {
+    const root = new TestNode();
+    const container = new TestNode();
+    root.appendChild(container);
+    appendAuthorBadges(container, { status: live() });
+    updateAuthorBadges(container, { pronouns: 'they/them', status: live({ expiresAt: '2026-09-13T14:00:00Z' }) });
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(3600000);
+    expect(container.querySelector('.live')).not.toBe(null);
+    disposeAuthorBadges(root);
+    disposeAuthorBadges(root);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('keeps distant expiries alive across the maximum timeout interval', () => {
+    const container = new TestNode();
+    appendAuthorBadges(container, { status: live({ expiresAt: new Date(Date.now() + 2 ** 31 + 1000).toISOString() }) });
+    vi.advanceTimersByTime(2 ** 31 - 1);
+    expect(container.querySelector('.live')).not.toBe(null);
+    vi.advanceTimersByTime(1001);
+    expect(container.querySelector('.live')).toBe(null);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it.each([

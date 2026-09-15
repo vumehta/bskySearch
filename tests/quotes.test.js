@@ -131,6 +131,29 @@ describe('quote search and pagination', () => {
     expect(elements.quoteResults.querySelector('.quote-author').querySelector('.badge').textContent).toBe('Verified');
   });
 
+  it('clears LIVE timers across quote sorts, overlapping pages and replacement searches', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-13T12:00:00Z'));
+    const livePost = (id, likes) => ({ ...post(id, likes), author: { ...post(id).author, status: { status: 'app.bsky.actor.status#live', expiresAt: '2026-09-13T13:00:00Z' } } });
+    vi.stubGlobal('fetch', vi.fn(async url => url.includes('getPosts')
+      ? response({ posts: [livePost('original')] })
+      : response({ posts: [livePost('q1', 2), livePost('q2', 1)], cursor: 'c1' })));
+    await quotes.performQuoteSearch();
+    expect(vi.getTimerCount()).toBe(3);
+    for (const sort of ['bookmarks', 'likes', 'recent', 'oldest']) {
+      quotes.handleQuoteTabClick({ target: elements.quoteTabs.children.find(node => node.dataset.sort === sort) });
+      expect(vi.getTimerCount()).toBe(3);
+    }
+    fetch.mockResolvedValueOnce(response({ posts: [livePost('q1', 3), livePost('q3', 4)] }));
+    await quotes.loadMoreQuotes();
+    expect(vi.getTimerCount()).toBe(4);
+    fetch.mockResolvedValue(response({ error: 'Unavailable' }, 503));
+    await quotes.performQuoteSearch();
+    expect(elements.quoteOriginal.children).toHaveLength(0);
+    expect(elements.quoteResults.children).toHaveLength(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('deduplicates overlapping pages, refreshes changed cards, and stops repeated cursors', async () => {
     mockInitial();
     await quotes.performQuoteSearch();

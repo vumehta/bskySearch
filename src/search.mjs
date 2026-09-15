@@ -33,12 +33,12 @@ import {
   normalizeTerm,
   sortPosts,
 } from './utils.mjs';
-import { appendAuthorBadges } from './author-badges.mjs';
+import { appendAuthorBadges, disposeAuthorBadges, updateAuthorBadges } from './author-badges.mjs';
 import { appendEngagementStats, SEARCH_STAT_CLASSES } from './post-stats.mjs';
 import { enforceSearchCacheLimit, getCachedSearch } from './cache.mjs';
 import { fetchJson } from './http.mjs';
 import { getEmbedPreviews } from './post-data.mjs';
-import { createHighlightMatcher, getMatchedTermsForPost, getPostRenderFingerprint, ingestSearchPosts, nextSearchCursor, settleWithConcurrency, validateSearchPage } from './search-model.mjs';
+import { createHighlightMatcher, getMatchedTermsForPost, getPostContentFingerprint, getPostRenderFingerprint, ingestSearchPosts, nextSearchCursor, settleWithConcurrency, validateSearchPage } from './search-model.mjs';
 import { setQueryParam, updateURLWithParams } from './url.mjs';
 import { cancelThreadRequest, cancelThreadRequests, initializeThreadToggle, isReplyPost, toggleThread } from './thread.mjs';
 
@@ -51,6 +51,7 @@ const SORT_LABELS = {
 
 const ingestedPostsByUri = new Map();
 let activeSearchController = null;
+let currentSearchInputKey = null;
 const searchSeenCursors = new Map();
 let deriveTimerId = null;
 
@@ -176,8 +177,7 @@ function createSearchContext() {
   return {
     generation: state.searchGeneration,
     signal: activeSearchController.signal,
-    // The API ranks by top or latest; bookmarks re-rank the top results locally.
-    sort: state.searchSort === 'latest' ? 'latest' : 'top',
+    sort: getUpstreamSort(state.searchSort),
     since: state.searchSince,
   };
 }
@@ -446,6 +446,7 @@ function createPostElement(post) {
 
 function resetResultsRenderCache() {
   cancelThreadRequests();
+  disposeAuthorBadges(resultsDiv);
   cancelScheduledRender();
   resultsHeaderEl = null;
   resultsCountEl = null;
@@ -511,6 +512,12 @@ function ensureResultsShell() {
   resultsDiv.appendChild(loadMoreBtnEl);
 }
 
+function discardPostElement(element) {
+  cancelThreadRequest(element);
+  disposeAuthorBadges(element);
+  element.remove();
+}
+
 function syncVisibleResultPosts(visiblePosts) {
   const visibleUris = new Set();
   let renderedCount = 0;
@@ -525,15 +532,21 @@ function syncVisibleResultPosts(visiblePosts) {
     let postElement = previous?.element;
 
     if (!postElement || previous.fingerprint !== nextFingerprint) {
-      const nextElement = createPostElement(post);
-
-      if (postElement?.parentNode === resultsListEl) {
-        cancelThreadRequest(postElement);
-        resultsListEl.replaceChild(nextElement, postElement);
+      const contentFingerprint = getPostContentFingerprint(post);
+      if (postElement && previous.contentFingerprint === contentFingerprint) {
+        updateAuthorBadges(postElement.querySelector('.author-info'), post.author);
+        const stats = postElement.querySelector('.post-stats');
+        stats.textContent = '';
+        appendEngagementStats(stats, post, SEARCH_STAT_CLASSES);
+      } else {
+        const nextElement = createPostElement(post);
+        if (postElement) {
+          if (postElement.parentNode === resultsListEl) resultsListEl.insertBefore(nextElement, postElement);
+          discardPostElement(postElement);
+        }
+        postElement = nextElement;
       }
-
-      postElement = nextElement;
-      renderedPosts.set(uri, { element: postElement, fingerprint: nextFingerprint });
+      renderedPosts.set(uri, { element: postElement, fingerprint: nextFingerprint, contentFingerprint });
     }
 
     const currentAtIndex = resultsListEl.children[renderedCount];
@@ -544,18 +557,13 @@ function syncVisibleResultPosts(visiblePosts) {
   });
 
   for (const [uri, { element }] of renderedPosts) {
-    if (visibleUris.has(uri)) {
-      continue;
-    }
-    if (element.parentNode === resultsListEl) {
-      cancelThreadRequest(element);
-      element.remove();
-    }
+    if (visibleUris.has(uri)) continue;
+    discardPostElement(element);
     renderedPosts.delete(uri);
   }
 
   while (resultsListEl.children.length > renderedCount) {
-    resultsListEl.lastElementChild?.remove();
+    discardPostElement(resultsListEl.lastElementChild);
   }
 }
 
@@ -621,16 +629,36 @@ function renderResults() {
   syncLoadMoreButton();
 }
 
+function readSearchInput() {
+  const termsValue = termsInput.value.trim();
+  const rawSearchTerms = termsValue.split(',').map(normalizeTerm).filter(Boolean);
+  return {
+    rawSearchTerms,
+    searchTerms: expandSearchTerms(rawSearchTerms, expandTermsToggle.checked),
+    minLikes: Math.max(0, parseInt(minLikesInput.value, 10) || 0),
+    timeFilterHours: parseInt(timeFilterSelect.value, 10) || 24,
+    searchSort: normalizeSortValue(sortSelect.value),
+  };
+}
+
+// The API ranks by top or latest; bookmarks re-rank the top results locally.
+function getUpstreamSort(sort) {
+  return sort === 'latest' ? 'latest' : 'top';
+}
+
+// Identifies which upstream pages a search loads. Minimum likes and the
+// bookmarks sort apply locally, so they are not part of the key.
+function getSearchInputKey(input) {
+  return JSON.stringify([input.searchTerms, input.timeFilterHours, getUpstreamSort(input.searchSort)]);
+}
+
 // A new search replaces the previous one immediately, including its requests.
 export async function performSearch() {
   cancelDebouncedSearch();
   cancelActiveSearch();
-  const termsValue = termsInput.value.trim();
-  state.rawSearchTerms = termsValue.split(',').map(normalizeTerm).filter(Boolean);
-  state.searchTerms = expandSearchTerms(state.rawSearchTerms, expandTermsToggle.checked);
-  state.minLikes = Math.max(0, parseInt(minLikesInput.value, 10) || 0);
-  state.timeFilterHours = parseInt(timeFilterSelect.value, 10) || 24;
-  state.searchSort = normalizeSortValue(sortSelect.value);
+  const input = readSearchInput();
+  Object.assign(state, input);
+  currentSearchInputKey = getSearchInputKey(input);
   state.searchSince = state.searchTerms.length ? getSearchSince(state.timeFilterHours) : null;
   state.allPosts = [];
   // Empty string means the first page needs loading; null means exhausted.
@@ -698,6 +726,7 @@ export function clearSearchResults() {
   state.rawSearchTerms = [];
   state.searchTerms = [];
   state.searchSince = null;
+  currentSearchInputKey = null;
   ingestedPostsByUri.clear();
   state.renderLimit = INITIAL_RENDER_LIMIT;
   resetResultsRenderCache();
@@ -716,7 +745,20 @@ export function focusSearchInput() {
 }
 
 export function applySearchSortChange() {
+  const input = readSearchInput();
+  const canSortLocally = state.searchDebounceTimer === null
+    && input.searchTerms.length > 0
+    && currentSearchInputKey === getSearchInputKey(input);
   cancelDebouncedSearch();
+  state.searchSort = input.searchSort;
+  if (canSortLocally) {
+    // Top and Most Saved share upstream pages. Keep the fixed window, cursors,
+    // loaded cards and any in-flight page; only change their local ordering.
+    flushDerivedPostsRebuild();
+    renderResults();
+    updateSearchURL();
+    return;
+  }
   if (termsInput.value.trim()) return performSearch();
   updateSearchURL();
 }

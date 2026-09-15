@@ -1,5 +1,5 @@
 import { PUBLIC_API } from './constants.mjs';
-import { appendAuthorBadges } from './author-badges.mjs';
+import { appendAuthorBadges, disposeAuthorBadges } from './author-badges.mjs';
 import { fetchJson } from './http.mjs';
 import { isRenderablePost } from './post-data.mjs';
 import { formatRelativeTime, isValidBskyUrl } from './utils.mjs';
@@ -106,6 +106,7 @@ function removeThreadContexts(postElement) {
     if (!child.classList.contains('thread-context')) {
       continue;
     }
+    disposeAuthorBadges(child);
     child.remove();
     removed = true;
   }

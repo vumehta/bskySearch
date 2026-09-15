@@ -39,9 +39,9 @@ test.afterEach(async ({ page }) => {
 test('built page loads and minimum likes preserves loaded pages and pagination', async ({ page }, testInfo) => {
   const cursors = [];
   const pages = {
-    first: { posts: [post('first', 'apple first page', 20)], cursor: 'second' },
-    second: { posts: [post('second', 'apple second page', 60)], cursor: 'third' },
-    third: { posts: [post('third', 'apple third page', 100)], cursor: 'fourth' },
+    first: { posts: [{ ...post('first', 'apple first page', 20), bookmarkCount: 1 }], cursor: 'second' },
+    second: { posts: [{ ...post('second', 'apple second page', 60), bookmarkCount: 9 }], cursor: 'third' },
+    third: { posts: [{ ...post('third', 'apple third page', 100), bookmarkCount: 5 }], cursor: 'fourth' },
     fourth: { posts: [post('fourth', 'apple fourth page', 80)] },
   };
   await page.route('**/api/search?**', async (route) => {
@@ -71,12 +71,63 @@ test('built page loads and minimum likes preserves loaded pages and pagination',
   await expect(page.locator('#results .post-text')).toHaveText(['apple third page']);
   await page.getByLabel('Min. Likes', { exact: true }).fill('0');
   await expect(page.locator('#results .post')).toHaveCount(3);
+  await page.getByLabel('Sort', { exact: true }).selectOption('bookmarks');
+  await expect(page.locator('#results .post-text')).toHaveText(['apple second page', 'apple third page', 'apple first page']);
+  await page.getByLabel('Sort', { exact: true }).selectOption('top');
+  await expect(page.locator('#results .post-text')).toHaveText(['apple third page', 'apple second page', 'apple first page']);
   expect(cursors).toEqual(['first', 'second', 'third']);
   await page.getByRole('button', { name: 'Load More Results', exact: true }).click();
   await expect(page.locator('#results .post')).toHaveCount(4);
   expect(cursors).toEqual(['first', 'second', 'third', 'fourth']);
   await expect(page.getByRole('button', { name: 'Load More Results', exact: true })).toBeHidden();
   await page.screenshot({ path: testInfo.outputPath('search.png'), fullPage: true });
+});
+
+test('save and badge updates preserve revealed video and expanded thread context', async ({ page }, testInfo) => {
+  const base = post('reply', 'apple video reply', 20);
+  const reply = {
+    ...base,
+    bookmarkCount: 1,
+    record: { ...base.record, reply: { parent: { uri: originalUri } } },
+    embed: { $type: 'app.bsky.embed.video#view', thumbnail: 'https://video.bsky.app/fixture-preview.svg', alt: 'Video preview fixture' },
+  };
+  const updated = {
+    ...reply,
+    bookmarkCount: 9,
+    author: { ...reply.author, pronouns: 'they/them', verification: { verifiedStatus: 'valid' } },
+  };
+  const pages = {
+    first: { posts: [reply], cursor: 'second' },
+    second: { posts: [], cursor: 'third' },
+    third: { posts: [updated] },
+  };
+  await page.route('**/api/search?**', route => {
+    const cursor = new URL(route.request().url()).searchParams.get('cursor') || 'first';
+    return route.fulfill({ json: pages[cursor] });
+  });
+  await page.route('https://video.bsky.app/fixture-preview.svg', route => route.fulfill({
+    contentType: 'image/svg+xml',
+    body: '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><rect width="1" height="1" fill="white"/></svg>',
+  }));
+  await page.route('https://public.api.bsky.app/xrpc/app.bsky.feed.getPostThread?**', route => route.fulfill({
+    json: { thread: { parent: { post: post('original', 'Thread parent fixture', 10) } } },
+    headers: { 'Access-Control-Allow-Origin': '*' },
+  }));
+
+  await page.goto('/?terms=apple');
+  await page.getByRole('button', { name: 'Show video preview', exact: true }).click();
+  await expect(page.getByRole('img', { name: 'Video preview fixture', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'View Thread', exact: true }).click();
+  await expect(page.locator('.thread-parent-text')).toHaveText('Thread parent fixture');
+  await page.getByRole('button', { name: 'Load More Results', exact: true }).click();
+  await expect(page.getByLabel('9 saves', { exact: true })).toBeVisible();
+  await expect(page.locator('#results .pronouns')).toHaveText('they/them');
+  await expect(page.locator('#results .badge')).toHaveText('Verified');
+  await expect(page.getByRole('button', { name: 'Show video preview', exact: true })).toBeHidden();
+  await expect(page.getByRole('img', { name: 'Video preview fixture', exact: true })).toBeVisible();
+  await expect(page.locator('.thread-parent-text')).toHaveText('Thread parent fixture');
+  await expect(page.getByRole('button', { name: 'Hide Thread', exact: true })).toHaveAttribute('aria-expanded', 'true');
+  await page.screenshot({ path: testInfo.outputPath('preserved-disclosures.png'), fullPage: true });
 });
 
 test('normal handle URL submits the quote form and all sort controls reorder real cards', async ({ page }, testInfo) => {

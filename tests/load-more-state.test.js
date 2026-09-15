@@ -409,6 +409,49 @@ describe('search pagination and lifecycle', () => {
     if (field === 'embed') expect(nextCard.querySelector('.image-placeholder')).toBeTruthy();
   });
 
+  it('updates saves and badges in place, keeping a revealed preview', async () => {
+    const post = { ...makePost('media', 20), bookmarkCount: 1, embed: { $type: 'app.bsky.embed.video#view', thumbnail: 'https://video.bsky.app/thumbnail.jpg', alt: 'Clip' } };
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ cursor: 'c1', posts: [post] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ cursor: 'c2', posts: [post] }) });
+    await search.performSearch();
+    const card = elements.results.querySelector('.post');
+    card.querySelector('.image-placeholder').firstElementChild.listeners.get('click')();
+    const updated = { ...post, bookmarkCount: 99, author: { ...post.author, pronouns: 'they/them', verification: { verifiedStatus: 'valid' } } };
+    globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ posts: [updated] }) }));
+    await search.loadMore();
+    expect(elements.results.querySelector('.post')).toBe(card);
+    expect(card.querySelectorAll('.post-image')).toHaveLength(1);
+    expect(card.querySelector('.author-info').children.map((node) => node.textContent).slice(2)).toEqual(['they/them', 'Verified']);
+    expect(card.querySelector('.post-stats').children.at(-1).getAttribute('aria-label')).toBe('99 saves');
+  });
+
+  it('keeps a pending or expanded thread while updating its card in place', async () => {
+    const reply = { ...makePost('reply', 20), record: { ...makePost('reply', 20).record, reply: { parent: { uri: 'at://did:plc:test/app.bsky.feed.post/parent' } } } };
+    const pending = deferred();
+    let saves = 0;
+    globalThis.fetch = vi.fn(async (url) => (url.includes('getPostThread')
+      ? pending.promise
+      : { ok: true, json: async () => ({ cursor: `c${saves}`, posts: [{ ...reply, bookmarkCount: ++saves }] }) }));
+    await search.performSearch();
+    const card = elements.results.querySelector('.post');
+    const toggle = card.querySelector('button.thread-link');
+    const expanding = toggle.listeners.get('click')();
+    await search.loadMore();
+    expect(elements.results.querySelector('.post')).toBe(card);
+    expect(toggle.textContent).toBe('Cancel loading');
+    expect(fetch.mock.calls.find(([url]) => url.includes('getPostThread'))[1].signal.aborted).toBe(false);
+
+    pending.resolve({ ok: true, json: async () => ({ thread: { parent: { post: makePost('parent', 1) } } }) });
+    await expanding;
+    const context = card.querySelector('.thread-context');
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    await search.loadMore();
+    expect(card.querySelector('.thread-context')).toBe(context);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(card.querySelector('.post-stats').children.at(-1).getAttribute('aria-label')).toBe('4 saves');
+  });
+
   it.each([
     [
       'a gallery',
@@ -470,6 +513,23 @@ describe('search pagination and lifecycle', () => {
     expect(card.querySelector('.post-stats').children.at(-1).getAttribute('aria-label')).toBe('4 saves');
     vi.advanceTimersByTime(3600000);
     expect(authorDetails()).toEqual(['she/her', 'Verifier']);
+  });
+
+  it('releases LIVE expiry timers when cards are filtered out or results cleared', async () => {
+    vi.useFakeTimers();
+    const status = { status: 'app.bsky.actor.status#live', expiresAt: new Date(Date.now() + 3600000).toISOString() };
+    const livePost = (id) => ({ ...makePost(id, 20), author: { did: 'did:plc:test', handle: 'alice.bsky.social', status } });
+    globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ posts: [livePost('one'), livePost('two')] }) }));
+    await search.performSearch();
+    expect(vi.getTimerCount()).toBe(2);
+    elements.minLikes.value = '100';
+    search.applyMinLikesFilter();
+    expect(vi.getTimerCount()).toBe(0);
+    elements.minLikes.value = '0';
+    search.applyMinLikesFilter();
+    expect(vi.getTimerCount()).toBe(2);
+    search.clearSearchResults();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('links an author with an unverified handle by DID', async () => {

@@ -111,10 +111,7 @@ themeSelect.addEventListener('change', (event) => {
 
 prefersDarkScheme.addEventListener('change', handleSystemThemeChange);
 
-sortSelect.addEventListener('change', () => {
-  state.searchSort = normalizeSortValue(sortSelect.value);
-  applySearchSortChange();
-});
+sortSelect.addEventListener('change', applySearchSortChange);
 
 quoteTabs.addEventListener('click', handleQuoteTabClick);
 
