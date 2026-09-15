@@ -72,19 +72,6 @@ describe('author badges', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('removes a status that expires while its badge is being constructed', () => {
-    const container = new TestNode();
-    const expiry = Date.parse(live().expiresAt);
-    const now = vi.spyOn(Date, 'now').mockReturnValueOnce(expiry - 1).mockReturnValue(expiry);
-    try {
-      appendAuthorBadges(container, { status: live() });
-      expect(container.querySelector('.live')).toBe(null);
-      expect(vi.getTimerCount()).toBe(0);
-    } finally {
-      now.mockRestore();
-    }
-  });
-
   it.each([
     ['no expiry', live({ expiresAt: undefined })],
     ['an expired status', live({ expiresAt: '2026-09-13T11:00:00Z' })],

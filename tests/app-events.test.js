@@ -95,11 +95,13 @@ describe('app search controls', () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['searchBtn', 'terms', 'minLikes'])('%s submits immediately and cancels the pending debounce', async (id) => {
+  it.each([
+    ['searchBtn', 'click'], ['terms', 'keypress'], ['minLikes', 'keypress'], ['sortSelect', 'change'],
+  ])('%s submits immediately and cancels the pending debounce', async (id, event) => {
     await bootApp();
     elements.terms.value = 'apple';
     dispatch('terms', 'input');
-    await dispatch(id, id === 'searchBtn' ? 'click' : 'keypress', { key: 'Enter' });
+    await dispatch(id, event, { key: 'Enter' });
     await vi.advanceTimersByTimeAsync(0);
     expect(elements.results.querySelectorAll('.post')).toHaveLength(1);
     const card = elements.results.querySelector('.post');
@@ -287,19 +289,6 @@ describe('app search controls', () => {
     expect(searchRequests()).toHaveLength(3);
   });
 
-  it('starts the pending term search when the sort changes during the debounce', async () => {
-    await bootApp('?terms=apple');
-    elements.terms.value = 'banana';
-    dispatch('terms', 'input');
-    elements.sortSelect.value = 'bookmarks';
-    dispatch('sortSelect', 'change');
-    await vi.advanceTimersByTimeAsync(0);
-    expect(state.searchDebounceTimer).toBeNull();
-    expect(state).toMatchObject({ searchTerms: ['banana'], searchSort: 'bookmarks' });
-    expect(searchRequests().at(-1).get('term')).toBe('banana');
-    await vi.advanceTimersByTimeAsync(300);
-    expect(searchRequests()).toHaveLength(2);
-  });
 });
 
 describe('app URL initialization', () => {
