@@ -26,35 +26,27 @@ function createBadge({ className, text, title }) {
 }
 
 // Cards are not rebuilt when a status lapses, so the badge removes itself.
-// Browsers run longer timeouts immediately, hence the clamp.
+// Browsers run longer timeouts immediately, hence the clamp and reschedule.
 const MAX_TIMEOUT_MS = 2 ** 31 - 1;
 const expiryTimers = new WeakMap();
 function removeAtExpiry(badge, expiresAt) {
-  const expiry = Date.parse(expiresAt);
-  const schedule = () => {
-    const remaining = expiry - Date.now();
-    if (remaining <= 0) {
-      expiryTimers.delete(badge);
-      badge.remove();
-      return;
-    }
-    expiryTimers.set(badge, setTimeout(schedule, Math.min(remaining, MAX_TIMEOUT_MS)));
-  };
-  schedule();
+  const remaining = Date.parse(expiresAt) - Date.now();
+  if (remaining <= 0) {
+    badge.remove();
+    return;
+  }
+  expiryTimers.set(badge, setTimeout(() => removeAtExpiry(badge, expiresAt), Math.min(remaining, MAX_TIMEOUT_MS)));
 }
 
 // Call before removing a card or subtree so timers cannot retain detached DOM.
 export function disposeAuthorBadges(container) {
-  for (const badge of container.querySelectorAll('.badge')) {
-    clearTimeout(expiryTimers.get(badge));
-    expiryTimers.delete(badge);
-  }
+  for (const badge of container.querySelectorAll('.live')) clearTimeout(expiryTimers.get(badge));
 }
 
 export function updateAuthorBadges(container, author) {
   disposeAuthorBadges(container);
-  for (const node of [...container.querySelectorAll('.badge'), ...container.querySelectorAll('.pronouns')]) {
-    node.remove();
+  for (const selector of ['.pronouns', '.badge']) {
+    for (const node of container.querySelectorAll(selector)) node.remove();
   }
   appendAuthorBadges(container, author);
 }

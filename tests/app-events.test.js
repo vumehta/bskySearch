@@ -234,19 +234,71 @@ describe('app search controls', () => {
     expect(elements.results.querySelector('.results-header').textContent).toContain('Sorted by saves (high to low)');
   });
 
-  it('re-ranks cached top results when the sort changes to saves', async () => {
-    fetch.mockImplementation(async () => Response.json({ posts: [
-      { ...makePost('liked'), bookmarkCount: 1 },
-      { ...makePost('saved'), likeCount: 10, bookmarkCount: 9 },
-    ] }));
+  it('re-ranks loaded pages locally when the sort changes between top and saves', async () => {
+    let page = 0;
+    fetch.mockImplementation(async () => Response.json({
+      posts: [{ ...makePost(++page), bookmarkCount: page === 3 ? 9 : 1 }],
+      cursor: page < 3 ? `cursor-${page}` : null,
+    }));
     await bootApp('?terms=apple');
-    expect(state.allPosts.map((post) => post.uri)).toEqual([makePost('liked').uri, makePost('saved').uri]);
+    await search.loadMore();
+    expect(state.allPosts).toHaveLength(3);
+    const { searchSince, renderLimit } = state;
+
     elements.sortSelect.value = 'bookmarks';
     dispatch('sortSelect', 'change');
     await vi.advanceTimersByTimeAsync(0);
-    expect(searchRequests().map((params) => params.get('sort'))).toEqual(['top']);
-    expect(state.allPosts.map((post) => post.uri)).toEqual([makePost('saved').uri, makePost('liked').uri]);
+    expect(searchRequests()).toHaveLength(3);
+    expect(state.allPosts.map((post) => post.uri)).toEqual([3, 1, 2].map((id) => makePost(id).uri));
+    expect(state).toMatchObject({ searchSort: 'bookmarks', searchSince, renderLimit });
+    expect(state.currentCursors.apple).toBeNull();
+    expect(elements.results.querySelector('.results-header').textContent).toContain('Sorted by saves (high to low)');
     expect(window.location.searchParams.get('searchSort')).toBe('bookmarks');
+
+    elements.sortSelect.value = 'top';
+    dispatch('sortSelect', 'change');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(searchRequests()).toHaveLength(3);
+    expect(state.allPosts.map((post) => post.uri)).toEqual([1, 2, 3].map((id) => makePost(id).uri));
+    expect(window.location.searchParams.has('searchSort')).toBe(false);
+  });
+
+  it('keeps an in-flight page alive when the sort changes between top and saves', async () => {
+    fetch.mockImplementation(async (url) => Response.json({
+      posts: [makePost()],
+      cursor: new URL(url, window.location).searchParams.has('cursor') ? 'c2' : 'c1',
+    }));
+    await bootApp('?terms=apple');
+    const pending = deferred();
+    fetch.mockReturnValueOnce(pending.promise);
+    const loading = search.loadMore();
+    const signal = fetch.mock.calls.at(-1)[1].signal;
+    elements.sortSelect.value = 'bookmarks';
+    dispatch('sortSelect', 'change');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(signal.aborted).toBe(false);
+    expect(state).toMatchObject({ isLoading: true, searchSort: 'bookmarks' });
+
+    pending.resolve(Response.json({ posts: [{ ...makePost('saved'), likeCount: 10, bookmarkCount: 9 }] }));
+    await loading;
+    expect(state.allPosts.map((post) => post.uri)).toEqual([makePost('saved').uri, makePost().uri]);
+    expect(state.isLoading).toBe(false);
+    expect(state.currentCursors.apple).toBeNull();
+    expect(searchRequests()).toHaveLength(3);
+  });
+
+  it('starts the pending term search when the sort changes during the debounce', async () => {
+    await bootApp('?terms=apple');
+    elements.terms.value = 'banana';
+    dispatch('terms', 'input');
+    elements.sortSelect.value = 'bookmarks';
+    dispatch('sortSelect', 'change');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(state.searchDebounceTimer).toBeNull();
+    expect(state).toMatchObject({ searchTerms: ['banana'], searchSort: 'bookmarks' });
+    expect(searchRequests().at(-1).get('term')).toBe('banana');
+    await vi.advanceTimersByTimeAsync(300);
+    expect(searchRequests()).toHaveLength(2);
   });
 });
 

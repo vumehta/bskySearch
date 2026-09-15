@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createHighlightMatcher, getPostRenderFingerprint, ingestSearchPosts, nextSearchCursor, validateSearchPage } from '../src/search-model.mjs';
+import { createHighlightMatcher, getPostContentFingerprint, getPostRenderFingerprint, ingestSearchPosts, nextSearchCursor, validateSearchPage } from '../src/search-model.mjs';
 import { getEmbedPreviews, isRenderablePost } from '../src/post-data.mjs';
 
 const renderablePost = () => ({
@@ -93,7 +93,7 @@ describe('production search transformations', () => {
     expect(isRenderablePost({ ...post, author: { ...post.author, status: 'app.bsky.actor.status#live' } })).toBe(false);
   });
 
-  it('changes the render fingerprint when saves or author badge fields change', () => {
+  it('keeps saves and author badge fields out of the content fingerprint', () => {
     const base = renderablePost();
     for (const changed of [
       { ...base, bookmarkCount: 1 },
@@ -102,7 +102,10 @@ describe('production search transformations', () => {
       { ...base, author: { ...base.author, status: { status: 'app.bsky.actor.status#live' } } },
     ]) {
       expect(getPostRenderFingerprint(changed)).not.toBe(getPostRenderFingerprint(base));
+      expect(getPostContentFingerprint(changed)).toBe(getPostContentFingerprint(base));
     }
+    const moved = { ...base, author: { ...base.author, did: 'did:plc:other' } };
+    expect(getPostContentFingerprint(moved)).not.toBe(getPostContentFingerprint(base));
   });
 
   it.each([undefined, null, 'plc:test', 'did:plc:', 'did:PLC:test', 'did:plc:te st'])

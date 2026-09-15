@@ -177,8 +177,7 @@ function createSearchContext() {
   return {
     generation: state.searchGeneration,
     signal: activeSearchController.signal,
-    // The API ranks by top or latest; bookmarks re-rank the top results locally.
-    sort: state.searchSort === 'latest' ? 'latest' : 'top',
+    sort: getUpstreamSort(state.searchSort),
     since: state.searchSince,
   };
 }
@@ -513,6 +512,12 @@ function ensureResultsShell() {
   resultsDiv.appendChild(loadMoreBtnEl);
 }
 
+function discardPostElement(element) {
+  cancelThreadRequest(element);
+  disposeAuthorBadges(element);
+  element.remove();
+}
+
 function syncVisibleResultPosts(visiblePosts) {
   const visibleUris = new Set();
   let renderedCount = 0;
@@ -536,9 +541,8 @@ function syncVisibleResultPosts(visiblePosts) {
       } else {
         const nextElement = createPostElement(post);
         if (postElement) {
-          cancelThreadRequest(postElement);
-          disposeAuthorBadges(postElement);
-          if (postElement.parentNode === resultsListEl) resultsListEl.replaceChild(nextElement, postElement);
+          if (postElement.parentNode === resultsListEl) resultsListEl.insertBefore(nextElement, postElement);
+          discardPostElement(postElement);
         }
         postElement = nextElement;
       }
@@ -553,22 +557,13 @@ function syncVisibleResultPosts(visiblePosts) {
   });
 
   for (const [uri, { element }] of renderedPosts) {
-    if (visibleUris.has(uri)) {
-      continue;
-    }
-    if (element.parentNode === resultsListEl) {
-      cancelThreadRequest(element);
-      disposeAuthorBadges(element);
-      element.remove();
-    }
+    if (visibleUris.has(uri)) continue;
+    discardPostElement(element);
     renderedPosts.delete(uri);
   }
 
   while (resultsListEl.children.length > renderedCount) {
-    const element = resultsListEl.lastElementChild;
-    cancelThreadRequest(element);
-    disposeAuthorBadges(element);
-    element.remove();
+    discardPostElement(resultsListEl.lastElementChild);
   }
 }
 
@@ -646,11 +641,15 @@ function readSearchInput() {
   };
 }
 
+// The API ranks by top or latest; bookmarks re-rank the top results locally.
+function getUpstreamSort(sort) {
+  return sort === 'latest' ? 'latest' : 'top';
+}
+
+// Identifies which upstream pages a search loads. Minimum likes and the
+// bookmarks sort apply locally, so they are not part of the key.
 function getSearchInputKey(input) {
-  return JSON.stringify([
-    input.rawSearchTerms, input.searchTerms, input.timeFilterHours,
-    input.searchSort === 'latest' ? 'latest' : 'top',
-  ]);
+  return JSON.stringify([input.searchTerms, input.timeFilterHours, getUpstreamSort(input.searchSort)]);
 }
 
 // A new search replaces the previous one immediately, including its requests.
@@ -751,11 +750,10 @@ export function applySearchSortChange() {
     && input.searchTerms.length > 0
     && currentSearchInputKey === getSearchInputKey(input);
   cancelDebouncedSearch();
+  state.searchSort = input.searchSort;
   if (canSortLocally) {
     // Top and Most Saved share upstream pages. Keep the fixed window, cursors,
     // loaded cards and any in-flight page; only change their local ordering.
-    state.searchSort = input.searchSort;
-    state.minLikes = input.minLikes;
     flushDerivedPostsRebuild();
     renderResults();
     updateSearchURL();
