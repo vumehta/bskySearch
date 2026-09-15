@@ -49,25 +49,34 @@ export function createHighlightMatcher(terms) {
   };
 }
 
-export function getPostRenderFingerprint(post) {
+// Changes to these fields require rebuilding the card's content and controls.
+// Counts and badges can be updated without losing media or thread disclosure.
+export function getPostContentFingerprint(post) {
   return JSON.stringify([
     post.uri || '',
+    post.author?.did || '',
     post.author?.handle || '',
     post.author?.displayName || '',
     post.author?.avatar || '',
-    post.author?.pronouns || '',
-    post.author?.verification || null,
-    post.author?.status || null,
     post.indexedAt || '',
     post.record?.createdAt || '',
     post.record?.text || '',
     post.record?.reply || null,
     post.embed || null,
+    getMatchedTermsForPost(post),
+  ]);
+}
+
+export function getPostRenderFingerprint(post) {
+  return JSON.stringify([
+    getPostContentFingerprint(post),
+    post.author?.pronouns || '',
+    post.author?.verification || null,
+    post.author?.status || null,
     post.likeCount || 0,
     post.repostCount || 0,
     post.replyCount || 0,
     post.bookmarkCount || 0,
-    getMatchedTermsForPost(post),
   ]);
 }
 

@@ -71,6 +71,21 @@ describe('thread disclosure', () => {
     expect(context(card).querySelector('.badge').textContent).toBe('Verified');
   });
 
+  it('clears LIVE badge timers when hiding a thread, including cached parents', async () => {
+    const { card } = createCard();
+    const author = { ...parent().author, status: { status: 'app.bsky.actor.status#live', expiresAt: '2026-01-01T13:00:00Z' } };
+    fetchMock.mockResolvedValueOnce(response({ thread: { parent: { post: { ...parent(), author } } } }));
+    await thread.toggleThread(post, card);
+    expect(vi.getTimerCount()).toBe(1);
+    await thread.toggleThread(post, card);
+    expect(vi.getTimerCount()).toBe(0);
+    await thread.toggleThread(post, card);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(1);
+    await thread.toggleThread(post, card);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('refreshes cached parents after the cache lifetime', async () => {
     const { card } = createCard();
     await thread.toggleThread(post, card);
