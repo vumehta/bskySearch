@@ -1,7 +1,8 @@
 // The evidence sent to the topic classifier, shared by the browser (which
 // builds it from a post) and the API (which re-normalizes whatever arrives).
 // Every field is written by strangers, so it is only ever used as classifier
-// input; nothing here is rendered or interpreted.
+// input or shown as plain text by the post card (see post-embeds.mjs), which
+// reads embeds through the same helpers; nothing here is interpreted.
 
 export const TOPIC_LIMITS = Object.freeze({
   maxItems: 25,
@@ -21,7 +22,7 @@ export const TOPIC_LIMITS = Object.freeze({
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 
 // Control characters and runs of whitespace carry no meaning for the classifier.
-function cleanText(value, maxLength) {
+export function cleanText(value, maxLength) {
   if (typeof value !== 'string') return '';
   let text = value.replace(/[\x00-\x1F\x7F-\x9F]+/g, ' ').replace(/\s+/g, ' ').trim();
   if (text.length > maxLength) {
@@ -118,10 +119,16 @@ function getLinkLocation(uri) {
   }
 }
 
-function getLinkCard(embed) {
-  const external = embed?.$type === 'app.bsky.embed.external#view' ? embed.external : null;
+// A quote with media keeps its link card or images one level down.
+const getMedia = (embed) => (embed?.$type === 'app.bsky.embed.recordWithMedia#view' ? embed.media : embed);
+
+// Raw fields of a link card. `uri` is for the post card, which validates it
+// before linking; the classifier is only ever sent the site and the path.
+export function getLinkCard(embed) {
+  const media = getMedia(embed);
+  const external = media?.$type === 'app.bsky.embed.external#view' ? media.external : null;
   if (!isObject(external)) return null;
-  return { title: external.title, description: external.description, ...getLinkLocation(external.uri) };
+  return { uri: external.uri, title: external.title, description: external.description, ...getLinkLocation(external.uri) };
 }
 
 function getImageDescriptions(embed) {
@@ -146,12 +153,13 @@ function getQuotedRecord(embed) {
   return isObject(view) && isObject(view.value) ? view : null;
 }
 
-function getQuotedPost(embed) {
+// Raw fields of a resolved quote, all unvalidated, with its own link card.
+export function getQuotedPost(embed) {
   const quoted = getQuotedRecord(embed);
   if (!quoted) return null;
   const embeds = Array.isArray(quoted.embeds) ? quoted.embeds : [];
-  const linkCard = embeds.map((item) => getLinkCard(item) || getLinkCard(item?.media)).find(Boolean);
-  return { text: quoted.value.text, author: formatAuthor(quoted.author), link_title: linkCard?.title };
+  const linkCard = embeds.map((item) => getLinkCard(item)).find(Boolean) || null;
+  return { uri: quoted.uri, author: quoted.author, text: quoted.value.text, linkCard };
 }
 
 // Reaction posts ("wow") keep their subject in a link card, an image, or the
@@ -159,12 +167,16 @@ function getQuotedPost(embed) {
 export function buildTopicContext(post) {
   if (!isObject(post)) return null;
   const embed = isObject(post.embed) ? post.embed : null;
-  const media = embed?.$type === 'app.bsky.embed.recordWithMedia#view' ? embed.media : embed;
+  const quoted = getQuotedPost(embed);
   return sanitizeTopicContext({
     post_text: post.record?.text,
     author: formatAuthor(post.author),
-    link_card: getLinkCard(media),
-    image_descriptions: getImageDescriptions(media),
-    quoted_post: getQuotedPost(embed),
+    link_card: getLinkCard(embed),
+    image_descriptions: getImageDescriptions(getMedia(embed)),
+    quoted_post: quoted && {
+      text: quoted.text,
+      author: formatAuthor(quoted.author),
+      link_title: quoted.linkCard?.title,
+    },
   });
 }

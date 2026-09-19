@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 import {
+  getHttpUrl,
+  getPostUrlFromAtUri,
   isValidBskyUrl,
   parseBlueskyPostUrl,
   getSearchCacheKey,
@@ -32,6 +34,64 @@ describe('profile and post links', () => {
     const unverified = { ...author, handle: 'handle.invalid' };
     expect(getProfileUrl(unverified)).toBe('https://bsky.app/profile/did:plc:abc123');
     expect(getPostUrl({ uri, author: unverified })).toBe('https://bsky.app/profile/did:plc:abc123/post/xyz');
+  });
+});
+
+describe('getPostUrlFromAtUri', () => {
+  it('links an embedded post by the DID in its AT URI', () => {
+    expect(getPostUrlFromAtUri('at://did:plc:abc123/app.bsky.feed.post/xyz')).toBe('https://bsky.app/profile/did:plc:abc123/post/xyz');
+    expect(getPostUrlFromAtUri('at://did:web:example.com/app.bsky.feed.post/3kabc')).toBe('https://bsky.app/profile/did:web:example.com/post/3kabc');
+  });
+
+  it.each([
+    'at://alice.bsky.social/app.bsky.feed.post/xyz',
+    'at://did:plc:abc123/app.bsky.feed.like/xyz',
+    'at://did:plc:abc123/app.bsky.feed.post/xyz/extra',
+    'at://did:plc:abc123/app.bsky.feed.post/..',
+    'at://did:plc:abc 123/app.bsky.feed.post/xyz',
+    'at://did:plc:abc123/app.bsky.feed.post/xyz?next=https://evil.example',
+    'https://bsky.app/profile/did:plc:abc123/post/xyz',
+    '',
+    null,
+    undefined,
+    7,
+    { uri: 'at://did:plc:abc123/app.bsky.feed.post/xyz' },
+  ])('returns null for %j', (uri) => {
+    expect(getPostUrlFromAtUri(uri)).toBeNull();
+  });
+});
+
+describe('getHttpUrl', () => {
+  it('returns the parsed form of http and https URLs', () => {
+    expect(getHttpUrl('https://news.example/story?id=1#top')).toBe('https://news.example/story?id=1#top');
+    expect(getHttpUrl('http://news.example')).toBe('http://news.example/');
+    expect(getHttpUrl('  HTTPS://News.Example/a b ')).toBe('https://news.example/a%20b');
+  });
+
+  it.each([
+    'javascript:alert(1)',
+    'JaVaScRiPt:alert(1)',
+    ' javascript:alert(1)',
+    'java	script:alert(1)',
+    'javascript://news.example/%0Aalert(1)',
+    'data:text/html,<script>alert(1)</script>',
+    'vbscript:msgbox(1)',
+    'blob:https://news.example/1234',
+    'file:///etc/passwd',
+    'ftp://files.example/report',
+    'mailto:someone@example.com',
+    '//news.example/story',
+    '/api/classify',
+    'news.example/story',
+    'https://',
+    '',
+    null,
+    undefined,
+    7,
+    ['https://news.example/'],
+    { href: 'https://news.example/' },
+  ])('returns null for %j', (url) => {
+    expect(getHttpUrl(url)).toBeNull();
   });
 });
 

@@ -34,6 +34,7 @@ import {
   sortPosts,
 } from './utils.mjs';
 import { appendAuthorBadges } from './author-badges.mjs';
+import { appendPostEmbeds } from './post-embeds.mjs';
 import { appendEngagementStats, SEARCH_STAT_CLASSES } from './post-stats.mjs';
 import { enforceSearchCacheLimit, getCachedSearch } from './cache.mjs';
 import { fetchJson } from './http.mjs';
@@ -459,6 +460,8 @@ function createPostElement(post) {
     imagesContainer.appendChild(placeholder);
     postDiv.appendChild(imagesContainer);
   }
+
+  appendPostEmbeds(postDiv, post.embed, (value) => createHighlightedText(value, state.searchTerms));
 
   const statsDiv = document.createElement('div');
   statsDiv.className = 'post-stats';

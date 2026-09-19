@@ -884,6 +884,99 @@ button:disabled {
     flex-wrap: wrap;
 }
 
+/* A post's link card and quoted post. Both sit on the card's own background. */
+.embed-link,
+.embed-quote {
+    margin: 0 0 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 14px;
+}
+
+.embed-quote {
+    border-left: 3px solid var(--accent);
+}
+
+.embed-quote .embed-link {
+    margin: 8px 0 0;
+}
+
+.embed-link-title,
+.embed-quote-text {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+}
+
+.embed-link-title {
+    -webkit-line-clamp: 2;
+    font-weight: 600;
+    color: var(--text);
+    text-decoration: none;
+}
+
+a.embed-link-title {
+    color: var(--accent);
+}
+
+a.embed-link-title:hover,
+a.embed-link-title:focus-visible {
+    text-decoration: underline;
+}
+
+a.embed-link-title:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.embed-link-site {
+    overflow-wrap: anywhere;
+    color: var(--muted-2);
+    font-size: 13px;
+}
+
+.embed-link-description {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--muted);
+}
+
+.embed-quote-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 2px 8px;
+    margin-bottom: 4px;
+}
+
+.embed-quote-name,
+.embed-quote-handle {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.embed-quote-name {
+    font-weight: 600;
+}
+
+.embed-quote-handle {
+    color: var(--muted-2);
+    font-size: 13px;
+}
+
+.embed-quote-link {
+    margin-left: auto;
+    font-size: 13px;
+    white-space: nowrap;
+}
+
+.embed-quote-text {
+    -webkit-line-clamp: 4;
+}
+
 @media (max-width: 600px) {
     body {
         padding: 12px;
