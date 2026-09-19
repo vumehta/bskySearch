@@ -126,13 +126,33 @@ describe('topic filter', () => {
     revealButton().listeners.get('click')();
     expect(renderedPosts().map((post) => post.className)).toEqual(['post', 'post off-topic']);
     expect(renderedPosts()[1].querySelector('.off-topic-tag').textContent).toBe('Off-topic \xB7 4% match');
+    // Kept posts show their score too, so the whole range is visible when tuning.
+    expect(renderedPosts()[0].querySelector('.topic-score-tag').textContent).toBe('96% match');
+    expect(renderedPosts()[0].querySelector('.off-topic-tag')).toBeNull();
     expect(summaryText()).toBe('1 off-topic post shown dimmed.');
     expect(revealButton().textContent).toBe('Hide them again');
     expect(revealButton().getAttribute('aria-pressed')).toBe('true');
 
     revealButton().listeners.get('click')();
     expect(renderedPosts().map((post) => post.className)).toEqual(['post']);
+    expect(renderedPosts()[0].querySelector('.topic-score-tag')).toBeNull();
     expect(revealButton().getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('offers the scores even when nothing was hidden', async () => {
+    installFetch({
+      posts: [makePost('company', 'Apple announces a new iPhone', 90)],
+      classify: scoredBy(() => 0.71),
+    });
+    state.hideOffTopic = true;
+    await search.performSearch();
+    await vi.waitFor(() => expect(summaryText()).toBe('No off-topic posts found.'));
+    expect(revealButton().style.display).toBe('');
+    expect(revealButton().textContent).toBe('Show scores');
+
+    revealButton().listeners.get('click')();
+    expect(renderedPosts()[0].querySelector('.topic-score-tag').textContent).toBe('71% match');
+    expect(revealButton().textContent).toBe('Hide scores');
   });
 
   it('scores only posts that pass the cheap filters, with their full evidence', async () => {
@@ -158,7 +178,7 @@ describe('topic filter', () => {
         context: {
           post_text: 'wow',
           author: 'Alice (@alice.bsky.social)',
-          link_card: { title: 'Apple beats earnings', description: 'Record quarter.', site: 'news.example' },
+          link_card: { title: 'Apple beats earnings', description: 'Record quarter.', site: 'news.example', path: '/story' },
         },
       }],
     });

@@ -565,7 +565,8 @@ button:disabled {
     color: var(--muted);
 }
 
-.off-topic-tag {
+.off-topic-tag,
+.topic-score-tag {
     background: var(--surface-hover);
     color: var(--muted);
 }

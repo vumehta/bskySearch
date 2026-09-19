@@ -172,12 +172,14 @@ test('topic filter hides off-topic posts, reveals them on request, and survives 
     title: 'Apple beats earnings',
     description: 'A record quarter.',
     site: 'news.example',
+    path: '/apple',
   });
 
   await page.getByRole('button', { name: 'Show them', exact: true }).click();
   await expect(page.locator('#results .post')).toHaveCount(3);
   await expect(page.locator('#results .post.off-topic .off-topic-tag')).toHaveText('Off-topic \xB7 3% match');
   await expect(page.locator('#results .post.off-topic .post-text')).toHaveText('My apple pie recipe');
+  await expect(page.locator('#results .topic-score-tag')).toHaveText(['95% match', '95% match']);
   await page.screenshot({ path: testInfo.outputPath('topic-filter.png'), fullPage: true });
 
   await page.reload();

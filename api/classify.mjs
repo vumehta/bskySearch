@@ -19,7 +19,7 @@ const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504, 529]);
 
 const MAX_BODY_CHARS = 256 * 1024;
 
-// A score depends only on the keyword and the evidence, so it is cached under
+// A score depends only on the question and the evidence, so it is cached under
 // a hash of exactly those. A caller cannot plant a score for a real post,
 // because a different text is a different key.
 const SCORE_CACHE_TTL_MS = 60 * 60 * 1000;
@@ -70,23 +70,31 @@ function jsonNoStore(payload, status = 200, extraHeaders = {}) {
 }
 
 // The wording decides what counts as on-topic, so it lives in one place.
+//
+// The question is about the sense of the word, not its prominence. An earlier
+// version asked whether the company was "a main subject" and scored real
+// mentions at 0.2-0.3: an ad tracker covering "meta and Google", a list of big
+// tech firms, a parenthetical "(Meta)". Those are wanted. What is not wanted is
+// the gaming meta, "that's so meta", or an apple pie.
+//
 // Products and services are deliberately included: a post about a show, an
-// app, or a device is about the company that makes it.
+// app, or a device refers to the company that makes it.
 export function buildTopicQuestion(keyword) {
   return {
     type: 'noul',
     instructions:
-      `Is the company, brand, or organisation called "${keyword}", or any of its products or services, ` +
-      'a main subject of this social media post? Judge the post as a whole: its text, its link card, ' +
-      'its image descriptions, its author, and any post it quotes.',
+      `Does this social media post refer to the company, brand, or organisation called "${keyword}", ` +
+      'or to any of its products or services? Consider the post text, its link card, its image descriptions, ' +
+      'its author, and any post it quotes.',
     criteria: {
       true:
-        `The post, its link, its images, or the post it quotes is substantially about "${keyword}" the company, ` +
-        'brand, or organisation, or about its products, services, shows, apps, devices, executives, or business. ' +
-        'A post published by the official account of that company also counts.',
+        `"${keyword}" the company, brand, or organisation, or one of its products, services, shows, apps, devices, ` +
+        'platforms, or executives, is mentioned or discussed somewhere in the post, its link card, its image ' +
+        'descriptions, or the post it quotes. A brief mention counts, and so does a mention alongside other ' +
+        'companies. A post published by the official account of that company also counts.',
       false:
-        `The word "${keyword}" is used with a different meaning, or the company is mentioned only in passing ` +
-        'while the post is about something else.',
+        `Nothing in the post refers to that company. The word "${keyword}" is either absent or used with a ` +
+        'different meaning, such as an ordinary word, slang, a game term, or a different thing with the same name.',
     },
   };
 }
@@ -140,8 +148,9 @@ async function readJsonBody(request) {
   }
 }
 
+// The question is part of the key, so rewording it never serves old scores.
 async function getScoreCacheKey(keyword, context) {
-  const bytes = new TextEncoder().encode(JSON.stringify([keyword, context]));
+  const bytes = new TextEncoder().encode(JSON.stringify([buildTopicQuestion(keyword), context]));
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }

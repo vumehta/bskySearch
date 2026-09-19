@@ -13,6 +13,7 @@ export const TOPIC_LIMITS = Object.freeze({
   title: 300,
   description: 500,
   site: 100,
+  path: 200,
   imageDescription: 500,
   maxImageDescriptions: 4,
 });
@@ -51,6 +52,7 @@ function sanitizeLinkCard(raw) {
     title: cleanText(raw.title, TOPIC_LIMITS.title),
     description: cleanText(raw.description, TOPIC_LIMITS.description),
     site: cleanText(raw.site, TOPIC_LIMITS.site),
+    path: cleanText(raw.path, TOPIC_LIMITS.path),
   });
 }
 
@@ -96,19 +98,30 @@ function formatAuthor(author) {
   return name || handle;
 }
 
-function getSite(uri) {
-  if (typeof uri !== 'string') return '';
+// A link's slug often names its subject when the card's title does not. The
+// query and fragment are left out: tracking parameters such as
+// `utm_source=Facebook` would read as a mention of Facebook.
+function getLinkLocation(uri) {
+  if (typeof uri !== 'string') return {};
   try {
-    return new URL(uri).hostname.replace(/^www\./, '');
+    const url = new URL(uri);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return {};
+    let path = url.pathname;
+    try {
+      path = decodeURIComponent(path);
+    } catch {
+      // Keep the encoded form of a malformed path.
+    }
+    return { site: url.hostname.replace(/^www\./, ''), path: path === '/' ? '' : path };
   } catch {
-    return '';
+    return {};
   }
 }
 
 function getLinkCard(embed) {
   const external = embed?.$type === 'app.bsky.embed.external#view' ? embed.external : null;
   if (!isObject(external)) return null;
-  return { title: external.title, description: external.description, site: getSite(external.uri) };
+  return { title: external.title, description: external.description, ...getLinkLocation(external.uri) };
 }
 
 function getImageDescriptions(embed) {

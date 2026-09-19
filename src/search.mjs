@@ -268,10 +268,14 @@ function applyTopicFilter(posts) {
   }
   const kept = [];
   let hidden = 0;
+  let scored = 0;
   for (const post of posts) {
     const { verdict, score } = getTopicVerdict(post);
+    if (score !== null) scored += 1;
     if (verdict !== 'off') {
-      kept.push(post);
+      // Revealing also labels the kept posts, so the whole range of scores is
+      // visible when judging the cutoff or the wording of the question.
+      kept.push(state.showOffTopic && score !== null ? { ...post, topicMatch: { offTopic: false, score } } : post);
       continue;
     }
     hidden += 1;
@@ -281,7 +285,7 @@ function applyTopicFilter(posts) {
   requestTopicScores(posts, () => {
     if (isCurrentSearchGeneration(generation)) scheduleDerivedPostsRebuild();
   });
-  topicSummary = { checked: posts.length, hidden, ...getTopicProgress(posts) };
+  topicSummary = { checked: posts.length, hidden, scored, ...getTopicProgress(posts) };
   return kept;
 }
 
@@ -363,11 +367,11 @@ function createPostElement(post) {
     tag.textContent = term;
     termsDiv.appendChild(tag);
   });
-  if (offTopic) {
+  if (post.topicMatch) {
     const tag = document.createElement('span');
-    tag.className = 'term-tag off-topic-tag';
-    const score = post.topicMatch.score;
-    tag.textContent = Number.isFinite(score) ? `Off-topic \xB7 ${Math.round(score * 100)}% match` : 'Off-topic';
+    tag.className = offTopic ? 'term-tag off-topic-tag' : 'term-tag topic-score-tag';
+    const match = `${Math.round(post.topicMatch.score * 100)}% match`;
+    tag.textContent = offTopic ? `Off-topic \xB7 ${match}` : match;
     termsDiv.appendChild(tag);
   }
   postDiv.appendChild(termsDiv);
@@ -658,8 +662,10 @@ function syncTopicSummary() {
   if (parts.length === 0) parts.push('No off-topic posts found.');
   resultsTopicEl.style.display = '';
   resultsTopicTextEl.textContent = parts.join(' ');
-  resultsTopicBtnEl.style.display = summary.hidden > 0 ? '' : 'none';
-  resultsTopicBtnEl.textContent = state.showOffTopic ? 'Hide them again' : 'Show them';
+  resultsTopicBtnEl.style.display = summary.hidden > 0 || summary.scored > 0 ? '' : 'none';
+  resultsTopicBtnEl.textContent = summary.hidden > 0
+    ? (state.showOffTopic ? 'Hide them again' : 'Show them')
+    : (state.showOffTopic ? 'Hide scores' : 'Show scores');
   resultsTopicBtnEl.setAttribute('aria-pressed', String(state.showOffTopic));
 }
 
