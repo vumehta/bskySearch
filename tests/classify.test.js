@@ -43,21 +43,27 @@ function upstream(scoreFor = () => 0.9) {
   return calls;
 }
 
-// Cache keys are hashed with Web Crypto, which completes on the real event
-// loop. setImmediate therefore stays real, and fake time advances in steps
-// with a real yield between them, so timers created after a hash still fire.
+// Cache keys are hashed with Web Crypto, which completes in real time on a
+// thread pool, however long that takes on a busy machine. Fake time must not
+// run ahead of it, or the job deadline fires before the first upstream call is
+// even made. So the clock stays still until that call exists, and afterwards
+// every fake step is followed by a real pause for whatever real work remains.
+const realSetTimeout = globalThis.setTimeout;
+const realPause = (ms = 1) => new Promise((resolve) => realSetTimeout(resolve, ms));
+
 function useFakeClock() {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
 }
 
-const yieldToEventLoop = () => new Promise((resolve) => setImmediate(resolve));
-
 async function advanceUntilSettled(pending, stepMs = 250) {
   let settled = false;
   pending.then(() => { settled = true; }, () => { settled = true; });
+  for (let turn = 0; turn < 5000 && !settled && globalThis.fetch.mock.calls.length === 0; turn += 1) {
+    await realPause();
+  }
   for (let step = 0; step < 400 && !settled; step += 1) {
-    await yieldToEventLoop();
     await vi.advanceTimersByTimeAsync(stepMs);
+    await realPause();
   }
   return pending;
 }
@@ -299,8 +305,8 @@ describe('upstream failures', () => {
     expect(Date.now() - startedAt).toBeLessThan(TOPIC_JOB_TIMEOUT_MS + 1000);
     // The abandoned upstream calls unwind without leaving timers behind.
     for (let step = 0; step < 20; step += 1) {
-      await yieldToEventLoop();
       await vi.advanceTimersByTimeAsync(1000);
+      await realPause();
     }
     expect(vi.getTimerCount()).toBe(0);
   });
