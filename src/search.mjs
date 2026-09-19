@@ -41,6 +41,7 @@ import { getEmbedPreviews } from './post-data.mjs';
 import { createHighlightMatcher, getMatchedTermsForPost, getPostRenderFingerprint, ingestSearchPosts, nextSearchCursor, settleWithConcurrency, validateSearchPage } from './search-model.mjs';
 import { setQueryParam, updateURLWithParams } from './url.mjs';
 import { cancelThreadRequest, cancelThreadRequests, initializeThreadToggle, isReplyPost, toggleThread } from './thread.mjs';
+import { cancelTopicScoring, getTopicProgress, getTopicVerdict, requestTopicScores, resetTopicScoring } from './topic-filter.mjs';
 
 const DERIVE_THROTTLE_MS = 120;
 const SORT_LABELS = {
@@ -62,10 +63,16 @@ let resultsSortEl = null;
 let resultsEmptyEl = null;
 let resultsEmptyPrimaryEl = null;
 let resultsEmptySecondaryEl = null;
+let resultsTopicEl = null;
+let resultsTopicTextEl = null;
+let resultsTopicBtnEl = null;
 let resultsListEl = null;
 let showMoreBtnEl = null;
 let loadMoreBtnEl = null;
 const renderedPosts = new Map();
+
+// Counts behind the topic filter's summary line; null while the filter is off.
+let topicSummary = null;
 
 // Highlight matcher cache for a single active term set.
 let highlightMatcherCache = { key: '', regex: null, termSet: null };
@@ -87,6 +94,7 @@ export function updateSearchURL() {
   setQueryParam(params, 'time', timeFilterSelect.value !== '24' ? timeFilterSelect.value : '');
   setQueryParam(params, 'searchSort', state.searchSort !== 'top' ? state.searchSort : '');
   setQueryParam(params, 'expand', expandTermsToggle.checked ? '1' : '');
+  setQueryParam(params, 'topic', state.hideOffTopic ? '1' : '');
   params.delete('sort');
   updateURLWithParams(params);
 }
@@ -165,6 +173,7 @@ function cancelActiveSearch() {
   state.searchGeneration += 1;
   activeSearchController?.abort();
   activeSearchController = null;
+  cancelTopicScoring();
   state.isLoading = false;
   searchBtn.disabled = false;
   clearDerivedPostsTimer();
@@ -249,11 +258,38 @@ function clearDerivedPostsTimer() {
   }
 }
 
+// The cheap filters run first, so only posts that would be shown are sent for
+// scoring. Scores arrive later and trigger another rebuild; until then a post
+// stays visible. Hidden posts can be revealed, marked, to audit the filter.
+function applyTopicFilter(posts) {
+  if (!state.hideOffTopic) {
+    topicSummary = null;
+    return posts;
+  }
+  const kept = [];
+  let hidden = 0;
+  for (const post of posts) {
+    const { verdict, score } = getTopicVerdict(post);
+    if (verdict !== 'off') {
+      kept.push(post);
+      continue;
+    }
+    hidden += 1;
+    if (state.showOffTopic) kept.push({ ...post, topicMatch: { offTopic: true, score } });
+  }
+  const generation = state.searchGeneration;
+  requestTopicScores(posts, () => {
+    if (isCurrentSearchGeneration(generation)) scheduleDerivedPostsRebuild();
+  });
+  topicSummary = { checked: posts.length, hidden, ...getTopicProgress(posts) };
+  return kept;
+}
+
 function recomputeDerivedPosts() {
   let derived = Array.from(ingestedPostsByUri.values());
   derived = filterByDate(derived, state.timeFilterHours);
   derived = filterByLikes(derived, state.minLikes);
-  state.allPosts = sortPosts(derived, state.searchSort);
+  state.allPosts = applyTopicFilter(sortPosts(derived, state.searchSort));
 }
 
 function scheduleDerivedPostsRebuild() {
@@ -314,8 +350,9 @@ function createPostElement(post) {
   const displayName = post.author.displayName || handle;
   const text = post.record?.text || '';
 
+  const offTopic = Boolean(post.topicMatch?.offTopic);
   const postDiv = document.createElement('div');
-  postDiv.className = 'post';
+  postDiv.className = offTopic ? 'post off-topic' : 'post';
 
   const termsDiv = document.createElement('div');
   termsDiv.className = 'search-terms';
@@ -326,6 +363,13 @@ function createPostElement(post) {
     tag.textContent = term;
     termsDiv.appendChild(tag);
   });
+  if (offTopic) {
+    const tag = document.createElement('span');
+    tag.className = 'term-tag off-topic-tag';
+    const score = post.topicMatch.score;
+    tag.textContent = Number.isFinite(score) ? `Off-topic \xB7 ${Math.round(score * 100)}% match` : 'Off-topic';
+    termsDiv.appendChild(tag);
+  }
   postDiv.appendChild(termsDiv);
 
   const header = document.createElement('div');
@@ -453,6 +497,9 @@ function resetResultsRenderCache() {
   resultsEmptyEl = null;
   resultsEmptyPrimaryEl = null;
   resultsEmptySecondaryEl = null;
+  resultsTopicEl = null;
+  resultsTopicTextEl = null;
+  resultsTopicBtnEl = null;
   resultsListEl = null;
   showMoreBtnEl = null;
   loadMoreBtnEl = null;
@@ -487,6 +534,21 @@ function ensureResultsShell() {
   resultsEmptyEl.appendChild(resultsEmptyPrimaryEl);
   resultsEmptyEl.appendChild(resultsEmptySecondaryEl);
 
+  // Not a live region: the counts change with every scored batch.
+  resultsTopicEl = document.createElement('div');
+  resultsTopicEl.className = 'topic-summary';
+  resultsTopicTextEl = document.createElement('span');
+  resultsTopicEl.appendChild(resultsTopicTextEl);
+  resultsTopicBtnEl = document.createElement('button');
+  resultsTopicBtnEl.className = 'topic-reveal';
+  resultsTopicBtnEl.type = 'button';
+  resultsTopicBtnEl.addEventListener('click', () => {
+    state.showOffTopic = !state.showOffTopic;
+    flushDerivedPostsRebuild();
+    renderResults();
+  });
+  resultsTopicEl.appendChild(resultsTopicBtnEl);
+
   resultsListEl = document.createElement('div');
 
   showMoreBtnEl = document.createElement('button');
@@ -505,6 +567,7 @@ function ensureResultsShell() {
   loadMoreBtnEl.addEventListener('click', loadMore);
 
   resultsDiv.appendChild(resultsHeaderEl);
+  resultsDiv.appendChild(resultsTopicEl);
   resultsDiv.appendChild(resultsEmptyEl);
   resultsDiv.appendChild(resultsListEl);
   resultsDiv.appendChild(showMoreBtnEl);
@@ -575,8 +638,34 @@ function syncLoadMoreButton() {
   loadMoreBtnEl.textContent = state.isLoading ? 'Loading…' : 'Load More Results';
 }
 
+function syncTopicSummary() {
+  const summary = topicSummary;
+  if (!summary || (summary.checked === 0 && !summary.unavailableReason)) {
+    resultsTopicEl.style.display = 'none';
+    return;
+  }
+  const count = (value) => `${value} ${value === 1 ? 'post' : 'posts'}`;
+  const parts = [];
+  if (summary.pending > 0) parts.push(`Checking ${count(summary.pending)} for topic…`);
+  if (summary.hidden > 0) {
+    parts.push(`${summary.hidden} off-topic ${summary.hidden === 1 ? 'post' : 'posts'} ${state.showOffTopic ? 'shown dimmed' : 'hidden'}.`);
+  }
+  if (summary.unavailableReason) {
+    parts.push(`Topic filter unavailable: ${summary.unavailableReason.replace(/\.$/, '')}. Unchecked posts stay visible.`);
+  } else if (summary.failed > 0) {
+    parts.push(`${count(summary.failed)} could not be checked and ${summary.failed === 1 ? 'stays' : 'stay'} visible.`);
+  }
+  if (parts.length === 0) parts.push('No off-topic posts found.');
+  resultsTopicEl.style.display = '';
+  resultsTopicTextEl.textContent = parts.join(' ');
+  resultsTopicBtnEl.style.display = summary.hidden > 0 ? '' : 'none';
+  resultsTopicBtnEl.textContent = state.showOffTopic ? 'Hide them again' : 'Show them';
+  resultsTopicBtnEl.setAttribute('aria-pressed', String(state.showOffTopic));
+}
+
 function renderResults() {
   ensureResultsShell();
+  syncTopicSummary();
 
   const totalCount = state.allPosts.length;
   const visibleCount = Math.min(state.renderLimit, totalCount);
@@ -638,6 +727,9 @@ export async function performSearch() {
   for (const term of state.searchTerms) state.currentCursors[term] = '';
   searchSeenCursors.clear();
   ingestedPostsByUri.clear();
+  resetTopicScoring();
+  state.showOffTopic = false;
+  topicSummary = null;
   resetResultsRenderCache();
   highlightMatcherCache = { key: '', regex: null, termSet: null };
   state.renderLimit = INITIAL_RENDER_LIMIT;
@@ -661,6 +753,18 @@ export async function loadMore() {
 
 export function applyMinLikesFilter() {
   state.minLikes = Math.max(0, parseInt(minLikesInput.value, 10) || 0);
+  updateSearchURL();
+  if (!state.searchTerms.length) return;
+  flushDerivedPostsRebuild();
+  renderResults();
+}
+
+// Turning the filter on or off re-derives the loaded posts; no new search.
+// Switching it back on also retries whatever could not be checked before.
+export function applyTopicFilterChange(enabled) {
+  state.hideOffTopic = Boolean(enabled);
+  state.showOffTopic = false;
+  resetTopicScoring();
   updateSearchURL();
   if (!state.searchTerms.length) return;
   flushDerivedPostsRebuild();
@@ -699,6 +803,9 @@ export function clearSearchResults() {
   state.searchTerms = [];
   state.searchSince = null;
   ingestedPostsByUri.clear();
+  resetTopicScoring();
+  state.showOffTopic = false;
+  topicSummary = null;
   state.renderLimit = INITIAL_RENDER_LIMIT;
   resetResultsRenderCache();
   hideStatus();

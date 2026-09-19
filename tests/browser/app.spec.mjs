@@ -125,3 +125,63 @@ test('normal handle URL submits the quote form and all sort controls reorder rea
   await expect(page.locator('#quoteStatus')).toBeHidden();
   await page.screenshot({ path: testInfo.outputPath('quotes.png'), fullPage: true });
 });
+
+test('topic filter hides off-topic posts, reveals them on request, and survives a reload', async ({ page }, testInfo) => {
+  const posts = [
+    post('company', 'Apple unveils a new iPhone', 90),
+    post('fruit', 'My apple pie recipe', 80),
+    {
+      ...post('reaction', 'wow', 70),
+      embed: {
+        $type: 'app.bsky.embed.external#view',
+        external: { uri: 'https://news.example/apple', title: 'Apple beats earnings', description: 'A record quarter.' },
+      },
+    },
+  ];
+  const classified = [];
+  await page.route('**/api/search?**', (route) => route.fulfill({ json: { posts } }));
+  await page.route('**/api/classify', async (route) => {
+    const request = route.request();
+    expect(request.method()).toBe('POST');
+    expect(request.headers()['content-type']).toBe('application/json');
+    const { items } = request.postDataJSON();
+    classified.push(...items);
+    await route.fulfill({
+      json: {
+        results: items.map((item) => ({
+          id: item.id,
+          scores: item.keywords.map(() => (item.context.post_text.includes('pie') ? 0.03 : 0.95)),
+        })),
+      },
+    });
+  });
+
+  await page.goto('/');
+  await page.getByLabel('Search Terms (comma-separated)', { exact: true }).fill('apple');
+  await page.getByRole('button', { name: 'Search', exact: true }).click();
+  await expect(page.locator('#results .post')).toHaveCount(3);
+  expect(classified).toEqual([]);
+
+  await page.getByLabel('Topic Filter', { exact: true }).check();
+  await expect(page.locator('#results .post')).toHaveCount(2);
+  await expect(page.locator('#results .topic-summary')).toContainText('1 off-topic post hidden.');
+  await expect(page).toHaveURL(/[?&]topic=1/);
+  expect(classified.map((item) => item.keywords)).toEqual([['apple'], ['apple'], ['apple']]);
+  // A reaction post is judged by its link card, not by "wow".
+  expect(classified.find((item) => item.id.endsWith('/reaction')).context.link_card).toEqual({
+    title: 'Apple beats earnings',
+    description: 'A record quarter.',
+    site: 'news.example',
+  });
+
+  await page.getByRole('button', { name: 'Show them', exact: true }).click();
+  await expect(page.locator('#results .post')).toHaveCount(3);
+  await expect(page.locator('#results .post.off-topic .off-topic-tag')).toHaveText('Off-topic \xB7 3% match');
+  await expect(page.locator('#results .post.off-topic .post-text')).toHaveText('My apple pie recipe');
+  await page.screenshot({ path: testInfo.outputPath('topic-filter.png'), fullPage: true });
+
+  await page.reload();
+  await expect(page.getByLabel('Topic Filter', { exact: true })).toBeChecked();
+  await expect(page.locator('#results .post')).toHaveCount(2);
+  await expect(page.locator('#results .post-text')).toHaveText(['Apple unveils a new iPhone', 'wow']);
+});

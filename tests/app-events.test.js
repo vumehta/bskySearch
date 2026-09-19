@@ -36,7 +36,7 @@ beforeEach(async () => {
   vi.setSystemTime(new Date('2026-09-06T12:00:00Z'));
   const testDOM = createTestDocument([
     'terms', 'minLikes', 'timeFilter', 'sortSelect', 'searchBtn', 'status', 'results',
-    'themeSelect', 'expandTermsToggle', 'expandSummary', 'quoteForm', 'postUrl',
+    'themeSelect', 'expandTermsToggle', 'expandSummary', 'topicFilterToggle', 'quoteForm', 'postUrl',
     'quoteSearchBtn', 'quoteStatus', 'quoteTabs', 'quoteOriginal', 'quoteCount',
     'quoteResults', 'quoteLoadMore',
   ]);
@@ -45,6 +45,7 @@ beforeEach(async () => {
   elements.timeFilter.value = '24';
   elements.sortSelect.value = 'top';
   elements.expandTermsToggle.checked = false;
+  elements.topicFilterToggle.checked = false;
   for (const sort of ['likes', 'recent', 'oldest', 'bookmarks']) {
     const tab = testDOM.document.createElement('button');
     tab.className = 'quote-tab';
@@ -279,5 +280,48 @@ describe('app URL initialization', () => {
     expect(state.searchSort).toBe(key === 'searchSort' ? sort : 'top');
     expect(state.quoteSort).toBe(key === 'quoteSort' ? sort : 'likes');
     expect(elements.quoteOriginal.querySelector('.quote-original')).toBeTruthy();
+  });
+});
+
+describe('topic filter control', () => {
+  // The classifier calls every post off-topic, which makes its effect visible.
+  function classifyEverythingOffTopic() {
+    fetch.mockImplementation(async (url, options) => {
+      if (!String(url).startsWith('/api/classify')) return Response.json({ posts: [makePost()] });
+      const { items } = JSON.parse(options.body);
+      return Response.json({ results: items.map((item) => ({ id: item.id, scores: item.keywords.map(() => 0.03) })) });
+    });
+  }
+
+  it('starts from the URL and filters the first search', async () => {
+    classifyEverythingOffTopic();
+    await bootApp('?terms=apple&minLikes=0&topic=1');
+    expect(elements.topicFilterToggle.checked).toBe(true);
+    expect(state.hideOffTopic).toBe(true);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(elements.results.querySelectorAll('.post')).toHaveLength(0);
+    expect(elements.results.querySelector('.topic-summary').textContent).toContain('1 off-topic post hidden.');
+    expect(window.location.search).toContain('topic=1');
+  });
+
+  it('stays off by default and applies the checkbox without another search', async () => {
+    classifyEverythingOffTopic();
+    await bootApp('?terms=apple&minLikes=0');
+    expect(state.hideOffTopic).toBe(false);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(elements.results.querySelectorAll('.post')).toHaveLength(1);
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    elements.topicFilterToggle.checked = true;
+    dispatch('topicFilterToggle', 'change');
+    await vi.advanceTimersByTimeAsync(300);
+    expect(elements.results.querySelectorAll('.post')).toHaveLength(0);
+    expect(searchRequests()).toHaveLength(1);
+    expect(window.location.search).toContain('topic=1');
+
+    elements.topicFilterToggle.checked = false;
+    dispatch('topicFilterToggle', 'change');
+    expect(elements.results.querySelectorAll('.post')).toHaveLength(1);
+    expect(window.location.search).not.toContain('topic=');
   });
 });

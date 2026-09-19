@@ -47,6 +47,19 @@
                     <span>Also search each word in multi-word phrases</span>
                 </div>
             </div>
+            <div class="form-group">
+                <div class="label-row">
+                    <label for="topicFilterToggle">Topic Filter</label>
+                    <span class="info-trigger">
+                        <button type="button" class="info-button" aria-label="About the topic filter" aria-describedby="topicFilterInfo">i</button>
+                        <span id="topicFilterInfo" class="info-tooltip" role="tooltip">An AI model checks whether each loaded post is really about the company you searched for, including its products and services. Post text, link titles, image descriptions, and quoted posts are sent to TypeSafe for this check.</span>
+                    </span>
+                </div>
+                <div class="checkbox-inline">
+                    <input type="checkbox" id="topicFilterToggle" />
+                    <span>Hide posts not about the company or its products</span>
+                </div>
+            </div>
         </div>
         <div class="form-row align-bottom">
             <div class="form-group small">

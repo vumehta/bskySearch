@@ -68,6 +68,7 @@ export function getPostRenderFingerprint(post) {
     post.replyCount || 0,
     post.bookmarkCount || 0,
     getMatchedTermsForPost(post),
+    post.topicMatch || null,
   ]);
 }
 

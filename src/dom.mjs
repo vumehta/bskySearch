@@ -8,6 +8,7 @@ export const resultsDiv = document.getElementById('results');
 export const themeSelect = document.getElementById('themeSelect');
 export const expandTermsToggle = document.getElementById('expandTermsToggle');
 export const expandSummary = document.getElementById('expandSummary');
+export const topicFilterToggle = document.getElementById('topicFilterToggle');
 export const quoteForm = document.getElementById('quoteForm');
 export const postUrlInput = document.getElementById('postUrl');
 export const quoteStatusDiv = document.getElementById('quoteStatus');

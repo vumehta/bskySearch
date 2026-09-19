@@ -17,6 +17,9 @@ export const state = {
   searchGeneration: 0,
   isLoading: false,
   renderLimit: INITIAL_RENDER_LIMIT,
+  // Topic filter: hide posts scored as off-topic, or reveal them marked.
+  hideOffTopic: false,
+  showOffTopic: false,
   allQuotes: [],
   quoteSort: 'likes',
   isQuoteLoading: false,
