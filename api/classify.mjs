@@ -256,6 +256,15 @@ function abortableDelay(ms, signal) {
   });
 }
 
+// A failed post only shows up as an unscored result, so the reason is logged
+// for whoever reads the function logs. Never the key; at most a short excerpt
+// of the classifier's own error text.
+function describeUpstreamFailure(payload) {
+  const detail = payload?.detail ?? payload?.error ?? payload?.message ?? '';
+  const text = typeof detail === 'string' ? detail : JSON.stringify(detail);
+  return (text || 'no error body').slice(0, 300);
+}
+
 // One upstream call answers every keyword for one post, because questions
 // over the same state share its tokens. Returns a score per keyword, or null
 // where the classifier gave no usable answer. Rejected credentials fail the
@@ -269,22 +278,28 @@ async function scoreItem(keywords, context, { apiKey, model, signal }) {
     let result;
     try {
       result = await postToTypeSafe(body, apiKey, signal);
-    } catch {
+    } catch (error) {
       throwIfAborted(signal);
       // Timeouts and network failures are retried once, then given up on.
       if (attempt === 0) continue;
+      console.warn('Topic classifier unreachable:', error?.name || 'Error', error?.message || '');
       return unscored;
     }
     if (result.status === 401 || result.status === 403) {
       throw httpError('The topic classifier rejected the server credentials.', 502);
     }
     if (RETRYABLE_STATUSES.has(result.status) && attempt === 0) continue;
-    if (result.status < 200 || result.status > 299) return unscored;
+    if (result.status < 200 || result.status > 299) {
+      console.warn(`Topic classifier answered ${result.status}:`, describeUpstreamFailure(result.payload));
+      return unscored;
+    }
     const answers = isObject(result.payload?.answers) ? result.payload.answers : {};
-    return keywords.map((_, index) => {
+    const scores = keywords.map((_, index) => {
       const score = answers[`k${index}`]?.noul;
       return Number.isFinite(score) && score >= 0 && score <= 1 ? score : null;
     });
+    if (scores.includes(null)) console.warn('Topic classifier returned an answer without a usable score.');
+    return scores;
   }
   return unscored;
 }

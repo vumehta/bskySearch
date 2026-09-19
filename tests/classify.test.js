@@ -62,7 +62,11 @@ async function advanceUntilSettled(pending, stepMs = 250) {
   return pending;
 }
 
-beforeEach(() => resetModuleStateForTests());
+beforeEach(() => {
+  resetModuleStateForTests();
+  // Upstream failures are logged for operators; keep them out of test output.
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+});
 
 afterEach(() => {
   resetModuleStateForTests();
@@ -240,11 +244,19 @@ describe('upstream failures', () => {
     expect(scoreCache.size).toBe(1);
   });
 
-  it('does not retry a rejected request', async () => {
-    globalThis.fetch = vi.fn(async () => Response.json({ error: 'invalid' }, { status: 422 }));
+  it('does not retry a rejected request, and logs why for the function logs', async () => {
+    globalThis.fetch = vi.fn(async () => Response.json(
+      { detail: { error_type: 'validation_error', message: 'criteria must be a map' } },
+      { status: 422 },
+    ));
     const response = await POST(request({ items: [item('a')] }), context);
     await expect(response.json()).resolves.toEqual({ results: [{ id: 'a', scores: [null] }] });
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    expect(console.warn).toHaveBeenCalledTimes(1);
+    const logged = console.warn.mock.calls[0].join(' ');
+    expect(logged).toContain('422');
+    expect(logged).toContain('criteria must be a map');
+    expect(logged).not.toContain('test-key');
   });
 
   it.each([401, 403])('fails the whole request when the key is rejected with %i', async (status) => {
