@@ -69,32 +69,33 @@ function jsonNoStore(payload, status = 200, extraHeaders = {}) {
   });
 }
 
-// The wording decides what counts as on-topic, so it lives in one place.
-//
-// The question is about the sense of the word, not its prominence. An earlier
-// version asked whether the company was "a main subject" and scored real
-// mentions at 0.2-0.3: an ad tracker covering "meta and Google", a list of big
-// tech firms, a parenthetical "(Meta)". Those are wanted. What is not wanted is
-// the gaming meta, "that's so meta", or an apple pie.
-//
-// Products and services are deliberately included: a post about a show, an
-// app, or a device refers to the company that makes it.
+// Judge the information about the searched subject, not just its presence.
+// A comparison can qualify for several companies; a source credit cannot.
+// The complete question is hashed into the cache key, so changing this rubric
+// invalidates scores produced by the earlier mention-only question.
 export function buildTopicQuestion(keyword) {
   return {
     type: 'noul',
-    instructions:
-      `Does this social media post refer to the company, brand, or organisation called "${keyword}", ` +
-      'or to any of its products or services? Consider the post text, its link card, its image descriptions, ' +
-      'its author, and any post it quotes.',
+    instructions: {
+      subject: keyword,
+      question: 'Does this post provide substantive analysis or news about `subject`, ' +
+        'the company, brand, organisation, platform, or its products and services?',
+      evidence: 'Consider `post_text`, `link_card`, `image_descriptions`, and `quoted_post` together. ' +
+        'Use only the supplied content; do not assume an unseen article or missing thread adds useful information.',
+    },
     criteria: {
       true:
-        `"${keyword}" the company, brand, or organisation, or one of its products, services, shows, apps, devices, ` +
-        'platforms, or executives, is mentioned or discussed somewhere in the post, its link card, its image ' +
-        'descriptions, or the post it quotes. A brief mention counts, and so does a mention alongside other ' +
-        'companies. A post published by the official account of that company also counts.',
+        'Explains, evaluates, compares, or reports a concrete development concerning `subject` or its products ' +
+        'and services: for example features, business performance, strategy, competition, privacy, moderation, ' +
+        'regulation, security, reliability, or effects on users. Reasoned criticism, specific product experiences, ' +
+        'and brief factual news count. The subject need not be the only focus, but there must be substantive ' +
+        'information about it. A link preview or quoted post can supply that information even when the post itself is a short reaction.',
       false:
-        `Nothing in the post refers to that company. The word "${keyword}" is either absent or used with a ` +
-        'different meaning, such as an ordinary word, slang, a game term, or a different thing with the same name.',
+        'No substantive analysis or news about `subject`. Mere mentions, hashtags, source or photo credits ' +
+        '(such as "via Instagram"), follow-me requests, promotions of unrelated content, and casual personal ' +
+        'updates do not count. Neither does using the platform to post a photo, share content, or contact someone. ' +
+        'Analysis of unrelated content does not qualify just because the platform is credited. ' +
+        'Bare praise or complaints, fandom about a show, an official author alone, and a different meaning of the word do not count.',
     },
   };
 }

@@ -127,13 +127,15 @@ test('normal handle URL submits the quote form and all sort controls reorder rea
 
 test('topic filter hides off-topic posts, reveals them on request, and survives a reload', async ({ page }, testInfo) => {
   const posts = [
-    post('company', 'Apple unveils a new iPhone', 90),
-    post('fruit', 'My apple pie recipe', 80),
+    post('company', 'Instagram prioritizes recommended Reels over followed accounts, pushing creators to buy reach.', 90),
+    post('credit', 'Artwork by a contemporary artist (via Instagram) #WomensArt', 80),
+    post('promotion', 'I am live now! Follow my stream. #instagram #livestream', 75),
+    post('casual', 'Took this photo for someone on Instagram, but I want to share it here.', 72),
     {
       ...post('reaction', 'wow', 70),
       embed: {
         $type: 'app.bsky.embed.external#view',
-        external: { uri: 'https://news.example/apple', title: 'Apple beats earnings', description: 'A record quarter.' },
+        external: { uri: 'https://news.example/instagram', title: 'Instagram expands teen account protections', description: 'Messages from strangers will be blocked by default.' },
       },
     },
   ];
@@ -149,45 +151,47 @@ test('topic filter hides off-topic posts, reveals them on request, and survives 
       json: {
         results: items.map((item) => ({
           id: item.id,
-          scores: item.keywords.map(() => (item.context.post_text.includes('pie') ? 0.03 : 0.95)),
+          // Fixture answers verify the UI. Real Jev judgments are checked by eval:topic.
+          scores: item.keywords.map(() => (/\/(company|reaction)$/.test(item.id) ? 0.95 : 0.03)),
         })),
       },
     });
   });
 
   await page.goto('/');
-  await page.getByLabel('Search Terms (comma-separated)', { exact: true }).fill('apple');
+  await page.getByLabel('Search Terms (comma-separated)', { exact: true }).fill('Instagram');
   await page.getByRole('button', { name: 'Search', exact: true }).click();
-  await expect(page.locator('#results .post')).toHaveCount(3);
+  await expect(page.locator('#results .post')).toHaveCount(5);
   expect(classified).toEqual([]);
 
+  await expect(page.getByText('Keep analysis and substantive news', { exact: true })).toBeVisible();
   await page.getByLabel('Topic Filter', { exact: true }).check();
   await expect(page.locator('#results .post')).toHaveCount(2);
-  await expect(page.locator('#results .topic-summary')).toContainText('1 off-topic post hidden.');
+  await expect(page.locator('#results .topic-summary')).toContainText('3 off-topic posts hidden.');
   await expect(page).toHaveURL(/[?&]topic=1/);
-  expect(classified.map((item) => item.keywords)).toEqual([['apple'], ['apple'], ['apple']]);
+  expect(classified.map((item) => item.keywords)).toEqual(Array.from({ length: 5 }, () => ['Instagram']));
   // A reaction post is judged by its link card, not by "wow".
   expect(classified.find((item) => item.id.endsWith('/reaction')).context.link_card).toEqual({
-    title: 'Apple beats earnings',
-    description: 'A record quarter.',
+    title: 'Instagram expands teen account protections',
+    description: 'Messages from strangers will be blocked by default.',
     site: 'news.example',
-    path: '/apple',
+    path: '/instagram',
   });
 
   // The card shows the headline that kept the post.
-  await expect(page.locator('#results .post', { hasText: 'wow' }).locator('.embed-link-title')).toHaveText('Apple beats earnings');
+  await expect(page.locator('#results .post', { hasText: 'wow' }).locator('.embed-link-title')).toHaveText('Instagram expands teen account protections');
 
   await page.getByRole('button', { name: 'Show them', exact: true }).click();
-  await expect(page.locator('#results .post')).toHaveCount(3);
-  await expect(page.locator('#results .post.off-topic .off-topic-tag')).toHaveText('Off-topic \xB7 3% match');
-  await expect(page.locator('#results .post.off-topic .post-text')).toHaveText('My apple pie recipe');
+  await expect(page.locator('#results .post')).toHaveCount(5);
+  await expect(page.locator('#results .post.off-topic .off-topic-tag')).toHaveText(Array(3).fill('Off-topic \xB7 3% match'));
+  await expect(page.locator('#results .post.off-topic .post-text')).toHaveText(posts.slice(1, 4).map((item) => item.record.text));
   await expect(page.locator('#results .topic-score-tag')).toHaveText(['95% match', '95% match']);
   await page.screenshot({ path: testInfo.outputPath('topic-filter.png'), fullPage: true });
 
   await page.reload();
   await expect(page.getByLabel('Topic Filter', { exact: true })).toBeChecked();
   await expect(page.locator('#results .post')).toHaveCount(2);
-  await expect(page.locator('#results .post-text')).toHaveText(['Apple unveils a new iPhone', 'wow']);
+  await expect(page.locator('#results .post-text')).toHaveText([posts[0].record.text, 'wow']);
 });
 
 test('cards show link cards and quoted posts as text, linking only to checked URLs', async ({ page }, testInfo) => {

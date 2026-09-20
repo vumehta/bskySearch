@@ -35,7 +35,7 @@ function upstream(scoreFor = () => 0.9) {
     const body = JSON.parse(options.body);
     calls.push({ url, options, body });
     const answers = Object.fromEntries(Object.entries(body.questions).map(([key, question]) => {
-      const keyword = question.instructions.match(/called "([^"]*)"/)[1];
+      const keyword = question.instructions.subject;
       return [key, { type: 'noul', noul: scoreFor(keyword, body.state) }];
     }));
     return Response.json({ model: body.model, answers, usage: { input_tokens: 1, output_tokens: 1 } });

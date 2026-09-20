@@ -34,8 +34,8 @@ export function cleanText(value, maxLength) {
   return text;
 }
 
-// The keyword is quoted inside the classifier's instructions, so quote
-// characters and backticks (the API's state-path syntax) are removed.
+// Normalize subject names consistently for questions and cache keys, removing
+// surrounding quotation marks and backticks (the API's state-path syntax).
 export function normalizeKeyword(value) {
   if (typeof value !== 'string') return '';
   return cleanText(value.replace(/["`\u{201C}\u{201D}]/gu, ' '), TOPIC_LIMITS.keyword);
