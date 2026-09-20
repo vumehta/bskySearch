@@ -548,6 +548,7 @@ button:disabled {
 
 .topic-reveal:hover,
 .topic-reveal:focus-visible {
+    background: none;
     text-decoration: underline;
 }
 
