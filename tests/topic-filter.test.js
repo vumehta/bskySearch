@@ -196,6 +196,40 @@ describe('topic filter', () => {
     expect(visibleUris()).toEqual([uri('shared')]);
   });
 
+  it('cancels excluded topic batches when minimum likes rises and requeues only eligible posts', async () => {
+    const posts = Array.from({ length: 100 }, (_, index) => makePost(`p${index}`, 'Apple news', 100 - index));
+    const pending = [deferred(), deferred()];
+    let attempt = 0;
+    const calls = installFetch({
+      posts,
+      classify: (body) => pending[attempt++]?.promise || scoredBy(() => 0.9)(body),
+    });
+    state.hideOffTopic = true;
+    await search.performSearch();
+    expect(calls.classify).toHaveLength(2);
+
+    // Reapplying the same threshold must leave useful in-flight work alone.
+    search.applyMinLikesFilter();
+    expect(calls.classify.every(({ options }) => !options.signal.aborted)).toBe(true);
+
+    elements.minLikes.value = '99';
+    search.applyMinLikesFilter();
+    expect(calls.classify.slice(0, 2).every(({ options }) => options.signal.aborted)).toBe(true);
+    await vi.waitFor(() => expect(summaryText()).toBe('No off-topic posts found.'));
+    expect(calls.classify).toHaveLength(3);
+    expect(calls.classify[2].body.items.map((item) => item.id)).toEqual([uri('p0'), uri('p1')]);
+    expect(visibleUris()).toEqual([uri('p0'), uri('p1')]);
+
+    // Late answers cannot overwrite the replacement batch's scores or revive its queue.
+    pending.forEach((response, index) => response.resolve(scoredBy(() => 0.01)(calls.classify[index].body)));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    elements.minLikes.value = '100';
+    search.applyMinLikesFilter();
+    expect(visibleUris()).toEqual([uri('p0')]);
+    expect(summaryText()).toBe('No off-topic posts found.');
+    expect(calls.classify).toHaveLength(3);
+  });
+
   it('keeps everything visible when the classifier is unavailable', async () => {
     const calls = installFetch({
       posts: [makePost('a', 'apple pie recipe'), makePost('b', 'Apple event recap')],
@@ -210,6 +244,7 @@ describe('topic filter', () => {
     expect(visibleUris()).toHaveLength(2);
 
     // It does not keep asking during this search.
+    elements.minLikes.value = '40';
     search.applyMinLikesFilter();
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(calls.classify).toHaveLength(1);

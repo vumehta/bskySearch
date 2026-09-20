@@ -66,13 +66,42 @@ describe('buildTopicContext', () => {
     expect(buildTopicContext(post({ embed })).image_descriptions).toEqual(['Headline screenshot']);
   });
 
-  it('reads a quoted post, its author, and its link title', () => {
+  it('reads a quoted post, its author, and all link-card evidence', () => {
     const embed = { $type: 'app.bsky.embed.record#view', record: quotedView };
     expect(buildTopicContext(post({ embed })).quoted_post).toEqual({
       text: 'Prices are going up next month.',
       author: 'Netflix (@netflix.com)',
       link_title: 'Meta lays off staff',
+      link_description: 'The company confirmed the cuts on Tuesday.',
+      link_site: 'news.example',
+      link_path: '/meta-layoffs',
     });
+  });
+
+  it('keeps a quoted link subject from its description and URL without tracking data', () => {
+    const embed = {
+      $type: 'app.bsky.embed.record#view',
+      record: {
+        ...quotedView,
+        embeds: [{
+          $type: 'app.bsky.embed.external#view',
+          external: {
+            title: 'Read more',
+            description: 'Apple announces the iPhone',
+            uri: 'https://www.apple.com/newsroom/iphone-launch?utm_source=Facebook#tracking',
+          },
+        }],
+      },
+    };
+    const context = buildTopicContext(post({ embed }));
+    expect(context.quoted_post).toMatchObject({
+      link_title: 'Read more',
+      link_description: 'Apple announces the iPhone',
+      link_site: 'apple.com',
+      link_path: '/newsroom/iphone-launch',
+    });
+    expect(JSON.stringify(context)).not.toMatch(/utm_source|Facebook|tracking/);
+    expect(sanitizeTopicContext(context)).toEqual(context);
   });
 
   it.each([
@@ -158,6 +187,19 @@ describe('sanitizeTopicContext', () => {
     });
     expect(sanitizeTopicContext(context)).toEqual(context);
     expect(sanitizeTopicContext({ quoted_post: { image_descriptions: 'not an array' } })).toEqual({});
+  });
+
+  it('bounds quoted link fields and drops malformed values', () => {
+    const fields = { link_title: 'title', link_description: 'description', link_site: 'site', link_path: 'path' };
+    const raw = Object.fromEntries(Object.keys(fields).map((field) => [field, `  a\u0000 b ${'x'.repeat(600)}`]));
+    const { quoted_post } = sanitizeTopicContext({ quoted_post: raw });
+    for (const [field, limit] of Object.entries(fields)) {
+      expect(quoted_post[field]).toHaveLength(TOPIC_LIMITS[limit]);
+      expect(quoted_post[field].startsWith('a b ')).toBe(true);
+    }
+    expect(sanitizeTopicContext({ quoted_post: {
+      link_title: 'Read more', link_description: {}, link_site: [], link_path: 7,
+    } })).toEqual({ quoted_post: { link_title: 'Read more' } });
   });
 
   it('never cuts an emoji in half', () => {

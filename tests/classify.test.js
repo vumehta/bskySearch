@@ -184,6 +184,31 @@ describe('scoring', () => {
     });
   });
 
+  it('forwards quoted link evidence and rechecks changed descriptions', async () => {
+    const calls = upstream((_keyword, state) => state.quoted_post.link_description.includes('iPhone') ? 0.9 : 0.1);
+    const candidate = item('quote', ['Apple'], 'wow');
+    candidate.context.quoted_post = {
+      link_title: 'Read more',
+      link_description: ' Apple\u0000 announces the iPhone ',
+      link_site: 'news.example',
+      link_path: '/story',
+      uri: 'https://news.example/story?tracking=1',
+    };
+    const response = await POST(request({ items: [candidate] }), context);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ results: [{ id: 'quote', scores: [0.9] }] });
+    expect(calls[0].body.state.quoted_post).toEqual({
+      link_title: 'Read more',
+      link_description: 'Apple announces the iPhone',
+      link_site: 'news.example',
+      link_path: '/story',
+    });
+    candidate.context.quoted_post.link_description = 'Apple pie recipe';
+    const updated = await POST(request({ items: [candidate] }), context);
+    await expect(updated.json()).resolves.toEqual({ results: [{ id: 'quote', scores: [0.1] }] });
+    expect(calls).toHaveLength(2);
+  });
+
   it('uses a configured model', async () => {
     const calls = upstream();
     await POST(request({ items: [item('a')] }), { env: { TYPESAFE_API_KEY: 'k', TYPESAFE_MODEL: 'jev-1.13.0' } });

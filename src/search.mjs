@@ -761,7 +761,13 @@ export async function loadMore() {
 }
 
 export function applyMinLikesFilter() {
-  state.minLikes = Math.max(0, parseInt(minLikesInput.value, 10) || 0);
+  const minLikes = Math.max(0, parseInt(minLikesInput.value, 10) || 0);
+  if (state.hideOffTopic && minLikes > state.minLikes) {
+    // Drop excluded work, keeping completed scores and failure state. The
+    // rebuild queues only posts that still qualify under the new threshold.
+    cancelTopicScoring();
+  }
+  state.minLikes = minLikes;
   updateSearchURL();
   if (!state.searchTerms.length) return;
   flushDerivedPostsRebuild();

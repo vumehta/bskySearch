@@ -71,6 +71,9 @@ function sanitizeQuotedPost(raw) {
     text: cleanText(raw.text, TOPIC_LIMITS.postText),
     author: cleanText(raw.author, TOPIC_LIMITS.author),
     link_title: cleanText(raw.link_title, TOPIC_LIMITS.title),
+    link_description: cleanText(raw.link_description, TOPIC_LIMITS.description),
+    link_site: cleanText(raw.link_site, TOPIC_LIMITS.site),
+    link_path: cleanText(raw.link_path, TOPIC_LIMITS.path),
     image_descriptions: sanitizeImageDescriptions(raw.image_descriptions),
   });
 }
@@ -181,6 +184,9 @@ export function buildTopicContext(post) {
       text: quoted.text,
       author: formatAuthor(quoted.author),
       link_title: quoted.linkCard?.title,
+      link_description: quoted.linkCard?.description,
+      link_site: quoted.linkCard?.site,
+      link_path: quoted.linkCard?.path,
       image_descriptions: quoted.imageDescriptions,
     },
   });
