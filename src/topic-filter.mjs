@@ -111,7 +111,9 @@ async function runBatch({ items, onUpdate, batchOwner }) {
   if (batchOwner !== owner) return;
   settleBatch(items, results);
   if (error instanceof HttpError && !BATCH_ONLY_STATUSES.has(error.status)) {
-    unavailableReason = error.message;
+    unavailableReason = error.status === 429
+      ? 'Too many topic checks. Try again in a minute.'
+      : error.message;
     for (const queued of queue) settleBatch(queued.items, null);
     queue = [];
   }

@@ -26,8 +26,8 @@ const SCORE_CACHE_TTL_MS = 60 * 60 * 1000;
 const MAX_SCORE_CACHE_SIZE = 5000;
 
 // Per-instance limit on upstream calls, which are what cost money. Cache hits
-// are free. No client IP header is trusted; account-wide protection belongs at
-// a trusted edge/shared limiter.
+// are free. Pair this with Vercel's per-IP firewall rule; see
+// docs/classifier-rate-limit.md. Neither guard is an account-wide cost ceiling.
 export const CLASSIFY_ADMISSION_LIMITS = Object.freeze({
   burst: 600,
   refillPerSecond: 5,

@@ -283,16 +283,19 @@ describe('topic filter', () => {
     expect(calls.classify).toHaveLength(3);
   });
 
-  it('keeps everything visible when the classifier is unavailable', async () => {
+  it.each([
+    [503, { error: 'The topic filter is not configured on this server.' }, 'The topic filter is not configured on this server.'],
+    [429, { error: { code: '429', message: 'Too Many Requests' } }, 'Too many topic checks. Try again in a minute.'],
+  ])('keeps everything visible when the classifier returns %i', async (status, payload, message) => {
     const calls = installFetch({
       posts: [makePost('a', 'apple pie recipe'), makePost('b', 'Apple event recap')],
-      classify: () => failure(503, { error: 'The topic filter is not configured on this server.' }),
+      classify: () => failure(status, payload),
     });
     state.hideOffTopic = true;
     await search.performSearch();
     await vi.waitFor(() => expect(summaryText()).toContain('unavailable'));
     expect(summaryText()).toBe(
-      'Topic filter unavailable: The topic filter is not configured on this server. Unchecked posts stay visible.',
+      `Topic filter unavailable: ${message} Unchecked posts stay visible.`,
     );
     expect(visibleUris()).toHaveLength(2);
 
