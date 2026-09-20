@@ -82,6 +82,27 @@ describe('buildTopicContext', () => {
     });
   });
 
+  it.each([
+    ['images', { $type: 'app.bsky.embed.images#view', images: [{ alt: 'Apple launches an iPhone', thumb: 'not sent' }] }],
+    ['gallery', { $type: 'app.bsky.embed.gallery#view', items: [{ alt: 'Apple launches an iPhone', thumbnail: 'not sent' }] }],
+    ['video', { $type: 'app.bsky.embed.video#view', alt: 'Apple launches an iPhone', playlist: 'not sent' }],
+    ['wrapped media', {
+      $type: 'app.bsky.embed.recordWithMedia#view',
+      media: { $type: 'app.bsky.embed.images#view', images: [{ alt: 'Apple launches an iPhone' }] },
+    }],
+  ])('includes a quoted %s description as evidence', (_kind, media) => {
+    const embed = {
+      $type: 'app.bsky.embed.record#view',
+      record: { ...quotedView, value: { text: '' }, embeds: [media] },
+    };
+    const context = buildTopicContext(post({ embed }));
+    expect(context.quoted_post).toEqual({
+      author: 'Netflix (@netflix.com)',
+      image_descriptions: ['Apple launches an iPhone'],
+    });
+    expect(sanitizeTopicContext(context)).toEqual(context);
+  });
+
   it('reads both halves of a quote with media', () => {
     const embed = {
       $type: 'app.bsky.embed.recordWithMedia#view',
@@ -131,6 +152,20 @@ describe('sanitizeTopicContext', () => {
     expect(context.post_text).toHaveLength(TOPIC_LIMITS.postText);
     expect(context.image_descriptions).toHaveLength(TOPIC_LIMITS.maxImageDescriptions);
     expect(context.image_descriptions.every((alt) => alt.length <= TOPIC_LIMITS.imageDescription)).toBe(true);
+  });
+
+  it('bounds quoted image descriptions and discards malformed values and unrelated fields', () => {
+    const context = sanitizeTopicContext({
+      quoted_post: {
+        image_descriptions: [null, {}, 7, ' ', ' Apple\u0000 launch ', ...Array(8).fill('x'.repeat(600))],
+        image_url: 'https://not-forwarded.example/image',
+      },
+    });
+    expect(context).toEqual({
+      quoted_post: { image_descriptions: ['Apple launch', ...Array(3).fill('x'.repeat(TOPIC_LIMITS.imageDescription))] },
+    });
+    expect(sanitizeTopicContext(context)).toEqual(context);
+    expect(sanitizeTopicContext({ quoted_post: { image_descriptions: 'not an array' } })).toEqual({});
   });
 
   it('never cuts an emoji in half', () => {

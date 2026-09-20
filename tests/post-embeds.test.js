@@ -61,10 +61,20 @@ describe('link card', () => {
     expect(container.querySelector('.embed-link-site').textContent).toBe('evil.example');
   });
 
+  it.each(['Apple account information', ''])('preserves the complete destination hostname with title "%s"', (title) => {
+    const hostname = 'login.' + 'secure.'.repeat(11) + 'identity.bsky.app.attacker.example';
+    const uri = 'https://' + hostname + '/signin';
+    const container = render(linkCard({ uri, title }));
+    const link = container.querySelector('a.embed-link-title');
+    expect(link.href).toBe(uri);
+    const displayedSite = title ? container.querySelector('.embed-link-site') : link;
+    expect(displayedSite.textContent).toBe(hostname);
+  });
+
   it('links the site when there is no title', () => {
     const container = render(linkCard({ uri: 'http://news.example/story', description: 'A record quarter.' }));
     expect(outline(container.children[0])).toEqual([
-      ['a.embed-link-title', 'news.example'],
+      ['a.embed-link-title embed-link-hostname', 'news.example'],
       ['div.embed-link-description', 'A record quarter.'],
     ]);
     expect(container.querySelector('a.embed-link-title').href).toBe('http://news.example/story');
@@ -133,6 +143,14 @@ describe('quoted post', () => {
       ['a.embed-link-title', 'New prices'],
       ['div.embed-link-site', 'blog.example'],
     ]);
+  });
+
+  it.each(['Quoted author', ''])('preserves the complete quoted handle with display name "%s"', (displayName) => {
+    const handle = 'account.' + 'secure.'.repeat(20) + 'foo.bsky.app.attacker.example';
+    const container = render(quote({ ...quotedView, author: { handle, displayName } }));
+    expect(container.querySelector('.embed-quote-handle').textContent).toBe('@' + handle);
+    expect(container.querySelector('.embed-quote-name').textContent).toBe(displayName || handle);
+    expect(container.querySelector('a.embed-quote-link').href).toBe('https://bsky.app/profile/did:plc:other/post/3kquoted');
   });
 
   it('falls back to the handle for an author without a display name', () => {

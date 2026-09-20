@@ -291,3 +291,183 @@ test('cards show link cards and quoted posts as text, linking only to checked UR
   expect(await colors()).toEqual({ border: 'rgb(42, 42, 42)', title: 'rgb(83, 168, 255)', site: 'rgb(160, 167, 179)' });
   await page.screenshot({ path: testInfo.outputPath('embeds-dark.png'), fullPage: true });
 });
+
+test('topic filtering rechecks an updated link card and keeps it visible while checking', async ({ page }, testInfo) => {
+  const external = (title) => ({ $type: 'app.bsky.embed.external#view', external: { uri: 'https://news.example/story', title } });
+  const original = { ...post('updated', 'wow', 90), embed: external('Fresh apple pie') };
+  const updated = { ...original, embed: external('Apple unveils a new iPhone') };
+  const filler = post('filler', 'Apple iPhone launch', 80);
+  const pages = {
+    first: { posts: [original], cursor: 'second' },
+    second: { posts: [filler], cursor: 'third' },
+    third: { posts: [updated] },
+  };
+  const classified = [];
+  let releaseUpdated;
+  const updatedReady = new Promise((resolve) => { releaseUpdated = resolve; });
+  await page.route('**/api/search?**', (route) => {
+    const cursor = new URL(route.request().url()).searchParams.get('cursor') || 'first';
+    return route.fulfill({ json: pages[cursor] });
+  });
+  await page.route('**/api/classify', async (route) => {
+    const { items } = route.request().postDataJSON();
+    classified.push(...items);
+    if (items.some((item) => item.context.link_card?.title === 'Apple unveils a new iPhone')) await updatedReady;
+    await route.fulfill({
+      json: { results: items.map((item) => ({
+        id: item.id,
+        scores: item.keywords.map(() => item.context.link_card?.title === 'Fresh apple pie' ? 0.05 : 0.95),
+      })) },
+    });
+  });
+
+  await page.goto('/');
+  await expect(page).toHaveTitle('Bluesky Term Search');
+  await page.getByLabel('Search Terms (comma-separated)', { exact: true }).fill('apple');
+  await page.getByRole('button', { name: 'Search', exact: true }).click();
+  await expect(page.locator('#results .post')).toHaveCount(2);
+  await page.getByLabel('Topic Filter', { exact: true }).check();
+  await expect(page.locator('#results .post-text')).toHaveText(['Apple iPhone launch']);
+  await expect(page.locator('.topic-summary')).toContainText('1 off-topic post hidden.');
+
+  await page.getByRole('button', { name: 'Load More Results', exact: true }).click();
+  await expect(page.locator('#results .post-text')).toHaveText(['wow', 'Apple iPhone launch']);
+  await expect(page.locator('.embed-link-title')).toHaveText('Apple unveils a new iPhone');
+  await expect(page.locator('.topic-summary')).toContainText('Checking 1 post for topic');
+  expect(classified.filter((item) => item.id === original.uri).map((item) => item.context.link_card.title))
+    .toEqual(['Fresh apple pie', 'Apple unveils a new iPhone']);
+  releaseUpdated();
+  await expect(page.locator('.topic-summary')).toContainText('No off-topic posts found.');
+  await page.getByRole('button', { name: 'Show scores', exact: true }).click();
+  await expect(page.locator('#results .topic-score-tag')).toHaveText(['95% match', '95% match']);
+  await expect(page.locator('#results .post.off-topic')).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
+  await page.locator('#results').screenshot({ path: testInfo.outputPath('updated-topic-score.png') });
+});
+
+test('topic filtering checks a seventh keyword and includes quoted image descriptions', async ({ page }, testInfo) => {
+  const keywords = ['meta', 'gap', 'target', 'shell', 'block', 'square', 'apple'];
+  const posts = [
+    post('seven', 'A puzzle with a gap, target, shell, block and square. Apple announced an iPhone.', 90),
+    {
+      ...post('image-quote', 'wow', 80),
+      embed: {
+        $type: 'app.bsky.embed.record#view',
+        record: {
+          $type: 'app.bsky.embed.record#viewRecord',
+          uri: 'at://did:plc:quotedfixture/app.bsky.feed.post/image',
+          author: { did: 'did:plc:quotedfixture', handle: 'reporter.example', displayName: 'Reporter' },
+          value: { text: '' },
+          embeds: [{ $type: 'app.bsky.embed.images#view', images: [{ alt: 'Apple launches the new iPhone', thumb: 'https://not-loaded.example/image' }] }],
+        },
+      },
+    },
+  ];
+  const classified = [];
+  let lastKeyword;
+  let releaseSeventh;
+  const seventhReady = new Promise((resolve) => { releaseSeventh = resolve; });
+  let releaseMeta;
+  let otherTermsCompleted = 0;
+  const otherTermsReady = new Promise((resolve) => { releaseMeta = resolve; });
+  await page.route('**/api/search?**', async (route) => {
+    const term = new URL(route.request().url()).searchParams.get('term');
+    // Exercise out-of-order completion without relying on arbitrary delays.
+    if (term === 'meta') await otherTermsReady;
+    await route.fulfill({ json: { posts } });
+    if (term !== 'meta' && ++otherTermsCompleted === keywords.length - 1) releaseMeta();
+  });
+  await page.route('**/api/classify', async (route) => {
+    const { items } = route.request().postDataJSON();
+    expect(items.length).toBeLessThanOrEqual(25);
+    expect(new Set(items.map((item) => item.id)).size).toBe(items.length);
+    expect(items.every((item) => item.keywords.length <= 6)).toBe(true);
+    classified.push(...items);
+    if (items.some((item) => item.keywords.includes(lastKeyword))) await seventhReady;
+    await route.fulfill({
+      json: { results: items.map((item) => ({
+        id: item.id,
+        scores: item.keywords.map((keyword) => keyword === lastKeyword ? 0.95 : 0.05),
+      })) },
+    });
+  });
+
+  await page.goto('/');
+  await page.getByLabel('Search Terms (comma-separated)', { exact: true }).fill(keywords.join(', '));
+  await page.getByRole('button', { name: 'Search', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Search', exact: true })).toBeEnabled();
+  await expect(page.locator('#results .post')).toHaveCount(2);
+  const matchedTerms = await page.locator('#results .post').first().locator('.term-tag').allTextContents();
+  expect([...matchedTerms].sort()).toEqual([...keywords].sort());
+  lastKeyword = matchedTerms.at(-1);
+  await page.getByLabel('Topic Filter', { exact: true }).check();
+  await expect.poll(() => classified.flatMap((item) => item.keywords).length).toBe(14);
+  for (const candidate of posts) {
+    expect(classified.filter((item) => item.id === candidate.uri).flatMap((item) => item.keywords).sort())
+      .toEqual([...keywords].sort());
+  }
+  expect(classified.find((item) => item.id.endsWith('/image-quote')).context.quoted_post.image_descriptions)
+    .toEqual(['Apple launches the new iPhone']);
+  await expect(page.locator('.topic-summary')).toContainText('Checking 2 posts for topic');
+  await expect(page.locator('#results .post')).toHaveCount(2);
+  await page.getByRole('button', { name: 'Show scores', exact: true }).click();
+  await expect(page.locator('#results .topic-score-tag')).toHaveText(['5% match', '5% match']);
+  releaseSeventh();
+  await expect(page.locator('.topic-summary')).toContainText('No off-topic posts found.');
+  await expect(page.locator('#results .topic-score-tag')).toHaveText(['95% match', '95% match']);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
+  await page.locator('#results').screenshot({ path: testInfo.outputPath('all-keywords-and-quoted-image.png') });
+});
+
+test('long destinations and quoted handles remain fully visible', async ({ page }, testInfo) => {
+  const hostname = 'login.' + 'secure.'.repeat(11) + 'identity.bsky.app.attacker.example';
+  const handle = 'account.' + 'secure.'.repeat(20) + 'foo.bsky.app.attacker.example';
+  const uri = 'https://' + hostname + '/signin';
+  const external = (title = '') => ({ $type: 'app.bsky.embed.external#view', external: { uri, title } });
+  const posts = [
+    {
+      ...post('identities', 'Apple account update', 90),
+      embed: {
+        $type: 'app.bsky.embed.recordWithMedia#view',
+        media: external('Apple account information'),
+        record: {
+          $type: 'app.bsky.embed.record#view',
+          record: {
+            $type: 'app.bsky.embed.record#viewRecord',
+            uri: 'at://did:plc:quotedfixture/app.bsky.feed.post/3kquoted',
+            author: { did: 'did:plc:quotedfixture', handle, displayName: 'Quoted author' },
+            value: { text: 'Apple account announcement' },
+            embeds: [external()],
+          },
+        },
+      },
+    },
+    { ...post('untitled', 'Apple untitled link', 80), embed: external() },
+  ];
+  await page.route('**/api/search?**', (route) => route.fulfill({ json: { posts } }));
+  await page.goto('/');
+  await page.getByLabel('Search Terms (comma-separated)', { exact: true }).fill('apple');
+  await page.getByRole('button', { name: 'Search', exact: true }).click();
+  await expect(page.locator('#results .post')).toHaveCount(2);
+  await expect(page.locator('.embed-link-site')).toHaveText(hostname);
+  await expect(page.locator('.embed-quote-handle')).toHaveText('@' + handle);
+  await expect(page.locator('.embed-link-hostname')).toHaveText([hostname, hostname]);
+  for (const link of await page.locator('a.embed-link-title').all()) {
+    await expect(link).toHaveAttribute('href', uri);
+  }
+
+  // Hostnames used in place of titles must wrap completely, including inside quotes.
+  for (const width of [testInfo.project.use.viewport.width, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const theme of ['light', 'dark']) {
+      await page.getByLabel('Theme', { exact: true }).selectOption(theme);
+      const clipped = await page.locator('.embed-link-site, .embed-link-hostname, .embed-quote-handle')
+        .evaluateAll((elements) => elements.filter((element) =>
+          element.scrollWidth > element.clientWidth + 1 || element.scrollHeight > element.clientHeight + 1)
+          .map((element) => element.className));
+      expect(clipped, 'Every destination and handle suffix must be visible').toEqual([]);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
+      await page.locator('#results .post').first().screenshot({ path: testInfo.outputPath('identifiers-' + width + '-' + theme + '.png') });
+    }
+  }
+});

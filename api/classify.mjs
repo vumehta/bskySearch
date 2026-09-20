@@ -199,12 +199,13 @@ function upstreamTimeoutError() {
   return new DOMException('Upstream request timed out.', 'TimeoutError');
 }
 
-// Resolves to { status, payload }. Rejects on caller cancellation, on timeout,
+// Resolves to { status, payload, retryAfter }. Rejects on caller cancellation, on timeout,
 // and on network failure.
 async function postToTypeSafe(body, apiKey, signal) {
   throwIfAborted(signal);
   const controller = new AbortController();
   let timedOut = false;
+  let responseMeta = null;
   const cancel = () => controller.abort();
   signal?.addEventListener('abort', cancel, { once: true });
   let rejectOnAbort;
@@ -230,19 +231,24 @@ async function postToTypeSafe(body, apiKey, signal) {
           body: JSON.stringify(body),
           signal: controller.signal,
         });
+        responseMeta = { status: response.status, retryAfter: response.headers?.get('retry-after') };
         let payload = null;
         try {
           payload = await response.json();
         } catch {
           // A non-JSON body must not hide the upstream HTTP status.
         }
-        return { status: response.status, payload };
+        return { ...responseMeta, payload };
       })(),
       aborted,
     ]);
   } catch (error) {
-    if (timedOut) throw upstreamTimeoutError();
     throwIfAborted(signal);
+    // A stalled error body must not discard its HTTP status or Retry-After.
+    if (timedOut && responseMeta && (responseMeta.status < 200 || responseMeta.status > 299)) {
+      return { ...responseMeta, payload: null };
+    }
+    if (timedOut) throw upstreamTimeoutError();
     throw error;
   } finally {
     clearTimeout(timer);
@@ -251,7 +257,19 @@ async function postToTypeSafe(body, apiKey, signal) {
   }
 }
 
+// Retry-After can be a delay in seconds or an HTTP date. Invalid or past
+// values use the normal retry delay; an excessive delay is skipped below.
+function getRetryDelayMs(value) {
+  if (typeof value !== 'string' || !value.trim()) return UPSTREAM_RETRY_DELAY_MS;
+  const trimmed = value.trim();
+  const delay = /^\d+(?:\.\d+)?$/.test(trimmed)
+    ? Number(trimmed) * 1000
+    : Date.parse(trimmed) - Date.now();
+  return Number.isNaN(delay) ? UPSTREAM_RETRY_DELAY_MS : Math.max(UPSTREAM_RETRY_DELAY_MS, delay);
+}
+
 function abortableDelay(ms, signal) {
+  throwIfAborted(signal);
   return new Promise((resolve, reject) => {
     const onAbort = () => {
       clearTimeout(timer);
@@ -278,12 +296,23 @@ function describeUpstreamFailure(payload) {
 // over the same state share its tokens. Returns a score per keyword, or null
 // where the classifier gave no usable answer. Rejected credentials fail the
 // whole request instead: no later call can succeed either.
-async function scoreItem(keywords, context, { apiKey, model, signal }) {
+async function scoreItem(keywords, context, { apiKey, model, signal, deadlineAt }) {
   const questions = Object.fromEntries(keywords.map((keyword, index) => [`k${index}`, buildTopicQuestion(keyword)]));
   const body = { model, state: context, questions };
   const unscored = keywords.map(() => null);
+  let retryDelayMs = UPSTREAM_RETRY_DELAY_MS;
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    if (attempt > 0) await abortableDelay(UPSTREAM_RETRY_DELAY_MS, signal);
+    throwIfAborted(signal);
+    if (attempt > 0) {
+      // Preserve completed scores when the requested wait cannot fit. Never
+      // shorten the provider's delay just to squeeze in another attempt.
+      if (retryDelayMs >= deadlineAt - Date.now()) return unscored;
+      await abortableDelay(retryDelayMs, signal);
+    }
+    throwIfAborted(signal);
+    // First attempts are reserved together; each retry needs another token.
+    // Keep admission outside the network-error catch so a local limit cannot retry.
+    if (attempt > 0) admitUpstreamCalls(1);
     let result;
     try {
       result = await postToTypeSafe(body, apiKey, signal);
@@ -297,7 +326,10 @@ async function scoreItem(keywords, context, { apiKey, model, signal }) {
     if (result.status === 401 || result.status === 403) {
       throw httpError('The topic classifier rejected the server credentials.', 502);
     }
-    if (RETRYABLE_STATUSES.has(result.status) && attempt === 0) continue;
+    if (RETRYABLE_STATUSES.has(result.status) && attempt === 0) {
+      retryDelayMs = getRetryDelayMs(result.retryAfter);
+      continue;
+    }
     if (result.status < 200 || result.status > 299) {
       console.warn(`Topic classifier answered ${result.status}:`, describeUpstreamFailure(result.payload));
       return unscored;
@@ -314,7 +346,7 @@ async function scoreItem(keywords, context, { apiKey, model, signal }) {
 }
 
 // A task only throws for a reason that dooms the rest too (cancellation or
-// rejected credentials), so no further upstream calls are started after one.
+// rejected credentials, or admission limits), so no later tasks start after one.
 async function runWithConcurrency(tasks, concurrency) {
   let nextIndex = 0;
   let stopped = false;
@@ -353,6 +385,8 @@ async function classifyItems(items, options) {
     });
   }
   if (tasks.length > 0) {
+    // Start only when the whole first round fits, avoiding partially admitted
+    // batches whose in-flight calls would immediately be cancelled.
     admitUpstreamCalls(tasks.length);
     await runWithConcurrency(tasks, UPSTREAM_CONCURRENCY);
   }
@@ -372,10 +406,13 @@ function withDeadline(start, signal, timeoutMs) {
       controller.abort();
     }, timeoutMs);
   });
-  const work = Promise.resolve().then(() => start(controller.signal));
+  const deadlineAt = Date.now() + timeoutMs;
+  const work = Promise.resolve().then(() => start(controller.signal, deadlineAt));
   // The loser of the race may still reject after the winner settles.
   work.catch(() => {});
   return Promise.race([work, deadline]).finally(() => {
+    // An early batch failure must also stop the other workers and retry waits.
+    controller.abort();
     clearTimeout(timer);
     signal?.removeEventListener('abort', cancel);
   });
@@ -406,7 +443,7 @@ export async function POST(request, context) {
     const items = parseItems(await readJsonBody(request));
     throwIfAborted(request.signal);
     const results = await withDeadline(
-      (signal) => classifyItems(items, { apiKey, model: configuredModel || DEFAULT_MODEL, signal }),
+      (signal, deadlineAt) => classifyItems(items, { apiKey, model: configuredModel || DEFAULT_MODEL, signal, deadlineAt }),
       request.signal,
       TOPIC_JOB_TIMEOUT_MS,
     );

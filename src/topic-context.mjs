@@ -57,12 +57,21 @@ function sanitizeLinkCard(raw) {
   });
 }
 
+function sanitizeImageDescriptions(raw) {
+  return Array.isArray(raw)
+    ? raw.map((alt) => cleanText(alt, TOPIC_LIMITS.imageDescription))
+      .filter(Boolean)
+      .slice(0, TOPIC_LIMITS.maxImageDescriptions)
+    : [];
+}
+
 function sanitizeQuotedPost(raw) {
   if (!isObject(raw)) return {};
   return withoutEmpty({
     text: cleanText(raw.text, TOPIC_LIMITS.postText),
     author: cleanText(raw.author, TOPIC_LIMITS.author),
     link_title: cleanText(raw.link_title, TOPIC_LIMITS.title),
+    image_descriptions: sanitizeImageDescriptions(raw.image_descriptions),
   });
 }
 
@@ -71,17 +80,11 @@ function sanitizeQuotedPost(raw) {
 // which lets the API hash exactly what it forwards.
 export function sanitizeTopicContext(raw) {
   if (!isObject(raw)) return null;
-  const imageDescriptions = Array.isArray(raw.image_descriptions)
-    ? raw.image_descriptions
-      .map((alt) => cleanText(alt, TOPIC_LIMITS.imageDescription))
-      .filter(Boolean)
-      .slice(0, TOPIC_LIMITS.maxImageDescriptions)
-    : [];
   return withoutEmpty({
     post_text: cleanText(raw.post_text, TOPIC_LIMITS.postText),
     author: cleanText(raw.author, TOPIC_LIMITS.author),
     link_card: sanitizeLinkCard(raw.link_card),
-    image_descriptions: imageDescriptions,
+    image_descriptions: sanitizeImageDescriptions(raw.image_descriptions),
     quoted_post: sanitizeQuotedPost(raw.quoted_post),
   });
 }
@@ -153,13 +156,14 @@ function getQuotedRecord(embed) {
   return isObject(view) && isObject(view.value) ? view : null;
 }
 
-// Raw fields of a resolved quote, all unvalidated, with its own link card.
+// Raw fields of a resolved quote, all unvalidated, with its own media evidence.
 export function getQuotedPost(embed) {
   const quoted = getQuotedRecord(embed);
   if (!quoted) return null;
   const embeds = Array.isArray(quoted.embeds) ? quoted.embeds : [];
   const linkCard = embeds.map((item) => getLinkCard(item)).find(Boolean) || null;
-  return { uri: quoted.uri, author: quoted.author, text: quoted.value.text, linkCard };
+  const imageDescriptions = embeds.flatMap((item) => getImageDescriptions(getMedia(item)));
+  return { uri: quoted.uri, author: quoted.author, text: quoted.value.text, linkCard, imageDescriptions };
 }
 
 // Reaction posts ("wow") keep their subject in a link card, an image, or the
@@ -177,6 +181,7 @@ export function buildTopicContext(post) {
       text: quoted.text,
       author: formatAuthor(quoted.author),
       link_title: quoted.linkCard?.title,
+      image_descriptions: quoted.imageDescriptions,
     },
   });
 }

@@ -2,8 +2,9 @@ import { TOPIC_LIMITS, cleanText, getLinkCard, getQuotedPost } from './topic-con
 import { getHttpUrl, getPostUrlFromAtUri } from './utils.mjs';
 
 // Embeds are not covered by isRenderablePost, so every field may have the wrong
-// type. Text goes through the classifier's own cleanup and limits, which makes
-// the card show what the topic filter judged, and is only ever set as text.
+// type. Descriptive text uses the classifier's cleanup and limits; hostnames
+// and handles remain complete so their domain suffixes are visible. All content
+// is only ever set as text.
 
 const plainText = (text) => document.createTextNode(text);
 
@@ -28,17 +29,18 @@ function createLinkCard(linkCard, renderText, { compact = false } = {}) {
   const href = getHttpUrl(linkCard.uri);
   const title = cleanText(linkCard.title, TOPIC_LIMITS.title);
   const description = compact ? '' : cleanText(linkCard.description, TOPIC_LIMITS.description);
-  // The site is read from the URL that is linked, so it cannot misname the
-  // destination; a URL that is not linked has no site worth showing.
-  const site = href ? cleanText(linkCard.site, TOPIC_LIMITS.site) : '';
+  // Preserve the complete hostname from the linked URL. Classifier limits
+  // would hide the actual destination domain at the end of a long hostname.
+  const site = href ? new URL(href).hostname.replace(/^www\./, '') : '';
   const heading = title || site;
   if (!heading && !description) return null;
 
   const card = createElement('div', 'embed-link');
   if (heading) {
+    const className = title ? 'embed-link-title' : 'embed-link-title embed-link-hostname';
     card.appendChild(href
-      ? createExternalLink('embed-link-title', href, renderText(heading))
-      : createElement('span', 'embed-link-title', renderText(heading)));
+      ? createExternalLink(className, href, renderText(heading))
+      : createElement('span', className, renderText(heading)));
   }
   if (title && site) card.appendChild(createElement('div', 'embed-link-site', plainText(site)));
   if (description) card.appendChild(createElement('div', 'embed-link-description', renderText(description)));
@@ -46,7 +48,7 @@ function createLinkCard(linkCard, renderText, { compact = false } = {}) {
 }
 
 function createQuotedPost(quoted, renderText) {
-  const handle = cleanText(quoted.author?.handle, TOPIC_LIMITS.author);
+  const handle = cleanText(quoted.author?.handle, Infinity);
   const name = cleanText(quoted.author?.displayName, TOPIC_LIMITS.author) || handle;
   const text = cleanText(quoted.text, TOPIC_LIMITS.postText);
   const linkCard = quoted.linkCard && createLinkCard(quoted.linkCard, renderText, { compact: true });

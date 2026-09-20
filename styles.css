@@ -917,6 +917,11 @@ button:disabled {
     text-decoration: none;
 }
 
+/* A hostname used as the title must keep its destination suffix visible. */
+.embed-link-hostname {
+    display: block;
+}
+
 a.embed-link-title {
     color: var(--accent);
 }

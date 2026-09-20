@@ -193,6 +193,20 @@ describe('scoring', () => {
     expect(calls[0].body.model).toBe('jev-latest');
   });
 
+  it('forwards quoted image descriptions as bounded text evidence', async () => {
+    const calls = upstream();
+    const raw = item('quote');
+    raw.context.quoted_post = {
+      image_descriptions: [' Apple\u0000 introduces an iPhone ', null, ...Array(8).fill('x'.repeat(600))],
+      thumbnail: 'https://not-forwarded.example/image',
+    };
+    const response = await POST(request({ items: [raw] }), context);
+    expect(response.status).toBe(200);
+    expect(calls[0].body.state.quoted_post).toEqual({
+      image_descriptions: ['Apple introduces an iPhone', ...Array(3).fill('x'.repeat(TOPIC_LIMITS.imageDescription))],
+    });
+  });
+
   it('uses a configured model', async () => {
     const calls = upstream();
     await POST(request({ items: [item('a')] }), { env: { TYPESAFE_API_KEY: 'k', TYPESAFE_MODEL: 'jev-1.13.0' } });
@@ -254,6 +268,84 @@ describe('upstream failures', () => {
     const response = await advanceUntilSettled(POST(request({ items: [item('a')] }), context));
     await expect(response.json()).resolves.toEqual({ results: [{ id: 'a', scores: [0.8] }] });
     expect(attempts).toBe(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([
+    ['seconds', 429, () => '1', 1000],
+    ['HTTP date', 529, () => new Date(Date.now() + 2000).toUTCString(), 2000],
+    ['invalid header', 503, () => 'not-a-date', UPSTREAM_RETRY_DELAY_MS],
+  ])('honors Retry-After with %s before retrying', async (_kind, status, header, minimumDelay) => {
+    useFakeClock();
+    vi.setSystemTime(new Date('2026-09-20T00:00:00Z'));
+    const attemptedAt = [];
+    globalThis.fetch = vi.fn(async () => {
+      attemptedAt.push(Date.now());
+      if (attemptedAt.length === 1) {
+        return Response.json({ error: 'try later' }, { status, headers: { 'Retry-After': header() } });
+      }
+      return Response.json({ answers: { k0: { type: 'noul', noul: 0.8 } } });
+    });
+    const response = await advanceUntilSettled(POST(request({ items: [item('a')] }), context), 50);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ results: [{ id: 'a', scores: [0.8] }] });
+    expect(attemptedAt).toHaveLength(2);
+    expect(attemptedAt[1] - attemptedAt[0]).toBeGreaterThanOrEqual(minimumDelay);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('preserves other scores when Retry-After exceeds the remaining job budget', async () => {
+    useFakeClock();
+    globalThis.fetch = vi.fn(async (_url, options) => {
+      if (JSON.parse(options.body).state.post_text === 'post throttled') {
+        return Response.json({ error: 'try later' }, { status: 429, headers: { 'Retry-After': '60' } });
+      }
+      return Response.json({ answers: { k0: { type: 'noul', noul: 0.8 } } });
+    });
+    const response = await advanceUntilSettled(POST(request({ items: [item('good'), item('throttled')] }), context));
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      results: [{ id: 'good', scores: [0.8] }, { id: 'throttled', scores: [null] }],
+    });
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('retains Retry-After when a rate-limit response body stalls', async () => {
+    useFakeClock();
+    let upstreamSignal;
+    globalThis.fetch = vi.fn(async (_url, options) => {
+      if (globalThis.fetch.mock.calls.length > 1) {
+        return Response.json({ answers: { k0: { type: 'noul', noul: 0.8 } } });
+      }
+      upstreamSignal = options.signal;
+      return {
+        status: 429,
+        headers: new Headers({ 'Retry-After': '60' }),
+        json: () => new Promise((_, reject) => {
+          options.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+        }),
+      };
+    });
+    const response = await advanceUntilSettled(POST(request({ items: [item('a')] }), context));
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ results: [{ id: 'a', scores: [null] }] });
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    expect(upstreamSignal.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('cancels the Retry-After wait when the caller leaves', async () => {
+    useFakeClock();
+    globalThis.fetch = vi.fn(async () =>
+      Response.json({ error: 'try later' }, { status: 429, headers: { 'Retry-After': '10' } }));
+    const controller = new AbortController();
+    const pending = POST(request({ items: [item('a')] }, { signal: controller.signal }), context);
+    for (let turn = 0; turn < 5000 && globalThis.fetch.mock.calls.length === 0; turn += 1) await realPause();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    controller.abort();
+    expect((await pending).status).toBe(499);
     expect(vi.getTimerCount()).toBe(0);
   });
 
@@ -353,6 +445,53 @@ describe('upstream failures', () => {
 });
 
 describe('admission', () => {
+  it('charges every retry against admission, including concurrent retries', async () => {
+    useFakeClock();
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+    upstream();
+    const retryingPosts = 4;
+    const initialCalls = CLASSIFY_ADMISSION_LIMITS.burst - retryingPosts;
+    for (let start = 0; start < initialCalls; start += TOPIC_LIMITS.maxItems) {
+      const items = Array.from({ length: Math.min(TOPIC_LIMITS.maxItems, initialCalls - start) }, (_, index) => item('fill' + (start + index)));
+      expect((await POST(request({ items }), context)).status).toBe(200);
+    }
+    globalThis.fetch.mockImplementation(async () => Response.json({ error: 'overloaded' }, { status: 529 }));
+    const response = await advanceUntilSettled(POST(request({
+      items: Array.from({ length: retryingPosts }, (_, index) => item('retry' + index)),
+    }), context));
+    expect(response.status).toBe(429);
+    expect(Number(response.headers.get('Retry-After'))).toBeGreaterThan(0);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(CLASSIFY_ADMISSION_LIMITS.burst);
+    expect(vi.getTimerCount()).toBe(0);
+    expect((await POST(request({ items: [item('fill0')] }), context)).status).toBe(200);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(CLASSIFY_ADMISSION_LIMITS.burst);
+  });
+
+  it('cancels in-flight calls when a retry exhausts admission', async () => {
+    useFakeClock();
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+    upstream();
+    const initialCalls = CLASSIFY_ADMISSION_LIMITS.burst - 2;
+    for (let start = 0; start < initialCalls; start += TOPIC_LIMITS.maxItems) {
+      const items = Array.from({ length: Math.min(TOPIC_LIMITS.maxItems, initialCalls - start) }, (_, index) => item('fill' + (start + index)));
+      expect((await POST(request({ items }), context)).status).toBe(200);
+    }
+    let upstreamSignal;
+    globalThis.fetch.mockClear().mockImplementation((_url, options) => {
+      if (JSON.parse(options.body).state.post_text === 'post retry') {
+        return Promise.resolve(Response.json({ error: 'overloaded' }, { status: 529 }));
+      }
+      upstreamSignal = options.signal;
+      return new Promise(() => {});
+    });
+    const response = await advanceUntilSettled(POST(request({ items: [item('stalled'), item('retry')] }), context));
+    expect(response.status).toBe(429);
+    expect(upstreamSignal.aborted).toBe(true);
+    await realPause();
+    expect(vi.getTimerCount()).toBe(0);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(CLASSIFY_ADMISSION_LIMITS.burst - initialCalls);
+  });
+
   it('limits upstream calls, not cache hits, and refills over time', async () => {
     useFakeClock();
     upstream();
@@ -371,5 +510,16 @@ describe('admission', () => {
 
     vi.setSystemTime(Date.now() + 1000);
     expect((await POST(request({ items: [item('fresh-1'), item('fresh-2')] }), context)).status).toBe(200);
+
+    // Reject a batch before starting any of it, and advertise enough refill time.
+    const freshBatch = Array.from({ length: TOPIC_LIMITS.maxItems }, (_, index) => item('next' + index));
+    const callsBefore = globalThis.fetch.mock.calls.length;
+    const batchLimited = await POST(request({ items: freshBatch }), context);
+    expect(batchLimited.status).toBe(429);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(callsBefore);
+    const retryAfter = Number(batchLimited.headers.get('Retry-After'));
+    expect(retryAfter).toBeGreaterThan(1);
+    vi.setSystemTime(Date.now() + retryAfter * 1000);
+    expect((await POST(request({ items: freshBatch }), context)).status).toBe(200);
   });
 });
