@@ -1,0 +1,33 @@
+# Topic filter
+
+The filter keeps analysis and substantive news about a searched company,
+platform, or its products and services. Concrete developments, reasoned
+criticism, useful comparisons, and specific product experiences qualify.
+The evidence can come from the post, a link preview, a quote, or image alt text.
+
+A mention alone does not qualify: source credits, promotional hashtags,
+follow-me requests, casual photo sharing, and unrelated commentary are excluded.
+The searched subject does not have to be the only subject, but the useful
+information must be about it. An official author does not qualify automatically.
+
+`buildTopicQuestion` in `api/classify.mjs` defines the rubric. It asks one Noul
+per original search term, sharing the evidence in one request per post.
+The server hashes the entire question with its evidence, so rubric changes
+invalidate earlier scores. Unchecked posts remain visible and hidden posts can
+be revealed using **Show them**.
+
+## Evaluate a rubric change
+
+`tests/fixtures/topic-eval.json` contains hand-labeled examples, including
+adaptations of the three reported Instagram false positives. These are test
+inputs, not verified news reports. Explicit details and account identities from
+the reported posts are omitted when they are not relevant to classification.
+
+Set `TYPESAFE_API_KEY` in the terminal environment, then run `npm.cmd run eval:topic`
+(or `npm run eval:topic`). This makes live, billable requests through the same
+handler used in production and exits unsuccessfully for wrong or missing answers.
+Set `TYPESAFE_MODEL` to a versioned model ID when comparing rubric changes.
+
+Normal unit and browser tests use mocked answers. They check request handling
+and UI behavior; they do not establish Jev's classification accuracy. The small
+evaluation set is a starting check, not a representative accuracy benchmark.

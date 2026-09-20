@@ -1,0 +1,113 @@
+[
+  {
+    "id": "artwork-source-credit",
+    "keyword": "Instagram",
+    "keep": false,
+    "context": { "post_text": "Artwork by contemporary UK abstract artist Tricia Crowther (via Instagram) #WomensArt" }
+  },
+  {
+    "id": "stream-promotion-hashtag",
+    "keyword": "Instagram",
+    "keep": false,
+    "context": { "post_text": "I'm live right now! Come watch my stream. #instagram #livestream #nsfw" }
+  },
+  {
+    "id": "casual-photo-sharing",
+    "keyword": "Instagram",
+    "keep": false,
+    "context": { "post_text": "Took this photo for someone on Instagram, but I want to share it here." }
+  },
+  {
+    "id": "art-analysis-with-platform-credit",
+    "keyword": "Instagram",
+    "keep": false,
+    "context": { "post_text": "This painting's composition uses diagonal lines and warm colors to create tension between the figures. The muted background draws the eye toward the central subject. Image via Instagram." }
+  },
+  {
+    "id": "profile-promotion",
+    "keyword": "Instagram",
+    "keep": false,
+    "context": { "post_text": "Follow my Instagram for more photos and updates! Link in bio." }
+  },
+  {
+    "id": "unsupported-complaint",
+    "keyword": "Instagram",
+    "keep": false,
+    "context": { "post_text": "Instagram sucks. I hate it." }
+  },
+  {
+    "id": "official-account-alone",
+    "keyword": "Instagram",
+    "keep": false,
+    "context": { "post_text": "Happy Friday! What are your weekend plans?", "author": "Instagram (@instagram.com)" }
+  },
+  {
+    "id": "algorithm-analysis",
+    "keyword": "Instagram",
+    "keep": true,
+    "context": { "post_text": "Instagram prioritizes recommended Reels over followed accounts. That reduces creators' organic reach and pushes them toward paid promotion, while keeping viewers scrolling longer." }
+  },
+  {
+    "id": "concrete-policy-news",
+    "keyword": "Instagram",
+    "keep": true,
+    "context": { "post_text": "Instagram is expanding teen account protections: under-16s will need parental approval to livestream, and messages from strangers will be blocked by default." }
+  },
+  {
+    "id": "specific-product-experience",
+    "keyword": "Instagram",
+    "keep": true,
+    "context": { "post_text": "Instagram resets my feed from Following to recommendations every time I reopen the app. It makes keeping up with people I follow harder and exposes me to more sponsored posts." }
+  },
+  {
+    "id": "comparison-with-another-platform",
+    "keyword": "Instagram",
+    "keep": true,
+    "context": { "post_text": "TikTok gives new accounts distribution through recommendations, while Instagram still relies more on existing follower relationships. That difference affects which platform small creators choose first." }
+  },
+  {
+    "id": "short-reaction-with-news-link",
+    "keyword": "Instagram",
+    "keep": true,
+    "context": {
+      "post_text": "wow",
+      "link_card": { "title": "Instagram expands teen account protections", "description": "Under-16s will need parental approval to livestream.", "site": "news.example" }
+    }
+  },
+  {
+    "id": "analysis-in-quoted-post",
+    "keyword": "Instagram",
+    "keep": true,
+    "context": { "post_text": "This explains it.", "quoted_post": { "text": "Instagram's subscription model shifts costs from advertisers to users, but weak adoption could leave it dependent on the same advertising incentives." } }
+  },
+  {
+    "id": "news-about-different-platform",
+    "keyword": "Instagram",
+    "keep": false,
+    "context": { "post_text": "TikTok now lets creators restrict comments to paid subscribers. That could improve moderation while putting community participation behind a paywall. Source: a journalist's Instagram post." }
+  },
+  {
+    "id": "news-about-searched-platform",
+    "keyword": "TikTok",
+    "keep": true,
+    "context": { "post_text": "TikTok now lets creators restrict comments to paid subscribers. That could improve moderation while putting community participation behind a paywall. Source: a journalist's Instagram post." }
+  },
+  {
+    "id": "brief-company-news",
+    "keyword": "Meta",
+    "keep": true,
+    "context": { "post_text": "Meta reported quarterly advertising revenue up 18%, driven by higher ad prices rather than more users." }
+  },
+  {
+    "id": "entertainment-with-service-credit",
+    "keyword": "Netflix",
+    "keep": false,
+    "context": { "post_text": "I love the outfits and romance in this Netflix show. My favorite character finally got a happy ending!" }
+  },
+  {
+    "id": "ordinary-word-sense",
+    "keyword": "Meta",
+    "keep": false,
+    "context": { "post_text": "The new patch changed the competitive meta: cheaper spells now counter the strongest deck." }
+  }
+]

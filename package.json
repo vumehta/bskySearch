@@ -10,6 +10,7 @@
     "perf:smoke": "node scripts/perf-smoke.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
+    "eval:topic": "node scripts/eval-topic.mjs",
     "test:browser": "playwright test --config tests/browser/playwright.config.mjs"
   },
   "repository": {
