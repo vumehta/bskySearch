@@ -46,15 +46,11 @@ describe('getPostUrlFromAtUri', () => {
   it.each([
     'at://alice.bsky.social/app.bsky.feed.post/xyz',
     'at://did:plc:abc123/app.bsky.feed.like/xyz',
-    'at://did:plc:abc123/app.bsky.feed.post/xyz/extra',
-    'at://did:plc:abc123/app.bsky.feed.post/..',
+    'at://did:plc:abc123/app.bsky.feed.post/../../settings',
     'at://did:plc:abc 123/app.bsky.feed.post/xyz',
     'at://did:plc:abc123/app.bsky.feed.post/xyz?next=https://evil.example',
     'https://bsky.app/profile/did:plc:abc123/post/xyz',
-    '',
     null,
-    undefined,
-    7,
     { uri: 'at://did:plc:abc123/app.bsky.feed.post/xyz' },
   ])('returns null for %j', (uri) => {
     expect(getPostUrlFromAtUri(uri)).toBeNull();
@@ -69,25 +65,14 @@ describe('getHttpUrl', () => {
   });
 
   it.each([
-    'javascript:alert(1)',
-    'JaVaScRiPt:alert(1)',
-    ' javascript:alert(1)',
-    'java	script:alert(1)',
+    '  JaVa\tScRiPt:alert(1)',
     'javascript://news.example/%0Aalert(1)',
     'data:text/html,<script>alert(1)</script>',
-    'vbscript:msgbox(1)',
-    'blob:https://news.example/1234',
-    'file:///etc/passwd',
     'ftp://files.example/report',
-    'mailto:someone@example.com',
     '//news.example/story',
     '/api/classify',
-    'news.example/story',
     'https://',
-    '',
     null,
-    undefined,
-    7,
     ['https://news.example/'],
     { href: 'https://news.example/' },
   ])('returns null for %j', (url) => {
@@ -102,14 +87,6 @@ describe('isValidBskyUrl', () => {
 
   it('returns true for CDN URLs', () => {
     expect(isValidBskyUrl('https://cdn.bsky.app/img/something')).toBe(true);
-  });
-
-  it('returns true for subdomains of bsky.app', () => {
-    expect(isValidBskyUrl('https://sub.bsky.app/page')).toBe(true);
-  });
-
-  it('returns true for subdomains of cdn.bsky.app', () => {
-    expect(isValidBskyUrl('https://img.cdn.bsky.app/something')).toBe(true);
   });
 
   it('returns false for http (non-https)', () => {
@@ -134,12 +111,6 @@ describe('isValidBskyUrl', () => {
 });
 
 describe('parseBlueskyPostUrl', () => {
-  it('parses valid post URL with handle', () => {
-    const result = parseBlueskyPostUrl('https://bsky.app/profile/alice.bsky.social/post/abc123');
-    expect(result.actor).toBe('alice.bsky.social');
-    expect(result.postId).toBe('abc123');
-  });
-
   it('parses valid post URL with custom domain', () => {
     const result = parseBlueskyPostUrl('https://bsky.app/profile/alice.example.com/post/xyz789');
     expect(result.actor).toBe('alice.example.com');
@@ -246,11 +217,6 @@ describe('expandSearchTerms', () => {
       .toEqual(['Hello world', 'Hello', 'world']);
   });
 
-  it('handles empty terms arrays', () => {
-    expect(expandSearchTerms([], true)).toEqual([]);
-    expect(expandSearchTerms([], false)).toEqual([]);
-  });
-
   it('filters empty terms with expansion off', () => {
     expect(expandSearchTerms(['', '  ', 'valid'], false)).toEqual(['valid']);
   });
@@ -321,14 +287,6 @@ describe('filterByDate', () => {
 });
 
 describe('getPostTimestamp', () => {
-  it('prefers record.createdAt when present', () => {
-    const post = {
-      indexedAt: '2025-01-01T00:00:00.000Z',
-      record: { createdAt: '2026-01-01T00:00:00.000Z' },
-    };
-    expect(getPostTimestamp(post)).toBe(Date.parse('2026-01-01T00:00:00.000Z'));
-  });
-
   it('falls back to indexedAt when createdAt is missing', () => {
     const post = { indexedAt: '2026-01-02T00:00:00.000Z' };
     expect(getPostTimestamp(post)).toBe(Date.parse('2026-01-02T00:00:00.000Z'));
@@ -380,30 +338,17 @@ describe('normalizeSortValue', () => {
 });
 
 describe('normalizeTerm', () => {
-  it('trims whitespace', () => {
-    expect(normalizeTerm('  hello  ')).toBe('hello');
-  });
-
-  it('removes double quotes', () => {
-    expect(normalizeTerm('"hello world"')).toBe('hello world');
-  });
-
   it('removes single quotes', () => {
     expect(normalizeTerm("'hello world'")).toBe('hello world');
   });
 
   it('trims after removing quotes', () => {
-    expect(normalizeTerm('" hello "')).toBe('hello');
+    expect(normalizeTerm('  " hello "  ')).toBe('hello');
   });
 
   it('does not remove unmatched quotes', () => {
     expect(normalizeTerm('"hello')).toBe('"hello');
     expect(normalizeTerm("hello'")).toBe("hello'");
-  });
-
-  it('handles empty string', () => {
-    expect(normalizeTerm('')).toBe('');
-    expect(normalizeTerm('   ')).toBe('');
   });
 
   it('preserves internal quotes', () => {

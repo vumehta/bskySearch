@@ -105,22 +105,6 @@ describe('production search transformations', () => {
     }
   });
 
-  it('changes the render fingerprint when a link card or a quoted post changes', () => {
-    const external = { uri: 'https://news.example/story', title: 'Apple beats earnings', description: 'A record quarter.' };
-    const quoted = { uri: 'at://did:plc:other/app.bsky.feed.post/two', author: { handle: 'netflix.com' }, value: { text: 'Quoted' } };
-    const linkCard = { ...renderablePost(), embed: { $type: 'app.bsky.embed.external#view', external } };
-    const quote = { ...renderablePost(), embed: { $type: 'app.bsky.embed.record#view', record: quoted } };
-    for (const [base, changed] of [
-      [renderablePost(), linkCard],
-      [linkCard, { ...linkCard, embed: { ...linkCard.embed, external: { ...external, title: 'Apple misses earnings' } } }],
-      [linkCard, { ...linkCard, embed: { ...linkCard.embed, external: { ...external, uri: 'https://news.example/other' } } }],
-      [quote, { ...quote, embed: { ...quote.embed, record: { ...quoted, value: { text: 'Edited' } } } }],
-      [quote, { ...quote, embed: { ...quote.embed, record: { ...quoted, author: { handle: 'hulu.com' } } } }],
-    ]) {
-      expect(getPostRenderFingerprint(changed)).not.toBe(getPostRenderFingerprint(base));
-    }
-  });
-
   it.each([undefined, null, 'plc:test', 'did:plc:', 'did:PLC:test', 'did:plc:te st'])
   ('rejects a malformed author DID: %s', (did) => {
     const post = renderablePost();

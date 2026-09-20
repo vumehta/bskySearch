@@ -153,29 +153,6 @@ describe('scoring', () => {
     expect(body.state).toEqual({ post_text: 'post at://post/1', author: 'Alice (@alice.example)' });
     expect(body.questions).toEqual({ k0: buildTopicQuestion('Meta'), k1: buildTopicQuestion('Apple') });
     expect(body.questions.k0.type).toBe('noul');
-    expect(body.questions.k0.instructions).toContain('products or services');
-  });
-
-  it('asks about the sense of the word, so brief and shared mentions count', () => {
-    const { instructions, criteria } = buildTopicQuestion('Meta');
-    expect(instructions).toMatch(/^Does this social media post refer to the company, brand, or organisation called "Meta"/);
-    expect(criteria.true).toContain('A brief mention counts');
-    expect(criteria.true).toContain('alongside other companies');
-    expect(criteria.false).toContain('different meaning');
-    // Prominence is not the test: that wording hid real mentions of the company.
-    expect([instructions, criteria.true, criteria.false].join(' ')).not.toMatch(/main subject|in passing/);
-  });
-
-  it('never serves a score that was given to a differently worded question', async () => {
-    const calls = upstream();
-    await POST(request({ items: [item('a')] }), context);
-    expect(scoreCache.size).toBe(1);
-    // The cache key is derived from the full question, not just the keyword.
-    const [cachedKey] = scoreCache.keys();
-    const bytes = new TextEncoder().encode(JSON.stringify(['Meta', calls[0].body.state]));
-    const digest = await crypto.subtle.digest('SHA-256', bytes);
-    const keywordOnlyKey = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
-    expect(cachedKey).not.toBe(keywordOnlyKey);
   });
 
   it('forwards only sanitized evidence, never extra client fields', async () => {

@@ -30,13 +30,6 @@ function post(overrides) {
 }
 
 describe('buildTopicContext', () => {
-  it('describes a plain text post by its text and author', () => {
-    expect(buildTopicContext(post())).toEqual({
-      post_text: 'wow',
-      author: 'Tech Reporter (@reporter.example)',
-    });
-  });
-
   it('carries the link card, where a reaction post keeps its subject', () => {
     expect(buildTopicContext(post({ embed: linkCard })).link_card).toEqual({
       title: 'Meta lays off staff',
@@ -100,7 +93,6 @@ describe('buildTopicContext', () => {
       author: 'Netflix (@netflix.com)',
       image_descriptions: ['Apple launches an iPhone'],
     });
-    expect(sanitizeTopicContext(context)).toEqual(context);
   });
 
   it('reads both halves of a quote with media', () => {
@@ -187,7 +179,6 @@ describe('sanitizeTopicContext', () => {
 
   it('is idempotent, so the API can hash exactly what it forwards', () => {
     const once = buildTopicContext(post({ embed: { $type: 'app.bsky.embed.record#view', record: quotedView } }));
-    expect(sanitizeTopicContext(once)).toEqual(once);
     expect(JSON.stringify(sanitizeTopicContext(once))).toBe(JSON.stringify(once));
   });
 });

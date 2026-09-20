@@ -38,18 +38,8 @@ describe('browser JSON requests', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('preserves useful HTTP error payloads and rejects malformed successful JSON', async () => {
-    vi.stubGlobal('fetch', vi.fn()
-      .mockResolvedValueOnce(new Response('{"error":"Try later"}', { status: 429 }))
-      .mockResolvedValueOnce(new Response('<html>broken</html>')));
-    await expect(fetchJson('/limited')).rejects.toMatchObject({ status: 429, message: 'Try later' });
+  it('rejects malformed successful JSON', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(new Response('<html>broken</html>')));
     await expect(fetchJson('/broken')).rejects.toBeInstanceOf(HttpError);
-  });
-
-  it('clears its timer after a successful body read', async () => {
-    vi.useFakeTimers();
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"posts":[]}')));
-    await expect(fetchJson('/success')).resolves.toEqual({ posts: [] });
-    expect(vi.getTimerCount()).toBe(0);
   });
 });

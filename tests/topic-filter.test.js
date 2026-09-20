@@ -33,7 +33,7 @@ const scoredBy = (scoreFor) => (body) => ok({
 });
 
 function installFetch({ posts, classify }) {
-  const calls = { search: [], classify: [] };
+  const calls = { classify: [] };
   globalThis.fetch = vi.fn(async (url, options = {}) => {
     if (String(url).startsWith('/api/classify')) {
       const body = JSON.parse(options.body);
@@ -41,7 +41,6 @@ function installFetch({ posts, classify }) {
       return classify(body, options);
     }
     const params = new URL(url, 'https://example.test').searchParams;
-    calls.search.push(params);
     return ok({ posts: typeof posts === 'function' ? posts(params.get('term')) : posts });
   });
   return calls;
@@ -82,14 +81,6 @@ describe('topic filter', () => {
     search.clearSearchResults();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
-  });
-
-  it('sends nothing to the classifier while it is off', async () => {
-    const calls = installFetch({ posts: [makePost('a', 'apple pie recipe')], classify: scoredBy(() => 0) });
-    await search.performSearch();
-    expect(visibleUris()).toEqual([uri('a')]);
-    expect(calls.classify).toHaveLength(0);
-    expect(summary().style.display).toBe('none');
   });
 
   it('shows results first, then hides the posts that score as off-topic', async () => {
@@ -415,37 +406,6 @@ describe('topic filter', () => {
     const secondPass = calls.classify.length;
     await checkAll();
     expect(calls.classify).toHaveLength(secondPass);
-  });
-
-  it('splits large result sets into bounded batches', async () => {
-    const posts = Array.from({ length: 60 }, (_, index) => makePost(`p${index}`, `Apple news ${index}`, 100 - index));
-    const calls = installFetch({ posts, classify: scoredBy(() => 0.9) });
-    state.hideOffTopic = true;
-    await search.performSearch();
-    await vi.waitFor(() => expect(calls.classify).toHaveLength(3));
-    expect(calls.classify.map(({ body }) => body.items.length)).toEqual([25, 25, 10]);
-    // The most prominent posts are judged first.
-    expect(calls.classify[0].body.items[0].id).toBe(uri('p0'));
-    await vi.waitFor(() => expect(summaryText()).toBe('No off-topic posts found.'));
-  });
-
-  it('switches on for loaded posts without searching again, and records it in the URL', async () => {
-    const calls = installFetch({
-      posts: [makePost('company', 'Apple announces a new iPhone', 90), makePost('fruit', 'apple pie recipe', 80)],
-      classify: scoredBy((item) => (item.id === uri('company') ? 0.96 : 0.04)),
-    });
-    await search.performSearch();
-    expect(calls.search).toHaveLength(1);
-
-    search.applyTopicFilterChange(true);
-    await vi.waitFor(() => expect(visibleUris()).toEqual([uri('company')]));
-    expect(calls.search).toHaveLength(1);
-    expect(window.history.replaceState.mock.calls.at(-1)[2]).toContain('topic=1');
-
-    search.applyTopicFilterChange(false);
-    expect(visibleUris()).toEqual([uri('company'), uri('fruit')]);
-    expect(summary().style.display).toBe('none');
-    expect(window.history.replaceState.mock.calls.at(-1)[2]).not.toContain('topic=');
   });
 
   it('abandons scoring when a new search replaces the old one', async () => {

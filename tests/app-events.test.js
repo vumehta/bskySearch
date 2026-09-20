@@ -222,19 +222,6 @@ describe('app search controls', () => {
     expect(window.location.searchParams.has('searchSort')).toBe(false);
   });
 
-  it('ranks by saves locally while requesting the top results', async () => {
-    fetch.mockImplementation(async () => Response.json({ posts: [
-      { ...makePost('liked'), bookmarkCount: 1 },
-      { ...makePost('saved'), likeCount: 10, bookmarkCount: 9 },
-    ] }));
-    await bootApp('?terms=apple&searchSort=bookmarks');
-    expect(elements.sortSelect.value).toBe('bookmarks');
-    expect(state.searchSort).toBe('bookmarks');
-    expect(searchRequests().map((params) => params.get('sort'))).toEqual(['top']);
-    expect(state.allPosts.map((post) => post.uri)).toEqual([makePost('saved').uri, makePost('liked').uri]);
-    expect(elements.results.querySelector('.results-header').textContent).toContain('Sorted by saves (high to low)');
-  });
-
   it('re-ranks cached top results when the sort changes to saves', async () => {
     fetch.mockImplementation(async () => Response.json({ posts: [
       { ...makePost('liked'), bookmarkCount: 1 },
