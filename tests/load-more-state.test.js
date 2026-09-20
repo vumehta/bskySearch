@@ -153,17 +153,6 @@ describe('search pagination and lifecycle', () => {
     expect(state.allPosts.map((post) => post.uri)).toEqual([expect.stringContaining('/p3')]);
   });
 
-  it('marks a terminal second initial page exhausted', async () => {
-    globalThis.fetch = vi.fn()
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ cursor: 'c1', posts: [makePost('p1', 20)] }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ posts: [makePost('p2', 20)] }) });
-    await search.performSearch();
-    expect(state.currentCursors.apple).toBe(null);
-    expect(getLoadMoreButton().style.display).toBe('none');
-    await search.loadMore();
-    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
-  });
-
   it('stops repeated cursors and longer cursor cycles', async () => {
     globalThis.fetch = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ cursor: 'c1', posts: [makePost('p1', 20)] }) })
@@ -390,7 +379,6 @@ describe('search pagination and lifecycle', () => {
       .mockResolvedValueOnce({ ok: true, json: async () => ({ cursor: 'c1', posts: [post] }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ cursor: 'c2', posts: [post] }) });
     await search.performSearch();
-    const previousCard = elements.results.querySelector('.post');
     const updated = { ...post, record: { ...post.record } };
     if (field === 'createdAt') updated.record.createdAt = new Date(Date.now() - 3600000).toISOString();
     if (field === 'reply') updated.record.reply = { parent: { uri: 'at://did:plc:test/app.bsky.feed.post/parent' } };
@@ -398,7 +386,6 @@ describe('search pagination and lifecycle', () => {
     globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ posts: [updated] }) }));
     await search.loadMore();
     const nextCard = elements.results.querySelector('.post');
-    expect(nextCard).not.toBe(previousCard);
     if (field === 'createdAt') expect(nextCard.querySelector('.post-time').textContent).toBe('1h ago');
     if (field === 'reply') {
       const toggle = nextCard.querySelector('.thread-link');

@@ -11,10 +11,12 @@ import {
   termsInput,
   themeSelect,
   timeFilterSelect,
+  topicFilterToggle,
 } from './dom.mjs';
 import {
   applyMinLikesFilter,
   applySearchSortChange,
+  applyTopicFilterChange,
   cancelDebouncedSearch,
   debouncedSearch,
   focusSearchInput,
@@ -64,6 +66,10 @@ function initFromURL() {
   if (params.get('expand') === '1') {
     expandTermsToggle.checked = true;
   }
+  if (params.get('topic') === '1') {
+    topicFilterToggle.checked = true;
+  }
+  state.hideOffTopic = Boolean(topicFilterToggle.checked);
 
   const postParam = params.get('post');
   const quoteSortParam = params.get('quoteSort');
@@ -140,6 +146,10 @@ expandTermsToggle.addEventListener('change', () => {
   updateExpansionSummary();
   cancelDebouncedSearch();
   if (termsInput.value.trim()) performSearch();
+});
+
+topicFilterToggle.addEventListener('change', () => {
+  applyTopicFilterChange(topicFilterToggle.checked);
 });
 
 timeFilterSelect.addEventListener('change', () => {

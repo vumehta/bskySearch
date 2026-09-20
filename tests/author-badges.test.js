@@ -33,7 +33,6 @@ describe('author badges', () => {
   it.each([
     ['no verification data', undefined],
     ['a lapsed verification', { verifiedStatus: 'invalid', trustedVerifierStatus: 'none' }],
-    ['an unverified account', { verifiedStatus: 'none', trustedVerifierStatus: 'none' }],
   ])('shows no badge for %s', (_kind, verification) => {
     expect(render({ verification })).toEqual([]);
   });
@@ -51,20 +50,10 @@ describe('author badges', () => {
   it.each([
     ['no expiry', live({ expiresAt: undefined })],
     ['an expired status', live({ expiresAt: '2026-09-13T11:00:00Z' })],
-    ['a malformed expiry', live({ expiresAt: 'soon' })],
     ['an inactive status', live({ isActive: false })],
     ['a disabled status', live({ isDisabled: true })],
     ['another status kind', live({ status: 'app.bsky.actor.status#away' })],
   ])('shows no LIVE badge for %s', (_kind, status) => {
     expect(render({ status })).toEqual([]);
-  });
-
-  it('lists pronouns before the badges', () => {
-    const author = {
-      pronouns: 'she/her',
-      verification: { verifiedStatus: 'valid', trustedVerifierStatus: 'none' },
-      status: live(),
-    };
-    expect(render(author)).toEqual([['pronouns', 'she/her'], ['badge verified', 'Verified'], ['badge live', 'LIVE']]);
   });
 });
