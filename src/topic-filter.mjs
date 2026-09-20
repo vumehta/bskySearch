@@ -6,7 +6,7 @@ import {
   TOPIC_SCORE_THRESHOLD,
 } from './constants.mjs';
 import { HttpError, fetchJson } from './http.mjs';
-import { getMatchedTermsForPost } from './search-model.mjs';
+import { state } from './state.mjs';
 import { TOPIC_LIMITS, buildTopicContext, hasTopicEvidence, normalizeKeyword } from './topic-context.mjs';
 
 // Scores belong to the exact evidence judged, so content updates cannot reuse
@@ -29,10 +29,12 @@ const BATCH_ONLY_STATUSES = new Set([400, 413, 504]);
 const scoreKey = (uri, keyword, context) => JSON.stringify([uri, keyword, context]);
 const isScore = (value) => Number.isFinite(value) && value >= 0 && value <= 1;
 
-function getTopicKeywords(post) {
+// Expansion broadens retrieval; classification uses only the original terms
+// from the active search, regardless of which query found each post.
+function getTopicKeywords() {
   const seen = new Set();
   const keywords = [];
-  for (const term of getMatchedTermsForPost(post)) {
+  for (const term of state.rawSearchTerms) {
     const keyword = normalizeKeyword(term);
     const folded = keyword.toLowerCase();
     if (!keyword || seen.has(folded)) continue;
@@ -47,11 +49,11 @@ function rememberScore(key, score) {
   scores.set(key, score);
 }
 
-// A post stays visible until every keyword it matched has scored low: results
+// A post stays visible until every original search term has scored low: results
 // appear first and scores arrive after, and an unchecked post is never hidden.
 export function getTopicVerdict(post) {
   const context = buildTopicContext(post);
-  const keywords = getTopicKeywords(post);
+  const keywords = getTopicKeywords();
   let best = null;
   let complete = keywords.length > 0;
   for (const keyword of keywords) {
@@ -67,9 +69,10 @@ export function getTopicVerdict(post) {
 export function getTopicProgress(posts) {
   let pendingPosts = 0;
   let failedPosts = 0;
+  const keywords = getTopicKeywords();
   for (const post of posts) {
     const context = buildTopicContext(post);
-    const keys = getTopicKeywords(post).map((keyword) => scoreKey(post.uri, keyword, context));
+    const keys = keywords.map((keyword) => scoreKey(post.uri, keyword, context));
     if (keys.some((key) => pending.has(key))) pendingPosts += 1;
     else if (keys.some((key) => failed.has(key)) && getTopicVerdict(post).verdict === 'unknown') failedPosts += 1;
   }
@@ -132,10 +135,11 @@ function pump() {
 export function requestTopicScores(posts, onUpdate) {
   if (unavailableReason) return;
   const rounds = [];
+  const topicKeywords = getTopicKeywords();
   for (const post of posts) {
     if (typeof post?.uri !== 'string' || !post.uri || post.uri.length > TOPIC_LIMITS.id) continue;
     const context = buildTopicContext(post);
-    const keywords = getTopicKeywords(post).filter((keyword) => {
+    const keywords = topicKeywords.filter((keyword) => {
       const key = scoreKey(post.uri, keyword, context);
       return !scores.has(key) && !pending.has(key) && !failed.has(key);
     });

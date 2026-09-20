@@ -33,7 +33,7 @@ const scoredBy = (scoreFor) => (body) => ok({
 });
 
 function installFetch({ posts, classify }) {
-  const calls = { classify: [] };
+  const calls = { search: [], classify: [] };
   globalThis.fetch = vi.fn(async (url, options = {}) => {
     if (String(url).startsWith('/api/classify')) {
       const body = JSON.parse(options.body);
@@ -41,6 +41,7 @@ function installFetch({ posts, classify }) {
       return classify(body, options);
     }
     const params = new URL(url, 'https://example.test').searchParams;
+    calls.search.push(params.get('term'));
     return ok({ posts: typeof posts === 'function' ? posts(params.get('term')) : posts });
   });
   return calls;
@@ -71,6 +72,7 @@ describe('topic filter', () => {
     search = await import('../src/search.mjs');
     ({ state } = await import('../src/state.mjs'));
     elements.terms.value = 'apple';
+    state.rawSearchTerms = ['apple'];
     elements.minLikes.value = '0';
     elements.sortSelect.value = 'top';
     elements.timeFilter.value = '24';
@@ -181,10 +183,10 @@ describe('topic filter', () => {
     expect(calls.classify[1].body.items.map((item) => item.id)).toEqual([uri('ignored')]);
   });
 
-  it('keeps a post that matched several keywords when any of them is on-topic', async () => {
+  it('keeps a post when any original search term is on-topic, regardless of which query found it', async () => {
     const shared = makePost('shared', 'Apple and Meta both report earnings today');
     const calls = installFetch({
-      posts: [shared],
+      posts: (term) => term === 'apple' ? [shared] : [],
       classify: scoredBy((_item, keyword) => (keyword === 'meta' ? 0.92 : 0.1)),
     });
     elements.terms.value = 'apple, meta';
@@ -194,6 +196,57 @@ describe('topic filter', () => {
     expect(calls.classify[0].body.items).toHaveLength(1);
     expect(calls.classify[0].body.items[0].keywords).toEqual(['apple', 'meta']);
     expect(visibleUris()).toEqual([uri('shared')]);
+  });
+
+  it('uses only original phrases when scoring expanded matches', async () => {
+    const postsByTerm = {
+      Electric: [makePost('ge', 'GE wins an electric turbine contract')],
+      General: [makePost('gm', 'GM announces its quarterly results'), makePost('other', 'A general update')],
+    };
+    const calls = installFetch({
+      posts: (term) => postsByTerm[term] || [],
+      classify: scoredBy((item, keyword) => (
+        (item.id === uri('ge') && keyword === 'General Electric') ||
+        (item.id === uri('gm') && keyword === 'General Motors')
+      ) ? 0.95 : 0.05),
+    });
+    elements.terms.value = 'General Electric, General Motors, general electric';
+    elements.expandTermsToggle.checked = true;
+    state.hideOffTopic = true;
+    await search.performSearch();
+    expect(calls.search).toEqual(['General Electric', 'General', 'Electric', 'General Motors', 'Motors']);
+    expect(calls.classify.flatMap(({ body }) => body.items.map((item) => item.keywords)))
+      .toEqual(Array.from({ length: 3 }, () => ['General Electric', 'General Motors']));
+    await vi.waitFor(() => expect(summaryText()).toBe('1 off-topic post hidden.'));
+    expect(visibleUris().sort()).toEqual([uri('ge'), uri('gm')]);
+
+    // Editing the input must not change the active search's classification.
+    elements.terms.value = 'Apple';
+    search.applyTopicFilterChange(false);
+    search.applyTopicFilterChange(true);
+    expect(visibleUris().sort()).toEqual([uri('ge'), uri('gm')]);
+    expect(calls.classify).toHaveLength(1);
+  });
+
+  it('rechecks a post when original phrases change even if the expanded match is unchanged', async () => {
+    const shared = makePost('ge', 'GE updates its general earnings guidance');
+    const calls = installFetch({
+      posts: (term) => term === 'General' ? [shared] : [],
+      classify: scoredBy((_item, keyword) => keyword === 'General Electric' ? 0.95 : 0.05),
+    });
+    elements.terms.value = 'General Electric';
+    elements.expandTermsToggle.checked = true;
+    state.hideOffTopic = true;
+    await search.performSearch();
+    await vi.waitFor(() => expect(summaryText()).toBe('No off-topic posts found.'));
+    expect(visibleUris()).toEqual([uri('ge')]);
+
+    elements.terms.value = 'General Motors';
+    await search.performSearch();
+    await vi.waitFor(() => expect(summaryText()).toBe('1 off-topic post hidden.'));
+    expect(visibleUris()).toEqual([]);
+    expect(calls.classify.map(({ body }) => body.items[0].keywords))
+      .toEqual([['General Electric'], ['General Motors']]);
   });
 
   it('cancels excluded topic batches when minimum likes rises and requeues only eligible posts', async () => {
@@ -367,10 +420,11 @@ describe('topic filter', () => {
   });
 
   it.each([[0.95, 'on'], [0.05, 'off'], [null, 'unknown']])(
-    'waits for every matched keyword, including the seventh (%s -> %s)',
+    'waits for every original keyword, including the seventh (%s -> %s)',
     async (lastScore, verdict) => {
       const { getTopicProgress, getTopicVerdict, requestTopicScores } = await import('../src/topic-filter.mjs');
       const keywords = ['meta', 'gap', 'target', 'shell', 'block', 'square', 'apple'];
+      state.rawSearchTerms = keywords;
       const shared = makePost('seven', 'Apple makes an iPhone', 50, { matchedTerms: keywords });
       const last = deferred();
       const calls = installFetch({
@@ -394,6 +448,7 @@ describe('topic filter', () => {
   it('bounds both dimensions of a large keyword and post batch without mixing scores', async () => {
     const { getTopicVerdict, requestTopicScores } = await import('../src/topic-filter.mjs');
     const keywords = Array.from({ length: 13 }, (_, index) => 'brand' + index);
+    state.rawSearchTerms = keywords;
     const posts = Array.from({ length: 27 }, (_, index) => makePost('p' + index, 'Company news', 50, { matchedTerms: keywords }));
     const calls = installFetch({
       posts: [],
@@ -420,6 +475,7 @@ describe('topic filter', () => {
     const { getTopicProgress, getTopicVerdict, requestTopicScores, resetTopicScoring } = await import('../src/topic-filter.mjs');
     const { MAX_TOPIC_SCORE_CACHE_SIZE } = await import('../src/constants.mjs');
     const keywords = Array.from({ length: 26 }, (_, index) => 'brand' + index);
+    state.rawSearchTerms = keywords;
     const posts = Array.from({ length: 200 }, (_, index) => makePost('p' + index, 'Company news', 50, { matchedTerms: keywords }));
     const calls = installFetch({ posts: [], classify: scoredBy(() => 0.05) });
     const checkAll = async () => {
