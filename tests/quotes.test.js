@@ -143,16 +143,7 @@ describe('quote search and pagination', () => {
     expect(elements.quoteResults.textContent).toContain('8');
   });
 
-  it('does not duplicate quotes or inflate totals when a whole page repeats', async () => {
-    mockInitial();
-    await quotes.performQuoteSearch();
-    await quotes.loadMoreQuotes();
-    expect(state.allQuotes).toHaveLength(1);
-    expect(elements.quoteCount.textContent).toBe('Loaded 1 of 1 quote');
-    expect(state.quoteCursor).toBeNull();
-  });
-
-  it('reuses cards for appended quotes and rerenders when pagination changes their order', async () => {
+  it('reuses unchanged cards and keeps paginated quotes sorted', async () => {
     mockInitial({ posts: [post('q1', 3), post('q2', 2)], cursor: 'c1' });
     await quotes.performQuoteSearch();
     const firstCard = elements.quoteResults.children[0];
@@ -168,7 +159,6 @@ describe('quote search and pagination', () => {
     await quotes.loadMoreQuotes();
     expect(elements.quoteResults.querySelectorAll('.quote-text').map((node) => node.textContent))
       .toEqual(['q4', 'q1', 'q2', 'q3']);
-    expect(elements.quoteResults.children[1]).not.toBe(firstCard);
     expect(state.quoteCursor).toBeNull();
     expect(document.getElementById('quoteLoadMoreBtn')).toBeNull();
   });

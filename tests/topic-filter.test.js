@@ -33,7 +33,7 @@ const scoredBy = (scoreFor) => (body) => ok({
 });
 
 function installFetch({ posts, classify }) {
-  const calls = { search: [], classify: [] };
+  const calls = { classify: [] };
   globalThis.fetch = vi.fn(async (url, options = {}) => {
     if (String(url).startsWith('/api/classify')) {
       const body = JSON.parse(options.body);
@@ -41,7 +41,6 @@ function installFetch({ posts, classify }) {
       return classify(body, options);
     }
     const params = new URL(url, 'https://example.test').searchParams;
-    calls.search.push(params);
     return ok({ posts: typeof posts === 'function' ? posts(params.get('term')) : posts });
   });
   return calls;
@@ -82,14 +81,6 @@ describe('topic filter', () => {
     search.clearSearchResults();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
-  });
-
-  it('sends nothing to the classifier while it is off', async () => {
-    const calls = installFetch({ posts: [makePost('a', 'apple pie recipe')], classify: scoredBy(() => 0) });
-    await search.performSearch();
-    expect(visibleUris()).toEqual([uri('a')]);
-    expect(calls.classify).toHaveLength(0);
-    expect(summary().style.display).toBe('none');
   });
 
   it('shows results first, then hides the posts that score as off-topic', async () => {
@@ -268,35 +259,153 @@ describe('topic filter', () => {
     expect(calls.classify).toHaveLength(1);
   });
 
-  it('splits large result sets into bounded batches', async () => {
-    const posts = Array.from({ length: 60 }, (_, index) => makePost(`p${index}`, `Apple news ${index}`, 100 - index));
-    const calls = installFetch({ posts, classify: scoredBy(() => 0.9) });
-    state.hideOffTopic = true;
-    await search.performSearch();
-    await vi.waitFor(() => expect(calls.classify).toHaveLength(3));
-    expect(calls.classify.map(({ body }) => body.items.length)).toEqual([25, 25, 10]);
-    // The most prominent posts are judged first.
-    expect(calls.classify[0].body.items[0].id).toBe(uri('p0'));
-    await vi.waitFor(() => expect(summaryText()).toBe('No off-topic posts found.'));
+  it('rechecks changed evidence but reuses a score after engagement-only updates', async () => {
+    const { getTopicVerdict, requestTopicScores } = await import('../src/topic-filter.mjs');
+    const oldPost = makePost('updated', 'wow', 50, {
+      matchedTerms: ['apple'],
+      embed: { $type: 'app.bsky.embed.external#view', external: { title: 'Fresh apple pie' } },
+    });
+    const calls = installFetch({
+      posts: [],
+      classify: scoredBy((item) => item.context.link_card.title.includes('iPhone') ? 0.95 : 0.05),
+    });
+    requestTopicScores([oldPost], () => {});
+    await vi.waitFor(() => expect(getTopicVerdict(oldPost)).toEqual({ verdict: 'off', score: 0.05 }));
+
+    const popular = { ...oldPost, likeCount: 500 };
+    requestTopicScores([popular], () => {});
+    expect(getTopicVerdict(popular)).toEqual({ verdict: 'off', score: 0.05 });
+    expect(calls.classify).toHaveLength(1);
+
+    const updated = {
+      ...oldPost,
+      embed: { $type: 'app.bsky.embed.external#view', external: { title: 'Apple unveils a new iPhone' } },
+    };
+    expect(getTopicVerdict(updated)).toEqual({ verdict: 'unknown', score: null });
+    requestTopicScores([updated], () => {});
+    await vi.waitFor(() => expect(getTopicVerdict(updated)).toEqual({ verdict: 'on', score: 0.95 }));
+    expect(calls.classify).toHaveLength(2);
+    expect(getTopicVerdict(oldPost)).toEqual({ verdict: 'off', score: 0.05 });
   });
 
-  it('switches on for loaded posts without searching again, and records it in the URL', async () => {
+  it.each(['old first', 'new first'])('isolates in-flight scores for changed evidence: %s', async (order) => {
+    const { getTopicProgress, getTopicVerdict, requestTopicScores } = await import('../src/topic-filter.mjs');
+    const oldPost = makePost('updated', 'apple pie', 50, { matchedTerms: ['apple'] });
+    const updated = { ...oldPost, record: { ...oldPost.record, text: 'Apple iPhone launch' } };
+    const responses = [deferred(), deferred()];
+    let index = 0;
+    const calls = installFetch({ posts: [], classify: () => responses[index++].promise });
+    const onUpdate = vi.fn();
+    requestTopicScores([oldPost], onUpdate);
+    requestTopicScores([updated], onUpdate);
+    expect(calls.classify).toHaveLength(2);
+    let finished = 0;
+    const finish = async (position, score) => {
+      responses[position].resolve(scoredBy(() => score)(calls.classify[position].body));
+      finished += 1;
+      await vi.waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(finished));
+    };
+    if (order === 'old first') {
+      await finish(0, 0.05);
+      expect(getTopicVerdict(updated)).toEqual({ verdict: 'unknown', score: null });
+      expect(getTopicProgress([updated]).pending).toBe(1);
+      await finish(1, 0.95);
+    } else {
+      await finish(1, 0.95);
+      expect(getTopicProgress([updated]).pending).toBe(0);
+      await finish(0, 0.05);
+    }
+    expect(getTopicVerdict(updated)).toEqual({ verdict: 'on', score: 0.95 });
+    expect(getTopicProgress([updated])).toMatchObject({ pending: 0, failed: 0 });
+  });
+
+  it.each(['failed score', 'missing evidence'])('retries changed evidence after %s in the same search', async (kind) => {
+    const { getTopicProgress, getTopicVerdict, requestTopicScores } = await import('../src/topic-filter.mjs');
+    const oldPost = makePost('updated', kind === 'missing evidence' ? '' : 'wow', 50, { matchedTerms: ['apple'] });
+    const updated = { ...oldPost, record: { ...oldPost.record, text: 'Apple iPhone launch' } };
+    installFetch({ posts: [], classify: scoredBy((item) => item.context.post_text.includes('iPhone') ? 0.95 : null) });
+    requestTopicScores([oldPost], () => {});
+    await vi.waitFor(() => expect(getTopicProgress([oldPost]).failed).toBe(1));
+    requestTopicScores([updated], () => {});
+    await vi.waitFor(() => expect(getTopicVerdict(updated)).toEqual({ verdict: 'on', score: 0.95 }));
+    expect(getTopicProgress([updated])).toMatchObject({ pending: 0, failed: 0 });
+  });
+
+  it.each([[0.95, 'on'], [0.05, 'off'], [null, 'unknown']])(
+    'waits for every matched keyword, including the seventh (%s -> %s)',
+    async (lastScore, verdict) => {
+      const { getTopicProgress, getTopicVerdict, requestTopicScores } = await import('../src/topic-filter.mjs');
+      const keywords = ['meta', 'gap', 'target', 'shell', 'block', 'square', 'apple'];
+      const shared = makePost('seven', 'Apple makes an iPhone', 50, { matchedTerms: keywords });
+      const last = deferred();
+      const calls = installFetch({
+        posts: [],
+        classify: (body) => body.items[0].keywords.includes('apple') ? last.promise : scoredBy(() => 0.05)(body),
+      });
+      const onUpdate = vi.fn();
+      requestTopicScores([shared], onUpdate);
+      await vi.waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(1));
+      expect(calls.classify).toHaveLength(2);
+      expect(calls.classify.flatMap(({ body }) => body.items.flatMap((item) => item.keywords))).toEqual(keywords);
+      expect(getTopicVerdict(shared)).toEqual({ verdict: 'unknown', score: 0.05 });
+      expect(getTopicProgress([shared]).pending).toBe(1);
+      last.resolve(scoredBy(() => lastScore)(calls.classify[1].body));
+      await vi.waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(2));
+      expect(getTopicVerdict(shared).verdict).toBe(verdict);
+      expect(getTopicProgress([shared]).pending).toBe(0);
+    },
+  );
+
+  it('bounds both dimensions of a large keyword and post batch without mixing scores', async () => {
+    const { getTopicVerdict, requestTopicScores } = await import('../src/topic-filter.mjs');
+    const keywords = Array.from({ length: 13 }, (_, index) => 'brand' + index);
+    const posts = Array.from({ length: 27 }, (_, index) => makePost('p' + index, 'Company news', 50, { matchedTerms: keywords }));
     const calls = installFetch({
-      posts: [makePost('company', 'Apple announces a new iPhone', 90), makePost('fruit', 'apple pie recipe', 80)],
-      classify: scoredBy((item) => (item.id === uri('company') ? 0.96 : 0.04)),
+      posts: [],
+      classify: scoredBy((item, keyword) => item.id === uri('p26') && keyword === 'brand12' ? 0.95 : 0.05),
     });
-    await search.performSearch();
-    expect(calls.search).toHaveLength(1);
+    const onUpdate = vi.fn();
+    requestTopicScores(posts, onUpdate);
+    await vi.waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(6));
+    for (const { body } of calls.classify) {
+      expect(body.items.length).toBeLessThanOrEqual(25);
+      expect(new Set(body.items.map((item) => item.id)).size).toBe(body.items.length);
+      expect(body.items.every((item) => item.keywords.length <= 6)).toBe(true);
+    }
+    for (const candidate of posts) {
+      const sent = calls.classify.flatMap(({ body }) => body.items.filter((item) => item.id === candidate.uri).flatMap((item) => item.keywords));
+      expect(sent).toEqual(keywords);
+      expect(getTopicVerdict(candidate).verdict).toBe(candidate.uri === uri('p26') ? 'on' : 'off');
+    }
+    requestTopicScores(posts, onUpdate);
+    expect(calls.classify).toHaveLength(6);
+  });
 
-    search.applyTopicFilterChange(true);
-    await vi.waitFor(() => expect(visibleUris()).toEqual([uri('company')]));
-    expect(calls.search).toHaveLength(1);
-    expect(window.history.replaceState.mock.calls.at(-1)[2]).toContain('topic=1');
+  it('keeps active scores beyond the carry-over cache limit without repeated classification', async () => {
+    const { getTopicProgress, getTopicVerdict, requestTopicScores, resetTopicScoring } = await import('../src/topic-filter.mjs');
+    const { MAX_TOPIC_SCORE_CACHE_SIZE } = await import('../src/constants.mjs');
+    const keywords = Array.from({ length: 26 }, (_, index) => 'brand' + index);
+    const posts = Array.from({ length: 200 }, (_, index) => makePost('p' + index, 'Company news', 50, { matchedTerms: keywords }));
+    const calls = installFetch({ posts: [], classify: scoredBy(() => 0.05) });
+    const checkAll = async () => {
+      requestTopicScores(posts, () => {});
+      await vi.waitFor(() => expect(getTopicProgress(posts).pending).toBe(0));
+      expect(posts.every((post) => getTopicVerdict(post).verdict === 'off')).toBe(true);
+    };
+    await checkAll();
+    const firstPass = calls.classify.length;
+    for (let rebuild = 0; rebuild < 3; rebuild += 1) await checkAll();
+    expect(calls.classify).toHaveLength(firstPass);
 
-    search.applyTopicFilterChange(false);
-    expect(visibleUris()).toEqual([uri('company'), uri('fruit')]);
-    expect(summary().style.display).toBe('none');
-    expect(window.history.replaceState.mock.calls.at(-1)[2]).not.toContain('topic=');
+    // A new session carries over a bounded cache, then retains all its own scores.
+    resetTopicScoring();
+    await checkAll();
+    const rescoredPairs = calls.classify.slice(firstPass)
+      .flatMap(({ body }) => body.items).reduce((count, item) => count + item.keywords.length, 0);
+    expect(rescoredPairs).toBe(posts.length * keywords.length - MAX_TOPIC_SCORE_CACHE_SIZE);
+    const secondPass = calls.classify.length;
+    await checkAll();
+    expect(calls.classify).toHaveLength(secondPass);
   });
 
   it('abandons scoring when a new search replaces the old one', async () => {

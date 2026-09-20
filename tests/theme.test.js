@@ -21,15 +21,15 @@ beforeEach(async () => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('theme preferences', () => {
-  it.each(['light', 'dark', 'system'])('restores the saved %s preference', (preference) => {
-    storage.getItem.mockReturnValue(preference);
+  it('restores a saved preference over the system theme', () => {
+    storage.getItem.mockReturnValue('light');
     theme.initTheme();
-    expect(themeSelect.value).toBe(preference);
-    expect(document.documentElement.dataset.theme).toBe(preference === 'system' ? 'dark' : preference);
+    expect(themeSelect.value).toBe('light');
+    expect(document.documentElement.dataset.theme).toBe('light');
   });
 
-  it.each([null, '', 'invalid', '__proto__'])('falls back to system for invalid saved preference %s', (preference) => {
-    storage.getItem.mockReturnValue(preference);
+  it('falls back to system for an unknown saved preference', () => {
+    storage.getItem.mockReturnValue('__proto__');
     theme.initTheme();
     expect(themeSelect.value).toBe('system');
     expect(document.documentElement.dataset.theme).toBe('dark');

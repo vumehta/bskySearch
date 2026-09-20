@@ -11,6 +11,18 @@ export function isValidBskyUrl(url) {
   }
 }
 
+// Link cards point anywhere on the web. Returns the parsed form of an http(s)
+// URL, so that what was checked is what gets linked, or null for anything else.
+export function getHttpUrl(url) {
+  if (typeof url !== 'string') return null;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.href : null;
+  } catch {
+    return null;
+  }
+}
+
 export function normalizeTerm(raw) {
   const sanitized = raw.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
   let term = sanitized.trim();
@@ -123,6 +135,14 @@ export function getPostUrl(post) {
   const postId = post.uri.split('/').pop();
   if (!/^[a-zA-Z0-9]+$/.test(postId)) return null;
   return `${getProfileUrl(post.author)}/post/${postId}`;
+}
+
+// An embedded post arrives unvalidated, so its link is built from the AT URI
+// alone. The author is addressed by DID, which bsky.app resolves like a handle.
+export function getPostUrlFromAtUri(uri) {
+  const match = typeof uri === 'string'
+    && /^at:\/\/(did:[a-z]+:[A-Za-z0-9._:%-]*[A-Za-z0-9._-])\/app\.bsky\.feed\.post\/([a-zA-Z0-9]+)$/.exec(uri);
+  return match ? `https://bsky.app/profile/${match[1]}/post/${match[2]}` : null;
 }
 
 export function formatDateTime(dateString) {

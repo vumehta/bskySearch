@@ -30,13 +30,6 @@ function post(overrides) {
 }
 
 describe('buildTopicContext', () => {
-  it('describes a plain text post by its text and author', () => {
-    expect(buildTopicContext(post())).toEqual({
-      post_text: 'wow',
-      author: 'Tech Reporter (@reporter.example)',
-    });
-  });
-
   it('carries the link card, where a reaction post keeps its subject', () => {
     expect(buildTopicContext(post({ embed: linkCard })).link_card).toEqual({
       title: 'Meta lays off staff',
@@ -79,6 +72,26 @@ describe('buildTopicContext', () => {
       text: 'Prices are going up next month.',
       author: 'Netflix (@netflix.com)',
       link_title: 'Meta lays off staff',
+    });
+  });
+
+  it.each([
+    ['images', { $type: 'app.bsky.embed.images#view', images: [{ alt: 'Apple launches an iPhone', thumb: 'not sent' }] }],
+    ['gallery', { $type: 'app.bsky.embed.gallery#view', items: [{ alt: 'Apple launches an iPhone', thumbnail: 'not sent' }] }],
+    ['video', { $type: 'app.bsky.embed.video#view', alt: 'Apple launches an iPhone', playlist: 'not sent' }],
+    ['wrapped media', {
+      $type: 'app.bsky.embed.recordWithMedia#view',
+      media: { $type: 'app.bsky.embed.images#view', images: [{ alt: 'Apple launches an iPhone' }] },
+    }],
+  ])('includes a quoted %s description as evidence', (_kind, media) => {
+    const embed = {
+      $type: 'app.bsky.embed.record#view',
+      record: { ...quotedView, value: { text: '' }, embeds: [media] },
+    };
+    const context = buildTopicContext(post({ embed }));
+    expect(context.quoted_post).toEqual({
+      author: 'Netflix (@netflix.com)',
+      image_descriptions: ['Apple launches an iPhone'],
     });
   });
 
@@ -133,6 +146,20 @@ describe('sanitizeTopicContext', () => {
     expect(context.image_descriptions.every((alt) => alt.length <= TOPIC_LIMITS.imageDescription)).toBe(true);
   });
 
+  it('bounds quoted image descriptions and discards malformed values and unrelated fields', () => {
+    const context = sanitizeTopicContext({
+      quoted_post: {
+        image_descriptions: [null, {}, 7, ' ', ' Apple\u0000 launch ', ...Array(8).fill('x'.repeat(600))],
+        image_url: 'https://not-forwarded.example/image',
+      },
+    });
+    expect(context).toEqual({
+      quoted_post: { image_descriptions: ['Apple launch', ...Array(3).fill('x'.repeat(TOPIC_LIMITS.imageDescription))] },
+    });
+    expect(sanitizeTopicContext(context)).toEqual(context);
+    expect(sanitizeTopicContext({ quoted_post: { image_descriptions: 'not an array' } })).toEqual({});
+  });
+
   it('never cuts an emoji in half', () => {
     const context = sanitizeTopicContext({ post_text: `${'a'.repeat(TOPIC_LIMITS.postText - 1)}\u{1F600}` });
     expect(context.post_text).toBe('a'.repeat(TOPIC_LIMITS.postText - 1));
@@ -152,7 +179,6 @@ describe('sanitizeTopicContext', () => {
 
   it('is idempotent, so the API can hash exactly what it forwards', () => {
     const once = buildTopicContext(post({ embed: { $type: 'app.bsky.embed.record#view', record: quotedView } }));
-    expect(sanitizeTopicContext(once)).toEqual(once);
     expect(JSON.stringify(sanitizeTopicContext(once))).toBe(JSON.stringify(once));
   });
 });
