@@ -71,6 +71,8 @@ function jsonNoStore(payload, status = 200, extraHeaders = {}) {
 
 // Judge the information about the searched subject, not just its presence.
 // A comparison can qualify for several companies; a source credit cannot.
+// One shared business/product intent disambiguates every keyword; there is no
+// per-keyword prompt or product catalog to maintain.
 // The complete question is hashed into the cache key, so changing this rubric
 // invalidates scores produced by the earlier mention-only question.
 export function buildTopicQuestion(keyword) {
@@ -78,20 +80,32 @@ export function buildTopicQuestion(keyword) {
     type: 'noul',
     instructions: {
       subject: keyword,
+      search_intent: 'The user is tracking companies, brands, and platforms and their products and services. ' +
+        'Interpret the search term as the named business or platform, regardless of capitalization, ' +
+        'not as an ordinary word, acronym, or unrelated entity. For example, Intel means the chip company, ' +
+        'not intelligence reports or military intel; Apple means the technology company, not fruit; ' +
+        'Meta means the technology company, not gaming strategy or self-referential commentary. ' +
+        'Apply this same business/product interpretation to every search term, including Instagram, WhatsApp, and Netflix.',
       question: 'Does this post provide substantive analysis or news about `subject`, ' +
-        'the company, brand, organisation, platform, or its products and services?',
+        'in the intended business/product sense described above?',
       evidence: 'Consider `post_text`, `link_card`, `image_descriptions`, and `quoted_post` together. ' +
         'Use only the supplied content; do not assume an unseen article or missing thread adds useful information.',
     },
     criteria: {
       true:
-        'Explains, evaluates, compares, or reports a concrete development concerning `subject` or its products ' +
+        'The supplied evidence connects the content to the intended company, brand, or platform. ' +
+        'It explains, evaluates, compares, or reports a concrete development concerning `subject` or its products ' +
         'and services: for example features, business performance, strategy, competition, privacy, moderation, ' +
         'regulation, security, reliability, or effects on users. Reasoned criticism, specific product experiences, ' +
         'and brief factual news count. The subject need not be the only focus, but there must be substantive ' +
-        'information about it. A link preview or quoted post can supply that information even when the post itself is a short reaction.',
+        'information about it. A clearly identifiable product or service can establish the connection without ' +
+        'repeating the company name. A link preview or quoted post can supply that information even when the post itself is a short reaction.',
       false:
-        'No substantive analysis or news about `subject`. Mere mentions, hashtags, source or photo credits ' +
+        'No substantive analysis or news about the intended business or its products and services. ' +
+        'Detailed news or analysis about another meaning of the search term does not qualify. ' +
+        'An ambiguous word alone is not evidence of a connection to the business. ' +
+        'If multiple meanings occur, judge only the information about the intended business and its products. ' +
+        'Mere mentions, hashtags, source or photo credits ' +
         '(such as "via Instagram"), follow-me requests, promotions of unrelated content, and casual personal ' +
         'updates do not count. Neither does using the platform to post a photo, share content, or contact someone. ' +
         'Analysis of unrelated content does not qualify just because the platform is credited. ' +

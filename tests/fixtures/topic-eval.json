@@ -109,5 +109,47 @@
     "keyword": "Meta",
     "keep": false,
     "context": { "post_text": "The new patch changed the competitive meta: cheaper spells now counter the strongest deck." }
+  },
+  {
+    "id": "intel-intelligence-news",
+    "keyword": "intel",
+    "keep": false,
+    "context": { "post_text": "New satellite intel shows military supply lines moving east. Intelligence analysts say the shift suggests preparations for a sustained offensive rather than a short border operation." }
+  },
+  {
+    "id": "intel-chip-news-lowercase",
+    "keyword": "intel",
+    "keep": true,
+    "context": { "post_text": "intel says its new laptop processors improve battery life by reducing idle power consumption. Independent testing will be needed to see whether that holds up under mixed workloads." }
+  },
+  {
+    "id": "intel-both-word-senses",
+    "keyword": "Intel",
+    "keep": true,
+    "context": { "post_text": "Fresh intel on Intel: the chipmaker is delaying its new factory to preserve cash as foundry losses mount. That pushes back capacity customers were counting on." }
+  },
+  {
+    "id": "apple-fruit-analysis",
+    "keyword": "Apple",
+    "keep": false,
+    "context": { "post_text": "Apple harvests fell after late frosts damaged blossoms. Growers expect lower yields and higher fruit prices, with smaller orchards facing the largest losses." }
+  },
+  {
+    "id": "apple-product-without-company-name",
+    "keyword": "apple",
+    "keep": true,
+    "context": { "post_text": "The latest iPhone update fixes the keyboard lag I was seeing in long messages, but battery drain during video calls is still noticeably worse than before." }
+  },
+  {
+    "id": "whatsapp-service-news",
+    "keyword": "WhatsApp",
+    "keep": true,
+    "context": { "post_text": "WhatsApp is introducing passkeys for account sign-in, reducing reliance on SMS codes that can be intercepted through SIM swapping." }
+  },
+  {
+    "id": "netflix-business-news",
+    "keyword": "Netflix",
+    "keep": true,
+    "context": { "post_text": "Netflix is raising subscription prices again. The increase improves revenue per subscriber but could push price-sensitive households toward the cheaper advertising tier." }
   }
 ]
