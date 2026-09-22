@@ -269,14 +269,10 @@ function applyTopicFilter(posts) {
   }
   const kept = [];
   let hidden = 0;
-  let scored = 0;
   for (const post of posts) {
     const { verdict, score } = getTopicVerdict(post);
-    if (score !== null) scored += 1;
     if (verdict !== 'off') {
-      // Revealing also labels the kept posts, so the whole range of scores is
-      // visible when judging the cutoff or the wording of the question.
-      kept.push(state.showOffTopic && score !== null ? { ...post, topicMatch: { offTopic: false, score } } : post);
+      kept.push(score !== null ? { ...post, topicMatch: { offTopic: false, score } } : post);
       continue;
     }
     hidden += 1;
@@ -286,7 +282,7 @@ function applyTopicFilter(posts) {
   requestTopicScores(posts, () => {
     if (isCurrentSearchGeneration(generation)) scheduleDerivedPostsRebuild();
   });
-  topicSummary = { checked: posts.length, hidden, scored, ...getTopicProgress(posts) };
+  topicSummary = { checked: posts.length, hidden, ...getTopicProgress(posts) };
   return kept;
 }
 
@@ -665,10 +661,8 @@ function syncTopicSummary() {
   if (parts.length === 0) parts.push('No off-topic posts found.');
   resultsTopicEl.style.display = '';
   resultsTopicTextEl.textContent = parts.join(' ');
-  resultsTopicBtnEl.style.display = summary.hidden > 0 || summary.scored > 0 ? '' : 'none';
-  resultsTopicBtnEl.textContent = summary.hidden > 0
-    ? (state.showOffTopic ? 'Hide them again' : 'Show them')
-    : (state.showOffTopic ? 'Hide scores' : 'Show scores');
+  resultsTopicBtnEl.style.display = summary.hidden > 0 ? '' : 'none';
+  resultsTopicBtnEl.textContent = state.showOffTopic ? 'Hide them again' : 'Show them';
   resultsTopicBtnEl.setAttribute('aria-pressed', String(state.showOffTopic));
 }
 
