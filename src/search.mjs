@@ -345,15 +345,32 @@ function createHighlightedText(text, terms) {
   return fragment;
 }
 
+function syncTopicMatch(postElement, topicMatch) {
+  const offTopic = Boolean(topicMatch?.offTopic);
+  postElement.classList.toggle('off-topic', offTopic);
+  const termsDiv = postElement.querySelector('.search-terms');
+  let tag = termsDiv.querySelector('.topic-score-tag') || termsDiv.querySelector('.off-topic-tag');
+  if (!topicMatch) {
+    tag?.remove();
+    return;
+  }
+  if (!tag) {
+    tag = document.createElement('span');
+    termsDiv.appendChild(tag);
+  }
+  tag.className = offTopic ? 'term-tag off-topic-tag' : 'term-tag topic-score-tag';
+  const match = `${Math.round(topicMatch.score * 100)}% match`;
+  tag.textContent = offTopic ? `Off-topic \xB7 ${match}` : match;
+}
+
 function createPostElement(post) {
   const postUrl = getPostUrl(post);
   const handle = post.author.handle;
   const displayName = post.author.displayName || handle;
   const text = post.record?.text || '';
 
-  const offTopic = Boolean(post.topicMatch?.offTopic);
   const postDiv = document.createElement('div');
-  postDiv.className = offTopic ? 'post off-topic' : 'post';
+  postDiv.className = 'post';
 
   const termsDiv = document.createElement('div');
   termsDiv.className = 'search-terms';
@@ -364,13 +381,6 @@ function createPostElement(post) {
     tag.textContent = term;
     termsDiv.appendChild(tag);
   });
-  if (post.topicMatch) {
-    const tag = document.createElement('span');
-    tag.className = offTopic ? 'term-tag off-topic-tag' : 'term-tag topic-score-tag';
-    const match = `${Math.round(post.topicMatch.score * 100)}% match`;
-    tag.textContent = offTopic ? `Off-topic \xB7 ${match}` : match;
-    termsDiv.appendChild(tag);
-  }
   postDiv.appendChild(termsDiv);
 
   const header = document.createElement('div');
@@ -601,6 +611,7 @@ function syncVisibleResultPosts(visiblePosts) {
       postElement = nextElement;
       renderedPosts.set(uri, { element: postElement, fingerprint: nextFingerprint });
     }
+    syncTopicMatch(postElement, post.topicMatch);
 
     const currentAtIndex = resultsListEl.children[renderedCount];
     if (currentAtIndex !== postElement) {
