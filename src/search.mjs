@@ -269,14 +269,10 @@ function applyTopicFilter(posts) {
   }
   const kept = [];
   let hidden = 0;
-  let scored = 0;
   for (const post of posts) {
     const { verdict, score } = getTopicVerdict(post);
-    if (score !== null) scored += 1;
     if (verdict !== 'off') {
-      // Revealing also labels the kept posts, so the whole range of scores is
-      // visible when judging the cutoff or the wording of the question.
-      kept.push(state.showOffTopic && score !== null ? { ...post, topicMatch: { offTopic: false, score } } : post);
+      kept.push(score !== null ? { ...post, topicMatch: { offTopic: false, score } } : post);
       continue;
     }
     hidden += 1;
@@ -286,7 +282,7 @@ function applyTopicFilter(posts) {
   requestTopicScores(posts, () => {
     if (isCurrentSearchGeneration(generation)) scheduleDerivedPostsRebuild();
   });
-  topicSummary = { checked: posts.length, hidden, scored, ...getTopicProgress(posts) };
+  topicSummary = { checked: posts.length, hidden, ...getTopicProgress(posts) };
   return kept;
 }
 
@@ -349,15 +345,32 @@ function createHighlightedText(text, terms) {
   return fragment;
 }
 
+function syncTopicMatch(postElement, topicMatch) {
+  const offTopic = Boolean(topicMatch?.offTopic);
+  postElement.classList.toggle('off-topic', offTopic);
+  const termsDiv = postElement.querySelector('.search-terms');
+  let tag = termsDiv.querySelector('.topic-score-tag') || termsDiv.querySelector('.off-topic-tag');
+  if (!topicMatch) {
+    tag?.remove();
+    return;
+  }
+  if (!tag) {
+    tag = document.createElement('span');
+    termsDiv.appendChild(tag);
+  }
+  tag.className = offTopic ? 'term-tag off-topic-tag' : 'term-tag topic-score-tag';
+  const match = `${Math.round(topicMatch.score * 100)}% match`;
+  tag.textContent = offTopic ? `Off-topic \xB7 ${match}` : match;
+}
+
 function createPostElement(post) {
   const postUrl = getPostUrl(post);
   const handle = post.author.handle;
   const displayName = post.author.displayName || handle;
   const text = post.record?.text || '';
 
-  const offTopic = Boolean(post.topicMatch?.offTopic);
   const postDiv = document.createElement('div');
-  postDiv.className = offTopic ? 'post off-topic' : 'post';
+  postDiv.className = 'post';
 
   const termsDiv = document.createElement('div');
   termsDiv.className = 'search-terms';
@@ -368,13 +381,6 @@ function createPostElement(post) {
     tag.textContent = term;
     termsDiv.appendChild(tag);
   });
-  if (post.topicMatch) {
-    const tag = document.createElement('span');
-    tag.className = offTopic ? 'term-tag off-topic-tag' : 'term-tag topic-score-tag';
-    const match = `${Math.round(post.topicMatch.score * 100)}% match`;
-    tag.textContent = offTopic ? `Off-topic \xB7 ${match}` : match;
-    termsDiv.appendChild(tag);
-  }
   postDiv.appendChild(termsDiv);
 
   const header = document.createElement('div');
@@ -605,6 +611,7 @@ function syncVisibleResultPosts(visiblePosts) {
       postElement = nextElement;
       renderedPosts.set(uri, { element: postElement, fingerprint: nextFingerprint });
     }
+    syncTopicMatch(postElement, post.topicMatch);
 
     const currentAtIndex = resultsListEl.children[renderedCount];
     if (currentAtIndex !== postElement) {
@@ -665,10 +672,8 @@ function syncTopicSummary() {
   if (parts.length === 0) parts.push('No off-topic posts found.');
   resultsTopicEl.style.display = '';
   resultsTopicTextEl.textContent = parts.join(' ');
-  resultsTopicBtnEl.style.display = summary.hidden > 0 || summary.scored > 0 ? '' : 'none';
-  resultsTopicBtnEl.textContent = summary.hidden > 0
-    ? (state.showOffTopic ? 'Hide them again' : 'Show them')
-    : (state.showOffTopic ? 'Hide scores' : 'Show scores');
+  resultsTopicBtnEl.style.display = summary.hidden > 0 ? '' : 'none';
+  resultsTopicBtnEl.textContent = state.showOffTopic ? 'Hide them again' : 'Show them';
   resultsTopicBtnEl.setAttribute('aria-pressed', String(state.showOffTopic));
 }
 

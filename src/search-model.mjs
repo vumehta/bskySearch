@@ -50,6 +50,7 @@ export function createHighlightMatcher(terms) {
 }
 
 export function getPostRenderFingerprint(post) {
+  // Topic labels are updated in place to preserve open previews and threads.
   return JSON.stringify([
     post.uri || '',
     post.author?.handle || '',
@@ -68,7 +69,6 @@ export function getPostRenderFingerprint(post) {
     post.replyCount || 0,
     post.bookmarkCount || 0,
     getMatchedTermsForPost(post),
-    post.topicMatch || null,
   ]);
 }
 

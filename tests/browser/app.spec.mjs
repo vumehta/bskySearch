@@ -168,6 +168,7 @@ test('topic filter hides off-topic posts, reveals them on request, and survives 
   await page.getByLabel('Topic Filter', { exact: true }).check();
   await expect(page.locator('#results .post')).toHaveCount(2);
   await expect(page.locator('#results .topic-summary')).toContainText('3 off-topic posts hidden.');
+  await expect(page.locator('#results .topic-score-tag')).toHaveText(['95% match', '95% match']);
   await expect(page).toHaveURL(/[?&]topic=1/);
   expect(classified.map((item) => item.keywords)).toEqual(Array.from({ length: 5 }, () => ['Instagram']));
   // A reaction post is judged by its link card, not by "wow".
@@ -188,10 +189,19 @@ test('topic filter hides off-topic posts, reveals them on request, and survives 
   await expect(page.locator('#results .topic-score-tag')).toHaveText(['95% match', '95% match']);
   await page.screenshot({ path: testInfo.outputPath('topic-filter.png'), fullPage: true });
 
+  await page.getByRole('button', { name: 'Hide them again', exact: true }).click();
+  await expect(page.locator('#results .post')).toHaveCount(2);
+  await expect(page.locator('#results .topic-score-tag')).toHaveText(['95% match', '95% match']);
+  await page.getByLabel('Topic Filter', { exact: true }).uncheck();
+  await expect(page.locator('#results .post')).toHaveCount(5);
+  await expect(page.locator('#results .topic-score-tag, #results .off-topic-tag')).toHaveCount(0);
+  await page.getByLabel('Topic Filter', { exact: true }).check();
+
   await page.reload();
   await expect(page.getByLabel('Topic Filter', { exact: true })).toBeChecked();
   await expect(page.locator('#results .post')).toHaveCount(2);
   await expect(page.locator('#results .post-text')).toHaveText([posts[0].record.text, 'wow']);
+  await expect(page.locator('#results .topic-score-tag')).toHaveText(['95% match', '95% match']);
 });
 
 test('cards show link cards and quoted posts as text, linking only to checked URLs', async ({ page }, testInfo) => {

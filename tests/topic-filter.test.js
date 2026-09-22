@@ -97,6 +97,7 @@ describe('topic filter', () => {
     expect(visibleUris()).toEqual([uri('company'), uri('fruit')]);
     expect(summaryText()).toBe('Checking 2 posts for topic…');
     expect(revealButton().style.display).toBe('none');
+    expect(elements.results.querySelectorAll('.topic-score-tag')).toHaveLength(0);
 
     pending.resolve(scoredBy((item) => (item.id === uri('company') ? 0.96 : 0.04))(calls.classify[0].body));
     await vi.waitFor(() => expect(renderedPosts()).toHaveLength(1));
@@ -104,6 +105,7 @@ describe('topic filter', () => {
     expect(summaryText()).toBe('1 off-topic post hidden.');
     expect(revealButton().style.display).toBe('');
     expect(revealButton().textContent).toBe('Show them');
+    expect(renderedPosts()[0].querySelector('.topic-score-tag').textContent).toBe('96% match');
     expect(calls.classify).toHaveLength(1);
   });
 
@@ -119,7 +121,6 @@ describe('topic filter', () => {
     revealButton().listeners.get('click')();
     expect(renderedPosts().map((post) => post.className)).toEqual(['post', 'post off-topic']);
     expect(renderedPosts()[1].querySelector('.off-topic-tag').textContent).toBe('Off-topic \xB7 4% match');
-    // Kept posts show their score too, so the whole range is visible when tuning.
     expect(renderedPosts()[0].querySelector('.topic-score-tag').textContent).toBe('96% match');
     expect(renderedPosts()[0].querySelector('.off-topic-tag')).toBeNull();
     expect(summaryText()).toBe('1 off-topic post shown dimmed.');
@@ -128,11 +129,65 @@ describe('topic filter', () => {
 
     revealButton().listeners.get('click')();
     expect(renderedPosts().map((post) => post.className)).toEqual(['post']);
-    expect(renderedPosts()[0].querySelector('.topic-score-tag')).toBeNull();
+    expect(renderedPosts()[0].querySelector('.topic-score-tag').textContent).toBe('96% match');
     expect(revealButton().getAttribute('aria-pressed')).toBe('false');
   });
 
-  it('offers the scores even when nothing was hidden', async () => {
+  it.each(['loading', 'open'])('preserves image previews and %s threads when scores arrive', async (threadState) => {
+    const pendingScore = deferred();
+    const pendingThread = deferred();
+    const post = makePost('reply', 'Apple announces a new iPhone');
+    post.record.reply = { parent: { uri: uri('parent') }, root: { uri: uri('parent') } };
+    post.embed = {
+      $type: 'app.bsky.embed.images#view',
+      images: [{ thumb: 'https://cdn.bsky.app/image.jpg', alt: 'iPhone' }],
+    };
+    const calls = installFetch({ posts: [post], classify: () => pendingScore.promise });
+    const fetchSearch = globalThis.fetch;
+    let threadSignal;
+    globalThis.fetch = vi.fn((url, options) => {
+      if (String(url).includes('getPostThread')) {
+        threadSignal = options.signal;
+        return pendingThread.promise;
+      }
+      return fetchSearch(url, options);
+    });
+    state.hideOffTopic = true;
+    await search.performSearch();
+    const card = renderedPosts()[0];
+    card.querySelector('.image-placeholder').children[0].listeners.get('click')();
+    const preview = card.querySelector('.post-images');
+    const threadButton = card.querySelector('button.thread-link');
+    const loading = threadButton.listeners.get('click')();
+    const threadResponse = ok({ thread: { parent: { post: makePost('parent', 'Apple news') } } });
+    if (threadState === 'open') {
+      pendingThread.resolve(threadResponse);
+      await loading;
+    }
+    const context = card.querySelector('.thread-context');
+
+    pendingScore.resolve(scoredBy(() => 0.96)(calls.classify[0].body));
+    await vi.waitFor(() => expect(renderedPosts()[0].querySelector('.topic-score-tag')?.textContent).toBe('96% match'));
+    expect(renderedPosts()[0]).toBe(card);
+    expect(card.querySelector('.post-images')).toBe(preview);
+    expect(threadSignal.aborted).toBe(false);
+    if (threadState === 'loading') {
+      expect(threadButton.getAttribute('aria-busy')).toBe('true');
+      pendingThread.resolve(threadResponse);
+      await loading;
+    } else {
+      expect(card.querySelector('.thread-context')).toBe(context);
+    }
+    expect(threadButton.getAttribute('aria-expanded')).toBe('true');
+
+    search.applyTopicFilterChange(false);
+    await vi.waitFor(() => expect(card.querySelector('.topic-score-tag')).toBeNull());
+    expect(renderedPosts()[0]).toBe(card);
+    expect(card.querySelector('.post-images')).toBe(preview);
+    expect(threadButton.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('shows scores without a reveal button when nothing was hidden', async () => {
     installFetch({
       posts: [makePost('company', 'Apple announces a new iPhone', 90)],
       classify: scoredBy(() => 0.71),
@@ -140,12 +195,11 @@ describe('topic filter', () => {
     state.hideOffTopic = true;
     await search.performSearch();
     await vi.waitFor(() => expect(summaryText()).toBe('No off-topic posts found.'));
-    expect(revealButton().style.display).toBe('');
-    expect(revealButton().textContent).toBe('Show scores');
-
-    revealButton().listeners.get('click')();
+    expect(revealButton().style.display).toBe('none');
     expect(renderedPosts()[0].querySelector('.topic-score-tag').textContent).toBe('71% match');
-    expect(revealButton().textContent).toBe('Hide scores');
+
+    search.applyTopicFilterChange(false);
+    await vi.waitFor(() => expect(renderedPosts()[0].querySelector('.topic-score-tag')).toBeNull());
   });
 
   it('scores only posts that pass the cheap filters, with their full evidence', async () => {

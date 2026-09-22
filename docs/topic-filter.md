@@ -24,7 +24,8 @@ information must be about it. An official author does not qualify automatically.
 per original search term, sharing the evidence in one request per post.
 The server hashes the entire question with its evidence, so rubric changes
 invalidate earlier scores. Unchecked posts remain visible and hidden posts can
-be revealed using **Show them**.
+be revealed using **Show them**. While the filter is enabled, match percentages
+appear as scores arrive, whether or not hidden posts are revealed.
 
 ## Evaluate a rubric change
 
