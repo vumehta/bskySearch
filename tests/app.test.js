@@ -168,7 +168,7 @@ describe('getSearchCacheKey', () => {
 });
 
 describe('getSearchSince', () => {
-  const now = Date.UTC(2026, 8, 1, 18, 34, 56, 789); // 2026-09-01T18:34:56.789Z
+  const now = Date.UTC(2026, 8, 1, 18, 34, 56, 789);
 
   it('returns the window start rounded down to the minute in UTC', () => {
     expect(getSearchSince(24, now)).toBe('2026-08-31T18:34:00Z');
@@ -251,11 +251,11 @@ describe('filterByDate', () => {
     const posts = [
       {
         uri: 'at://fresh',
-        indexedAt: '2025-12-31T14:00:00.000Z', // 22h before fixedNow
+        indexedAt: '2025-12-31T14:00:00.000Z',
       },
       {
         uri: 'at://stale',
-        indexedAt: '2025-12-31T10:00:00.000Z', // 26h before fixedNow
+        indexedAt: '2025-12-31T10:00:00.000Z',
       },
     ];
 
@@ -272,8 +272,8 @@ describe('filterByDate', () => {
     const posts = [
       {
         uri: 'at://fallback-recent',
-        indexedAt: '2025-12-31T08:00:00.000Z', // stale if used directly
-        record: { createdAt: '2026-01-01T11:00:00.000Z' }, // fresh
+        indexedAt: '2025-12-31T08:00:00.000Z',
+        record: { createdAt: '2026-01-01T11:00:00.000Z' },
       },
       {
         uri: 'at://stale',

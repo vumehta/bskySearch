@@ -6,12 +6,9 @@ import {
   sanitizeTopicContext,
 } from '../src/topic-context.mjs';
 
-// TypeSafe's Jev answers typed questions about a piece of state with
-// probabilities instead of prose. A "noul" is the probability of yes.
 const TYPESAFE_ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
 const DEFAULT_MODEL = 'jev-latest';
 
-// The deadline includes response headers and JSON body consumption.
 const UPSTREAM_TIMEOUT_MS = 8000;
 const UPSTREAM_CONCURRENCY = 8;
 const UPSTREAM_RETRY_DELAY_MS = 300;
@@ -19,15 +16,9 @@ const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504, 529]);
 
 const MAX_BODY_CHARS = 256 * 1024;
 
-// A score depends only on the question and the evidence, so it is cached under
-// a hash of exactly those. A caller cannot plant a score for a real post,
-// because a different text is a different key.
 const SCORE_CACHE_TTL_MS = 60 * 60 * 1000;
 const MAX_SCORE_CACHE_SIZE = 5000;
 
-// Per-instance limit on upstream calls, which are what cost money. Cache hits
-// are free. Pair this with Vercel's per-IP firewall rule; see
-// docs/classifier-rate-limit.md. Neither guard is an account-wide cost ceiling.
 export const CLASSIFY_ADMISSION_LIMITS = Object.freeze({
   burst: 600,
   refillPerSecond: 5,
@@ -69,12 +60,6 @@ function jsonNoStore(payload, status = 200, extraHeaders = {}) {
   });
 }
 
-// Judge the information about the searched subject, not just its presence.
-// A comparison can qualify for several companies; a source credit cannot.
-// One shared business/product intent disambiguates every keyword; there is no
-// per-keyword prompt or product catalog to maintain.
-// The complete question is hashed into the cache key, so changing this rubric
-// invalidates scores produced by the earlier mention-only question.
 export function buildTopicQuestion(keyword) {
   return {
     type: 'noul',
@@ -118,8 +103,6 @@ function isObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-// Malformed input is a client bug, so the whole request is rejected rather
-// than partially served.
 function parseItems(payload) {
   if (!isObject(payload) || !Array.isArray(payload.items)) {
     throw httpError('Expected a JSON body with an items array.', 400);
@@ -163,7 +146,6 @@ async function readJsonBody(request) {
   }
 }
 
-// The question is part of the key, so rewording it never serves old scores.
 async function getScoreCacheKey(keyword, context) {
   const bytes = new TextEncoder().encode(JSON.stringify([buildTopicQuestion(keyword), context]));
   const digest = await crypto.subtle.digest('SHA-256', bytes);
@@ -177,7 +159,6 @@ function getCachedScore(cacheKey) {
     scoreCache.delete(cacheKey);
     return null;
   }
-  // Refresh insertion order so eviction drops the least recently used entry.
   scoreCache.delete(cacheKey);
   scoreCache.set(cacheKey, cached);
   return cached.score;
@@ -214,8 +195,6 @@ function upstreamTimeoutError() {
   return new DOMException('Upstream request timed out.', 'TimeoutError');
 }
 
-// Resolves to { status, payload, retryAfter }. Rejects on caller cancellation, on timeout,
-// and on network failure.
 async function postToTypeSafe(body, apiKey, signal) {
   throwIfAborted(signal);
   const controller = new AbortController();
@@ -224,7 +203,6 @@ async function postToTypeSafe(body, apiKey, signal) {
   const cancel = () => controller.abort();
   signal?.addEventListener('abort', cancel, { once: true });
   let rejectOnAbort;
-  // Racing the abort also bounds fetch adapters that ignore the signal.
   const aborted = new Promise((_, reject) => {
     rejectOnAbort = () => reject(timedOut ? upstreamTimeoutError() : abortError());
     controller.signal.addEventListener('abort', rejectOnAbort, { once: true });
@@ -251,7 +229,6 @@ async function postToTypeSafe(body, apiKey, signal) {
         try {
           payload = await response.json();
         } catch {
-          // A non-JSON body must not hide the upstream HTTP status.
         }
         return { ...responseMeta, payload };
       })(),
@@ -259,7 +236,6 @@ async function postToTypeSafe(body, apiKey, signal) {
     ]);
   } catch (error) {
     throwIfAborted(signal);
-    // A stalled error body must not discard its HTTP status or Retry-After.
     if (timedOut && responseMeta && (responseMeta.status < 200 || responseMeta.status > 299)) {
       return { ...responseMeta, payload: null };
     }
@@ -272,8 +248,6 @@ async function postToTypeSafe(body, apiKey, signal) {
   }
 }
 
-// Retry-After can be a delay in seconds or an HTTP date. Invalid or past
-// values use the normal retry delay; an excessive delay is skipped below.
 function getRetryDelayMs(value) {
   if (typeof value !== 'string' || !value.trim()) return UPSTREAM_RETRY_DELAY_MS;
   const trimmed = value.trim();
@@ -298,19 +272,12 @@ function abortableDelay(ms, signal) {
   });
 }
 
-// A failed post only shows up as an unscored result, so the reason is logged
-// for whoever reads the function logs. Never the key; at most a short excerpt
-// of the classifier's own error text.
 function describeUpstreamFailure(payload) {
   const detail = payload?.detail ?? payload?.error ?? payload?.message ?? '';
   const text = typeof detail === 'string' ? detail : JSON.stringify(detail);
   return (text || 'no error body').slice(0, 300);
 }
 
-// One upstream call answers every keyword for one post, because questions
-// over the same state share its tokens. Returns a score per keyword, or null
-// where the classifier gave no usable answer. Rejected credentials fail the
-// whole request instead: no later call can succeed either.
 async function scoreItem(keywords, context, { apiKey, model, signal, deadlineAt }) {
   const questions = Object.fromEntries(keywords.map((keyword, index) => [`k${index}`, buildTopicQuestion(keyword)]));
   const body = { model, state: context, questions };
@@ -319,21 +286,16 @@ async function scoreItem(keywords, context, { apiKey, model, signal, deadlineAt 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     throwIfAborted(signal);
     if (attempt > 0) {
-      // Preserve completed scores when the requested wait cannot fit. Never
-      // shorten the provider's delay just to squeeze in another attempt.
       if (retryDelayMs >= deadlineAt - Date.now()) return unscored;
       await abortableDelay(retryDelayMs, signal);
     }
     throwIfAborted(signal);
-    // First attempts are reserved together; each retry needs another token.
-    // Keep admission outside the network-error catch so a local limit cannot retry.
     if (attempt > 0) admitUpstreamCalls(1);
     let result;
     try {
       result = await postToTypeSafe(body, apiKey, signal);
     } catch (error) {
       throwIfAborted(signal);
-      // Timeouts and network failures are retried once, then given up on.
       if (attempt === 0) continue;
       console.warn('Topic classifier unreachable:', error?.name || 'Error', error?.message || '');
       return unscored;
@@ -360,8 +322,6 @@ async function scoreItem(keywords, context, { apiKey, model, signal, deadlineAt 
   return unscored;
 }
 
-// A task only throws for a reason that dooms the rest too (cancellation or
-// rejected credentials, or admission limits), so no later tasks start after one.
 async function runWithConcurrency(tasks, concurrency) {
   let nextIndex = 0;
   let stopped = false;
@@ -400,16 +360,12 @@ async function classifyItems(items, options) {
     });
   }
   if (tasks.length > 0) {
-    // Start only when the whole first round fits, avoiding partially admitted
-    // batches whose in-flight calls would immediately be cancelled.
     admitUpstreamCalls(tasks.length);
     await runWithConcurrency(tasks, UPSTREAM_CONCURRENCY);
   }
   return results;
 }
 
-// Scores that arrive before the deadline are already cached, so retrying a
-// timed-out request only pays for the posts that were still outstanding.
 function withDeadline(start, signal, timeoutMs) {
   const controller = new AbortController();
   const cancel = () => controller.abort();
@@ -423,10 +379,8 @@ function withDeadline(start, signal, timeoutMs) {
   });
   const deadlineAt = Date.now() + timeoutMs;
   const work = Promise.resolve().then(() => start(controller.signal, deadlineAt));
-  // The loser of the race may still reject after the winner settles.
   work.catch(() => {});
   return Promise.race([work, deadline]).finally(() => {
-    // An early batch failure must also stop the other workers and retry waits.
     controller.abort();
     clearTimeout(timer);
     signal?.removeEventListener('abort', cancel);
@@ -443,13 +397,10 @@ export async function POST(request, context) {
     return jsonNoStore({ error: 'The topic filter is not configured on this server.' }, 503);
   }
 
-  // Browsers label cross-site requests. This endpoint spends money, so only
-  // this site's own pages may call it; other clients meet the admission limit.
   const fetchSite = request.headers.get('sec-fetch-site');
   if (fetchSite && fetchSite !== 'same-origin') {
     return jsonNoStore({ error: 'Cross-site requests are not allowed.' }, 403);
   }
-  // A JSON content type cannot be sent cross-site without a preflight.
   if (!/^application\/json\b/i.test(request.headers.get('content-type') || '')) {
     return jsonNoStore({ error: 'Content-Type must be application/json.' }, 415);
   }
@@ -481,7 +432,6 @@ function resetModuleStateForTests() {
   admissionUpdatedAt = null;
 }
 
-// Test utilities for unit/integration coverage.
 export const testUtils =
   process.env.NODE_ENV === 'test'
     ? {

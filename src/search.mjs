@@ -72,10 +72,8 @@ let showMoreBtnEl = null;
 let loadMoreBtnEl = null;
 const renderedPosts = new Map();
 
-// Counts behind the topic filter's summary line; null while the filter is off.
 let topicSummary = null;
 
-// Highlight matcher cache for a single active term set.
 let highlightMatcherCache = { key: '', regex: null, termSet: null };
 
 function showStatus(message, type) {
@@ -124,7 +122,6 @@ export function updateExpansionSummary() {
   expandSummary.textContent = `Typed: ${rawTerms.join(', ')}. Expanded: ${expanded.join(', ')}`;
 }
 
-// Every page belongs to a fixed search generation, sort, and time window.
 async function searchTerm(term, cursor, { sort, since, signal }) {
   signal.throwIfAborted();
   const cacheKey = getSearchCacheKey(term, cursor, sort, since);
@@ -151,8 +148,6 @@ function isActiveSearch(context) {
   return isCurrentSearchGeneration(context.generation) && !context.signal.aborted;
 }
 
-// Commit each successful page before requesting the next. A failed page leaves
-// its request cursor available for retry, including an initial empty cursor.
 async function fetchPagesForTerm(term, maxPages, context) {
   for (let page = 0; page < maxPages && isActiveSearch(context); page += 1) {
     const cursor = state.currentCursors[term];
@@ -186,7 +181,6 @@ function createSearchContext() {
   return {
     generation: state.searchGeneration,
     signal: activeSearchController.signal,
-    // The API ranks by top or latest; bookmarks re-rank the top results locally.
     sort: state.searchSort === 'latest' ? 'latest' : 'top',
     since: state.searchSince,
   };
@@ -259,9 +253,6 @@ function clearDerivedPostsTimer() {
   }
 }
 
-// The cheap filters run first, so only posts that would be shown are sent for
-// scoring. Scores arrive later and trigger another rebuild; until then a post
-// stays visible. Hidden posts can be revealed, marked, to audit the filter.
 function applyTopicFilter(posts) {
   if (!state.hideOffTopic) {
     topicSummary = null;
@@ -547,7 +538,6 @@ function ensureResultsShell() {
   resultsEmptyEl.appendChild(resultsEmptyPrimaryEl);
   resultsEmptyEl.appendChild(resultsEmptySecondaryEl);
 
-  // Not a live region: the counts change with every scored batch.
   resultsTopicEl = document.createElement('div');
   resultsTopicEl.className = 'topic-summary';
   resultsTopicTextEl = document.createElement('span');
@@ -724,7 +714,6 @@ function renderResults() {
   syncLoadMoreButton();
 }
 
-// A new search replaces the previous one immediately, including its requests.
 export async function performSearch() {
   cancelDebouncedSearch();
   cancelActiveSearch();
@@ -736,7 +725,6 @@ export async function performSearch() {
   state.searchSort = normalizeSortValue(sortSelect.value);
   state.searchSince = state.searchTerms.length ? getSearchSince(state.timeFilterHours) : null;
   state.allPosts = [];
-  // Empty string means the first page needs loading; null means exhausted.
   state.currentCursors = Object.create(null);
   for (const term of state.searchTerms) state.currentCursors[term] = '';
   searchSeenCursors.clear();
@@ -768,8 +756,6 @@ export async function loadMore() {
 export function applyMinLikesFilter() {
   const minLikes = Math.max(0, parseInt(minLikesInput.value, 10) || 0);
   if (state.hideOffTopic && minLikes > state.minLikes) {
-    // Drop excluded work, keeping completed scores and failure state. The
-    // rebuild queues only posts that still qualify under the new threshold.
     cancelTopicScoring();
   }
   state.minLikes = minLikes;
@@ -779,8 +765,6 @@ export function applyMinLikesFilter() {
   renderResults();
 }
 
-// Turning the filter on or off re-derives the loaded posts; no new search.
-// Switching it back on also retries whatever could not be checked before.
 export function applyTopicFilterChange(enabled) {
   state.hideOffTopic = Boolean(enabled);
   state.showOffTopic = false;

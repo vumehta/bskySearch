@@ -1,10 +1,8 @@
 const LIKE_ICON = '♥ ';
 const REPOST_ICON = '↻ ';
 const REPLY_ICON = '💬 ';
-// Bluesky calls bookmarks "saves" in its own app.
 const SAVE_ICON = '🔖 ';
 
-// Search results only style `.stat.likes`, so the other stats stay unmodified.
 export const SEARCH_STAT_CLASSES = {
   likes: 'stat likes',
   reposts: 'stat',

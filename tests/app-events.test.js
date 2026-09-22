@@ -271,7 +271,6 @@ describe('app URL initialization', () => {
 });
 
 describe('topic filter control', () => {
-  // The classifier calls every post off-topic, which makes its effect visible.
   function classifyEverythingOffTopic() {
     fetch.mockImplementation(async (url, options) => {
       if (!String(url).startsWith('/api/classify')) return Response.json({ posts: [makePost()] });

@@ -43,7 +43,6 @@ describe('buildTopicContext', () => {
     const card = (uri) => buildTopicContext(post({
       embed: { $type: 'app.bsky.embed.external#view', external: { uri, title: 'Leave big tech behind' } },
     })).link_card;
-    // A real case: the slug names the companies, and the query would read as a mention of Facebook.
     const guardian = 'https://www.theguardian.com/technology/2026/feb/26/how-to-replace-amazon-google-x-meta-apple-alternatives';
     expect(card(guardian + '?CMP=fb_gu&utm_source=Facebook#Echobox=1')).toEqual({
       title: 'Leave big tech behind',
@@ -52,7 +51,6 @@ describe('buildTopicContext', () => {
     });
     expect(card('https://example.com/')).toEqual({ title: 'Leave big tech behind', site: 'example.com' });
     expect(card('https://example.com/caf%C3%A9')).toMatchObject({ path: '/caf\xE9' });
-    // A malformed escape keeps its encoded form instead of throwing.
     expect(card('https://example.com/100%-off')).toMatchObject({ path: '/100%-off' });
     expect(card('javascript:alert(1)')).toEqual({ title: 'Leave big tech behind' });
     expect(card('https://example.com/' + 'a'.repeat(500)).path).toHaveLength(TOPIC_LIMITS.path);

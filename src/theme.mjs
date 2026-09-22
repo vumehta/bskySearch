@@ -22,7 +22,6 @@ export function initTheme() {
   try {
     savedPreference = normalizeThemePreference(localStorage.getItem(THEME_STORAGE_KEY));
   } catch {
-    // Browsers can deny storage while still allowing the app to run.
   }
   themeSelect.value = savedPreference;
   applyThemePreference(savedPreference);
@@ -35,7 +34,6 @@ export function handleThemeChange(preference) {
   try {
     localStorage.setItem(THEME_STORAGE_KEY, preference);
   } catch {
-    // Keep the selected theme usable even when it cannot be persisted.
   }
 }
 

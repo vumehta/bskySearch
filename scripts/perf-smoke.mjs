@@ -25,8 +25,6 @@ function runProductionMerge() {
   return derive([...store.values()]);
 }
 
-// An independent reference verifies semantics before timing production code,
-// including latest-record values and the union of matching terms.
 const flattened = termResults.flat();
 const expected = [...new Set(flattened.map((post) => post.uri))].map((uri) => {
   const versions = flattened.filter((post) => post.uri === uri);
@@ -64,8 +62,6 @@ function measure(label, operation, runs, budgetMs) {
   assert.ok(p95 < budgetMs, `${label} exceeded its smoke-check budget.`);
 }
 
-// Generous budgets catch major regressions without comparing noisy timings of
-// copied algorithms. Browser rendering is validated separately.
 measure('Production merge/filter/sort (1600 records)', runProductionMerge, 60, 50);
 measure('Production cached highlighting (120 matches)', () => highlightedParts(text, matcher), 200, 5);
 console.log('Production performance and result-equivalence checks passed.');

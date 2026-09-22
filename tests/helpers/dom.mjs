@@ -1,4 +1,3 @@
-// Minimal tree semantics for exercising the actual DOM-rendering modules.
 export class TestNode {
   constructor(tagName = 'div') {
     this.tagName = tagName;

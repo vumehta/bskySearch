@@ -1,9 +1,3 @@
-// The evidence sent to the topic classifier, shared by the browser (which
-// builds it from a post) and the API (which re-normalizes whatever arrives).
-// Every field is written by strangers, so it is only ever used as classifier
-// input or shown as plain text by the post card (see post-embeds.mjs), which
-// reads embeds through the same helpers; nothing here is interpreted.
-
 export const TOPIC_LIMITS = Object.freeze({
   maxItems: 25,
   maxKeywords: 6,
@@ -21,21 +15,17 @@ export const TOPIC_LIMITS = Object.freeze({
 
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 
-// Control characters and runs of whitespace carry no meaning for the classifier.
 export function cleanText(value, maxLength) {
   if (typeof value !== 'string') return '';
   let text = value.replace(/[\x00-\x1F\x7F-\x9F]+/g, ' ').replace(/\s+/g, ' ').trim();
   if (text.length > maxLength) {
     text = text.slice(0, maxLength);
-    // Do not leave half of a surrogate pair at the cut.
     if (/[\uD800-\uDBFF]$/.test(text)) text = text.slice(0, -1);
     text = text.trimEnd();
   }
   return text;
 }
 
-// Normalize subject names consistently for questions and cache keys, removing
-// surrounding quotation marks and backticks (the API's state-path syntax).
 export function normalizeKeyword(value) {
   if (typeof value !== 'string') return '';
   return cleanText(value.replace(/["`\u{201C}\u{201D}]/gu, ' '), TOPIC_LIMITS.keyword);
@@ -78,9 +68,6 @@ function sanitizeQuotedPost(raw) {
   });
 }
 
-// Returns a context with a fixed key order and only non-empty fields, or null
-// when the input is not an object. Sanitizing a sanitized context is a no-op,
-// which lets the API hash exactly what it forwards.
 export function sanitizeTopicContext(raw) {
   if (!isObject(raw)) return null;
   return withoutEmpty({
@@ -92,7 +79,6 @@ export function sanitizeTopicContext(raw) {
   });
 }
 
-// An author alone says nothing about the subject of a post.
 export function hasTopicEvidence(context) {
   return isObject(context) && Object.keys(context).some((key) => key !== 'author');
 }
@@ -105,9 +91,6 @@ function formatAuthor(author) {
   return name || handle;
 }
 
-// A link's slug often names its subject when the card's title does not. The
-// query and fragment are left out: tracking parameters such as
-// `utm_source=Facebook` would read as a mention of Facebook.
 function getLinkLocation(uri) {
   if (typeof uri !== 'string') return {};
   try {
@@ -117,7 +100,6 @@ function getLinkLocation(uri) {
     try {
       path = decodeURIComponent(path);
     } catch {
-      // Keep the encoded form of a malformed path.
     }
     return { site: url.hostname.replace(/^www\./, ''), path: path === '/' ? '' : path };
   } catch {
@@ -125,11 +107,8 @@ function getLinkLocation(uri) {
   }
 }
 
-// A quote with media keeps its link card or images one level down.
 const getMedia = (embed) => (embed?.$type === 'app.bsky.embed.recordWithMedia#view' ? embed.media : embed);
 
-// Raw fields of a link card. `uri` is for the post card, which validates it
-// before linking; the classifier is only ever sent the site and the path.
 export function getLinkCard(embed) {
   const media = getMedia(embed);
   const external = media?.$type === 'app.bsky.embed.external#view' ? media.external : null;
@@ -150,8 +129,6 @@ function getImageDescriptions(embed) {
   }
 }
 
-// Only a resolved post view carries a `value`; blocked, deleted, and detached
-// quotes, as well as feeds and lists, have nothing to read.
 function getQuotedRecord(embed) {
   const view = embed?.$type === 'app.bsky.embed.recordWithMedia#view' ? embed.record?.record
     : embed?.$type === 'app.bsky.embed.record#view' ? embed.record
@@ -159,7 +136,6 @@ function getQuotedRecord(embed) {
   return isObject(view) && isObject(view.value) ? view : null;
 }
 
-// Raw fields of a resolved quote, all unvalidated, with its own media evidence.
 export function getQuotedPost(embed) {
   const quoted = getQuotedRecord(embed);
   if (!quoted) return null;
@@ -169,8 +145,6 @@ export function getQuotedPost(embed) {
   return { uri: quoted.uri, author: quoted.author, text: quoted.value.text, linkCard, imageDescriptions };
 }
 
-// Reaction posts ("wow") keep their subject in a link card, an image, or the
-// post they quote, so all of that is part of what the classifier judges.
 export function buildTopicContext(post) {
   if (!isObject(post)) return null;
   const embed = isObject(post.embed) ? post.embed : null;

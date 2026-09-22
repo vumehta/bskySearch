@@ -11,8 +11,6 @@ export function isValidBskyUrl(url) {
   }
 }
 
-// Link cards point anywhere on the web. Returns the parsed form of an http(s)
-// URL, so that what was checked is what gets linked, or null for anything else.
 export function getHttpUrl(url) {
   if (typeof url !== 'string') return null;
   try {
@@ -67,9 +65,6 @@ export function getSearchCacheKey(term, cursor, sort, since = '') {
   return JSON.stringify([term, cursor || '', sort, since || '']);
 }
 
-// Start of the search window as a UTC timestamp for the API's `since` filter.
-// Rounded down to the minute so searches repeated within the cache TTL share
-// a cache key, and without fractional seconds to keep the value compact.
 export function getSearchSince(hours, now = Date.now()) {
   const normalizedHours = Number.isFinite(hours) && hours > 0 ? hours : 24;
   const cutoffTs = now - normalizedHours * 3600000;
@@ -93,7 +88,6 @@ export function normalizeSortValue(raw) {
   return SEARCH_SORT_VALUES.includes(raw) ? raw : 'top';
 }
 
-// Bookmarks are sparse, so equal counts fall back to likes.
 export function compareByBookmarks(a, b) {
   return (b.bookmarkCount || 0) - (a.bookmarkCount || 0) || (b.likeCount || 0) - (a.likeCount || 0);
 }
@@ -123,9 +117,6 @@ export function formatRelativeTime(dateString) {
   return date.toLocaleDateString();
 }
 
-// The AppView reports `handle.invalid` when it could not verify the handle;
-// bsky.app also resolves profiles by DID. The DID is not percent-encoded: its
-// syntax already is, and bsky.app does not resolve a re-encoded `did%3A` prefix.
 export function getProfileUrl(author) {
   const actor = author.handle === 'handle.invalid' ? author.did : encodeURIComponent(author.handle);
   return `https://bsky.app/profile/${actor}`;
@@ -137,8 +128,6 @@ export function getPostUrl(post) {
   return `${getProfileUrl(post.author)}/post/${postId}`;
 }
 
-// An embedded post arrives unvalidated, so its link is built from the AT URI
-// alone. The author is addressed by DID, which bsky.app resolves like a handle.
 export function getPostUrlFromAtUri(uri) {
   const match = typeof uri === 'string'
     && /^at:\/\/(did:[a-z]+:[A-Za-z0-9._:%-]*[A-Za-z0-9._-])\/app\.bsky\.feed\.post\/([a-zA-Z0-9]+)$/.exec(uri);

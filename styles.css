@@ -413,7 +413,6 @@ button:disabled {
     color: var(--button-text);
 }
 
-/* The thread header is a flex row with its own gap. */
 .thread-parent-header .pronouns,
 .thread-parent-header .badge {
     margin-left: 0;
@@ -885,7 +884,6 @@ button:disabled {
     flex-wrap: wrap;
 }
 
-/* A post's link card and quoted post. Both sit on the card's own background. */
 .embed-link,
 .embed-quote {
     margin: 0 0 12px;
@@ -918,7 +916,6 @@ button:disabled {
     text-decoration: none;
 }
 
-/* A hostname used as the title must keep its destination suffix visible. */
 .embed-link-hostname {
     display: block;
 }

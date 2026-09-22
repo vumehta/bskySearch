@@ -24,7 +24,6 @@ test.beforeEach(async ({ page }) => {
     if (['error', 'warning'].includes(message.type())) errors.push(message.text());
   });
   page.on('requestfailed', (request) => errors.push(`${request.url()}: ${request.failure()?.errorText}`));
-  // Any request not explicitly covered by a fixture must remain local.
   await page.route('**/*', (route) => {
     if (new URL(route.request().url()).hostname === '127.0.0.1') return route.continue();
     return route.abort();
@@ -151,7 +150,6 @@ test('topic filter hides off-topic posts, reveals them on request, and survives 
       json: {
         results: items.map((item) => ({
           id: item.id,
-          // Fixture answers verify the UI. Real Jev judgments are checked by eval:topic.
           scores: item.keywords.map(() => (/\/(company|reaction)$/.test(item.id) ? 0.95 : 0.03)),
         })),
       },
@@ -171,7 +169,6 @@ test('topic filter hides off-topic posts, reveals them on request, and survives 
   await expect(page.locator('#results .topic-score-tag')).toHaveText(['95% match', '95% match']);
   await expect(page).toHaveURL(/[?&]topic=1/);
   expect(classified.map((item) => item.keywords)).toEqual(Array.from({ length: 5 }, () => ['Instagram']));
-  // A reaction post is judged by its link card, not by "wow".
   expect(classified.find((item) => item.id.endsWith('/reaction')).context.link_card).toEqual({
     title: 'Instagram expands teen account protections',
     description: 'Messages from strangers will be blocked by default.',
@@ -179,7 +176,6 @@ test('topic filter hides off-topic posts, reveals them on request, and survives 
     path: '/instagram',
   });
 
-  // The card shows the headline that kept the post.
   await expect(page.locator('#results .post', { hasText: 'wow' }).locator('.embed-link-title')).toHaveText('Instagram expands teen account protections');
 
   await page.getByRole('button', { name: 'Show them', exact: true }).click();
@@ -240,11 +236,9 @@ test('cards show link cards and quoted posts as text, linking only to checked UR
   await page.getByLabel('Search Terms (comma-separated)', { exact: true }).fill('apple');
   await page.getByRole('button', { name: 'Search', exact: true }).click();
   await expect(page.locator('#results .post')).toHaveCount(3);
-  // Every card carries an "apple" term tag, so cards are told apart by their post text.
   const card = (text) => page.locator('#results .post')
     .filter({ has: page.locator('.post-text', { hasText: new RegExp(`^${text}$`) }) });
 
-  // Link card: title link, site, and a description kept to one line.
   const reaction = card('wow');
   const title = reaction.locator('a.embed-link-title');
   await expect(title).toHaveText('Apple beats earnings');
@@ -257,7 +251,6 @@ test('cards show link cards and quoted posts as text, linking only to checked UR
   await expect(description).toContainText('A record quarter.');
   expect((await description.boundingBox()).height).toBeLessThan(28);
 
-  // Quote with media: the media's link card, then the quoted post and its own link.
   const quote = card('this');
   await expect(quote.locator('> .embed-link a.embed-link-title')).toHaveText('plain.example');
   await expect(quote.locator('> .embed-link a.embed-link-title')).toHaveAttribute('href', 'http://plain.example/a');
@@ -268,18 +261,14 @@ test('cards show link cards and quoted posts as text, linking only to checked UR
     .toHaveAttribute('href', 'https://bsky.app/profile/did:plc:quotedfixture/post/3kquoted');
   await expect(quote.locator('.embed-quote .embed-link-title')).toHaveText('The new price list');
   await expect(quote.locator('.embed-quote .embed-link-description')).toHaveCount(0);
-  // Four lines of 14px text at most, however long the quoted post is.
   expect((await quote.locator('.embed-quote-text').boundingBox()).height).toBeLessThan(4 * 14 * 1.5 + 2);
 
-  // Untrusted fields: markup stays text, a script URL is never a link, and
-  // nothing is fetched from the hosts the embeds name (afterEach checks that).
   const hostile = card('apple');
   await expect(hostile.locator('span.embed-link-title')).toHaveText(markup);
   await expect(hostile.locator('.embed-link a')).toHaveCount(0);
   await expect(page.locator('#results img')).toHaveCount(0);
   await expect(page.locator('#results a:not([href^="https://bsky.app/"]):not(.embed-link-title)')).toHaveCount(0);
 
-  // Long unbroken text wraps inside the card at every viewport width.
   const overflow = await page.evaluate(() => {
     const root = document.documentElement;
     const escaped = [...document.querySelectorAll('.embed-link, .embed-quote')].filter((element) => {
@@ -334,7 +323,6 @@ test('long destinations and quoted handles remain fully visible', async ({ page 
     await expect(link).toHaveAttribute('href', uri);
   }
 
-  // Hostnames used in place of titles must wrap completely, including inside quotes.
   const widths = [testInfo.project.use.viewport.width];
   if (testInfo.project.name === 'mobile') widths.push(320);
   for (const width of widths) {

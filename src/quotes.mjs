@@ -364,7 +364,6 @@ export async function performQuoteSearch() {
     renderQuoteResults();
   } catch (error) {
     if (generation !== quoteGeneration || controller.signal.aborted) return;
-    // Cancel a still-running sibling (original post or quotes page).
     controller.abort();
     state.activeQuoteUri = null;
     state.quoteCursor = null;

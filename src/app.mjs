@@ -74,7 +74,6 @@ function initFromURL() {
   const postParam = params.get('post');
   const quoteSortParam = params.get('quoteSort');
   const hasValidQuoteSort = QUOTE_SORT_VALUES.includes(quoteSortParam);
-  // Both lists accept 'bookmarks'; a legacy `sort` names the search sort first.
   const hasValidLegacyQuoteSort = !hasValidLegacySearchSort && QUOTE_SORT_VALUES.includes(legacySortParam);
   const resolvedQuoteSort = hasValidQuoteSort
     ? quoteSortParam

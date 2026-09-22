@@ -1,8 +1,6 @@
 import { INITIAL_RENDER_LIMIT } from './constants.mjs';
 
-// DID cache to avoid duplicate lookups: key -> { did, timestamp }
 export const didCache = new Map();
-// Search results cache: key -> { data, timestamp }
 export const searchCache = new Map();
 
 export const state = {
@@ -17,7 +15,6 @@ export const state = {
   searchGeneration: 0,
   isLoading: false,
   renderLimit: INITIAL_RENDER_LIMIT,
-  // Topic filter: hide posts scored as off-topic, or reveal them marked.
   hideOffTopic: false,
   showOffTopic: false,
   allQuotes: [],

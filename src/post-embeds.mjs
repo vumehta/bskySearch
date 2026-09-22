@@ -1,10 +1,6 @@
 import { TOPIC_LIMITS, cleanText, getLinkCard, getQuotedPost } from './topic-context.mjs';
 import { getHttpUrl, getPostUrlFromAtUri } from './utils.mjs';
 
-// Embeds are not covered by isRenderablePost, so every field may have the wrong
-// type. Descriptive text uses the classifier's cleanup and limits; hostnames
-// and handles remain complete so their domain suffixes are visible. All content
-// is only ever set as text.
 
 const plainText = (text) => document.createTextNode(text);
 
@@ -23,14 +19,10 @@ function createExternalLink(className, href, content) {
   return link;
 }
 
-// There is no thumbnail: like post images, nothing loads until the reader asks,
-// and the CSP would refuse one served from outside Bluesky's CDN.
 function createLinkCard(linkCard, renderText, { compact = false } = {}) {
   const href = getHttpUrl(linkCard.uri);
   const title = cleanText(linkCard.title, TOPIC_LIMITS.title);
   const description = compact ? '' : cleanText(linkCard.description, TOPIC_LIMITS.description);
-  // Preserve the complete hostname from the linked URL. Classifier limits
-  // would hide the actual destination domain at the end of a long hostname.
   const site = href ? new URL(href).hostname.replace(/^www\./, '') : '';
   const heading = title || site;
   if (!heading && !description) return null;
@@ -66,9 +58,6 @@ function createQuotedPost(quoted, renderText) {
   return quote;
 }
 
-// Shows the link card and the quoted post, which the topic filter judges along
-// with the text: they are what explains a kept post that only says "wow".
-// `renderText` turns a string into a node, which lets search highlight terms.
 export function appendPostEmbeds(container, embed, renderText = plainText) {
   const linkCard = getLinkCard(embed);
   const quoted = getQuotedPost(embed);

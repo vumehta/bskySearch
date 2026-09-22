@@ -3,16 +3,11 @@ import { isRenderablePost } from '../src/post-data.mjs';
 import { SEARCH_JOB_TIMEOUT_MS } from '../src/constants.mjs';
 
 const BSKY_SERVICE = 'https://bsky.social/xrpc';
-// The PDS forwards AppView methods to the service named here.
 const APPVIEW_PROXY = 'did:web:api.bsky.app#bsky_appview';
 
-// The deadline includes response headers and JSON body consumption.
 const UPSTREAM_TIMEOUT_MS = 8000;
 const UPSTREAM_TIMEOUT_ERROR_CODE = 'UPSTREAM_TIMEOUT';
 
-// Per-instance limits on new, uncached search jobs. Cache hits and subscribers
-// sharing an existing job do not consume admission tokens. No client IP header
-// is trusted; account-wide protection belongs at a trusted edge/shared limiter.
 export const SEARCH_ADMISSION_LIMITS = Object.freeze({
   maxConcurrent: 16,
   burst: 60,
@@ -67,8 +62,6 @@ async function fetchWithTimeout(url, { onResponse, ...options } = {}, timeoutMs 
         try {
           onResponse?.(response);
         } catch (error) {
-          // Header-only failures must not wait for a stalled error body. Release
-          // it without allowing cancellation failure to hide the HTTP error.
           void response.body?.cancel().catch(() => {});
           throw error;
         }
@@ -78,7 +71,6 @@ async function fetchWithTimeout(url, { onResponse, ...options } = {}, timeoutMs 
         } catch {
           throwIfAborted(controller.signal);
           if (response.ok) throw proxyError('Invalid response from Bluesky.', 502);
-          // An HTML/non-JSON error body must not hide the upstream HTTP status.
           payload = null;
         }
         throwIfAborted(controller.signal);
@@ -97,9 +89,6 @@ async function fetchWithTimeout(url, { onResponse, ...options } = {}, timeoutMs 
   }
 }
 
-// Searches and authentication have independent subscribers. One cancelled
-// request only detaches itself; the upstream work is aborted when nobody needs
-// it. In particular, one search cannot cancel another search's shared login.
 function createSharedOperation(start, onSettled, timeoutMs) {
   const operation = {
     controller: new AbortController(),
@@ -113,8 +102,6 @@ function createSharedOperation(start, onSettled, timeoutMs) {
       return start(operation.controller.signal);
     });
   let timer;
-  // Only search jobs have a complete-operation deadline. Shared authentication
-  // remains alive when a different search still subscribes to it.
   const deadline = timeoutMs === undefined ? null : new Promise((_, reject) => {
     timer = setTimeout(() => {
       reject(createUpstreamTimeoutError());
@@ -154,22 +141,15 @@ function subscribe(operation, signal) {
   });
 }
 
-// Access tokens last 120 minutes. A search that crosses the boundary is retried
-// after ExpiredToken, so the cache is not expired early: with a shorter TTL a
-// transient refresh failure would discard a still-valid token. Refresh tokens
-// last longer.
 const SESSION_TTL_MS = 120 * 60 * 1000;
 let cachedSession = null;
 let sessionCreatedAt = null;
 let sessionOperation = null;
 
-// A rate-limited login or refresh blocks new session work until Bluesky's reset
-// time, so later searches fail fast instead of prolonging the account lockout.
 const AUTH_RETRY_DEFAULT_MS = 60 * 1000;
 const AUTH_RETRY_MAX_MS = 24 * 60 * 60 * 1000;
 let authBlockedUntil = 0;
 
-// Search results cache with 30s TTL and size cap
 const SEARCH_CACHE_TTL_MS = 30000;
 const SEARCH_CACHE_CLEANUP_INTERVAL_MS = 5000;
 const MAX_SEARCH_CACHE_SIZE = 500;
@@ -191,8 +171,6 @@ function stripControlChars(value) {
   return value.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
 }
 
-// `since` is forwarded to Bluesky as a date-range filter. The search lexicon
-// accepts either an ISO date (YYYY-MM-DD) or an AT Protocol datetime.
 const ISO_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 const ISO_DATE_PREFIX_PATTERN = /^(\d{4})-(\d{2})-(\d{2})(?:T|$)/;
 const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
@@ -243,9 +221,6 @@ function retryHeaders(response) {
   return retryAfter ? { 'Retry-After': retryAfter } : {};
 }
 
-// Use the first usable of Retry-After and RateLimit-Reset. atproto reports
-// RateLimit-Reset as an epoch timestamp; the IETF draft uses delta seconds.
-// Without a usable reset time, wait a conservative default.
 function getRetryDelayMs(response) {
   const now = Date.now();
   const retryAfter = response.headers?.get('Retry-After')?.trim() || '';
@@ -327,8 +302,6 @@ function isSessionExpired() {
 async function ensureSession(handle, appPassword, signal, rejectedAccessJwt = null) {
   throwIfAborted(signal);
   if (rejectedAccessJwt && cachedSession?.accessJwt === rejectedAccessJwt) {
-    // Keep refresh credentials, but never reuse an access token Bluesky rejected
-    // while a failed refresh is waiting for its cooldown to expire.
     sessionCreatedAt = null;
   }
   if (sessionOperation && !sessionOperation.controller.signal.aborted) {
@@ -339,8 +312,6 @@ async function ensureSession(handle, appPassword, signal, rejectedAccessJwt = nu
     !isSessionExpired() &&
     (!rejectedAccessJwt || cachedSession.accessJwt !== rejectedAccessJwt)
   ) {
-    // A delayed 401 for an older token can use the session another request
-    // already refreshed, without rotating the current token again.
     return cachedSession;
   }
   const blockedMs = authBlockedUntil - Date.now();
@@ -354,9 +325,6 @@ async function ensureSession(handle, appPassword, signal, rejectedAccessJwt = nu
         try {
           session = await refreshSession(previous.refreshJwt, sessionSignal);
         } catch (error) {
-          // Invalid/expired refresh credentials permit a new login. Do not
-          // turn cancellation, timeouts, rate limits or an outage into login
-          // attempts, or hide an invalid successful authentication response.
           if (![400, 401].includes(error.upstreamStatus)) throw error;
           cachedSession = null;
           sessionCreatedAt = null;
@@ -387,7 +355,6 @@ function getCachedSearchResult(cacheKey) {
     return null;
   }
 
-  // Refresh order for LRU-style eviction without extending TTL.
   searchResultsCache.delete(cacheKey);
   searchResultsCache.set(cacheKey, cached);
   return cached.data;
@@ -428,15 +395,13 @@ async function searchPosts({ term, cursor, sort, since }, accessJwt, signal) {
     q: term,
     sort,
     limit: '100',
-    lang: 'en', // Intentionally English-only; do not make configurable
+    lang: 'en',
   });
 
   if (cursor) {
     params.set('cursor', cursor);
   }
 
-  // Restrict ranking to the requested window so every page is usable,
-  // instead of ranking across all time and discarding most results later.
   if (since) {
     params.set('since', since);
   }
@@ -608,7 +573,6 @@ export async function GET(request, context) {
   }
 }
 
-// Test utilities for unit/integration coverage.
 export const testUtils =
   process.env.NODE_ENV === 'test'
     ? {

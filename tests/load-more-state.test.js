@@ -18,7 +18,6 @@ function makePost(id, likeCount) {
   };
 }
 
-// Every page carries a cursor, so the search always has more to load.
 function makePagedFetch() {
   let page = 0;
   return vi.fn(async () => {
@@ -128,7 +127,6 @@ describe('search pagination and lifecycle', () => {
     expect(searchSince[1]).toBe(searchSince[0]);
     expect(state.searchSince).toBe(searchSince[0]);
 
-    // 24-hour window, rounded down to the minute.
     const sinceTs = Date.parse(searchSince[0]);
     expect(sinceTs).toBeLessThanOrEqual(after - 24 * 3600000);
     expect(sinceTs).toBeGreaterThan(before - 24 * 3600000 - 60000);

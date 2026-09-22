@@ -14,8 +14,6 @@ export class RequestTimeoutError extends Error {
   }
 }
 
-// A deadline covers both headers and body consumption. Racing the operation
-// also bounds adapters that do not implement AbortSignal themselves.
 export async function fetchJson(url, { signal, timeoutMs = 10000, ...options } = {}) {
   const controller = new AbortController();
   const abortFromCaller = () => controller.abort(signal.reason);

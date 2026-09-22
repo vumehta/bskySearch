@@ -1,7 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 
-// Serve only the built assets, with the same response headers as deployment.
 const assets = new Map([
   ['/', ['bluesky-term-search.html', 'text/html']],
   ['/bluesky-term-search.html', ['bluesky-term-search.html', 'text/html']],

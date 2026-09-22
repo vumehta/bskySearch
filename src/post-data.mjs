@@ -13,14 +13,12 @@ function previewSource(embed) {
   }
 }
 
-// Embeds without previews are not rendered, so they need no checks.
 function hasSafeEmbedPreviews(embed) {
   const source = previewSource(embed);
   return !source || (Array.isArray(source.items) && source.items.every((item) =>
     isObject(item) && optionalString(item[source.thumbKey]) && optionalString(item.alt)));
 }
 
-// Previews of a validated embed as { kind: 'image' | 'video', images: [{ thumb, alt }] }, or null.
 export function getEmbedPreviews(embed) {
   const source = previewSource(embed);
   return source && {
@@ -29,8 +27,6 @@ export function getEmbedPreviews(embed) {
   };
 }
 
-// Validate the fields consumed by post cards before caching or committing data.
-// Optional null values use the same fallbacks as the renderers.
 export function isRenderablePost(post) {
   return isObject(post)
     && typeof post.uri === 'string'

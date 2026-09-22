@@ -9,28 +9,19 @@ import { HttpError, fetchJson } from './http.mjs';
 import { state } from './state.mjs';
 import { TOPIC_LIMITS, buildTopicContext, hasTopicEvidence, normalizeKeyword } from './topic-context.mjs';
 
-// Scores belong to the exact evidence judged, so content updates cannot reuse
-// an earlier score or be suppressed by an older pending/failed request. Scores
-// outlive the search; pending and failed keys belong to the current search only.
 const scores = new Map();
 const pending = new Set();
 const failed = new Set();
 let queue = [];
 let activeRequests = 0;
-// Owns every request of the current search. Replacing it orphans older
-// requests, whose late results must not touch the newer search's bookkeeping.
 let owner = null;
 let unavailableReason = '';
 
-// One bad batch says nothing about the next; every other HTTP failure (not
-// configured, rejected credentials, rate limited, no such route) would repeat.
 const BATCH_ONLY_STATUSES = new Set([400, 413, 504]);
 
 const scoreKey = (uri, keyword, context) => JSON.stringify([uri, keyword, context]);
 const isScore = (value) => Number.isFinite(value) && value >= 0 && value <= 1;
 
-// Expansion broadens retrieval; classification uses only the original terms
-// from the active search, regardless of which query found each post.
 function getTopicKeywords() {
   const seen = new Set();
   const keywords = [];
@@ -49,8 +40,6 @@ function rememberScore(key, score) {
   scores.set(key, score);
 }
 
-// A post stays visible until every original search term has scored low: results
-// appear first and scores arrive after, and an unchecked post is never hidden.
 export function getTopicVerdict(post) {
   const context = buildTopicContext(post);
   const keywords = getTopicKeywords();
@@ -131,9 +120,6 @@ function pump() {
   }
 }
 
-// Queues every post that still lacks a score. Safe to call on every rebuild:
-// keys that are scored, in flight, or already failed are skipped. `onUpdate`
-// runs after each batch that belongs to the current search.
 export function requestTopicScores(posts, onUpdate) {
   if (unavailableReason) return;
   const rounds = [];
@@ -147,13 +133,10 @@ export function requestTopicScores(posts, onUpdate) {
     });
     if (keywords.length === 0) continue;
     if (!hasTopicEvidence(context)) {
-      // Nothing to judge, such as an image without a description. It stays visible.
       keywords.forEach((keyword) => failed.add(scoreKey(post.uri, keyword, context)));
       continue;
     }
     keywords.forEach((keyword) => pending.add(scoreKey(post.uri, keyword, context)));
-    // Keep each keyword chunk for a post in a separate request: result IDs
-    // identify posts, so two chunks with the same ID must never share a batch.
     for (let start = 0; start < keywords.length; start += TOPIC_LIMITS.maxKeywords) {
       const round = start / TOPIC_LIMITS.maxKeywords;
       rounds[round] ??= [];
@@ -177,13 +160,10 @@ export function cancelTopicScoring() {
   pending.clear();
 }
 
-// A new scoring session retries what the previous one could not check.
 export function resetTopicScoring() {
   cancelTopicScoring();
   failed.clear();
   unavailableReason = '';
-  // Bound carry-over scores, but never evict an active search's own scores:
-  // each rebuild would otherwise requeue the entries evicted by the last batch.
   while (scores.size > MAX_TOPIC_SCORE_CACHE_SIZE) {
     scores.delete(scores.keys().next().value);
   }

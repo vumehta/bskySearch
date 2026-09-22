@@ -1,6 +1,5 @@
 import { isRenderablePost } from './post-data.mjs';
 
-// Search transformations shared by the UI and the performance smoke checks.
 export function validateSearchPage(data) {
   if (!data || typeof data !== 'object' || !Array.isArray(data.posts)
     || (data.cursor !== undefined && data.cursor !== null && typeof data.cursor !== 'string')
@@ -50,7 +49,6 @@ export function createHighlightMatcher(terms) {
 }
 
 export function getPostRenderFingerprint(post) {
-  // Topic labels are updated in place to preserve open previews and threads.
   return JSON.stringify([
     post.uri || '',
     post.author?.handle || '',
@@ -72,7 +70,6 @@ export function getPostRenderFingerprint(post) {
   ]);
 }
 
-// A cursor is useful only once. This also terminates A -> B -> A loops.
 export function nextSearchCursor(nextCursor, requestedCursor, seenCursors) {
   if (typeof nextCursor !== 'string' || !nextCursor || nextCursor === requestedCursor || seenCursors.has(nextCursor)) return null;
   return nextCursor;

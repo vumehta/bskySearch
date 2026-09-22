@@ -2,8 +2,6 @@ import { readFile } from 'node:fs/promises';
 import { POST } from '../api/classify.mjs';
 import { TOPIC_SCORE_THRESHOLD } from '../src/constants.mjs';
 
-// This is an opt-in, paid model evaluation, separate from mocked unit tests.
-// It uses the production handler and question, sending only the saved fixtures.
 if (!process.env.TYPESAFE_API_KEY) {
   console.error('Set TYPESAFE_API_KEY in the environment to evaluate the topic filter with real Jev answers.');
   process.exitCode = 1;

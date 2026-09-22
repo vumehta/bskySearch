@@ -24,7 +24,6 @@ function makePost(id, text, likeCount = 50, extra = {}) {
 const ok = (payload) => ({ ok: true, status: 200, json: async () => payload });
 const failure = (status, payload) => ({ ok: false, status, json: async () => payload });
 
-// Scores each (post, keyword) pair with `scoreFor`, in the API's response shape.
 const scoredBy = (scoreFor) => (body) => ok({
   results: body.items.map((item) => ({
     id: item.id,
@@ -230,7 +229,6 @@ describe('topic filter', () => {
       }],
     });
 
-    // Lowering the filter later scores only the newly visible post.
     elements.minLikes.value = '0';
     search.applyMinLikesFilter();
     await vi.waitFor(() => expect(calls.classify).toHaveLength(2));
@@ -274,7 +272,6 @@ describe('topic filter', () => {
     await vi.waitFor(() => expect(summaryText()).toBe('1 off-topic post hidden.'));
     expect(visibleUris().sort()).toEqual([uri('ge'), uri('gm')]);
 
-    // Editing the input must not change the active search's classification.
     elements.terms.value = 'Apple';
     search.applyTopicFilterChange(false);
     search.applyTopicFilterChange(true);
@@ -315,7 +312,6 @@ describe('topic filter', () => {
     await search.performSearch();
     expect(calls.classify).toHaveLength(2);
 
-    // Reapplying the same threshold must leave useful in-flight work alone.
     search.applyMinLikesFilter();
     expect(calls.classify.every(({ options }) => !options.signal.aborted)).toBe(true);
 
@@ -327,7 +323,6 @@ describe('topic filter', () => {
     expect(calls.classify[2].body.items.map((item) => item.id)).toEqual([uri('p0'), uri('p1')]);
     expect(visibleUris()).toEqual([uri('p0'), uri('p1')]);
 
-    // Late answers cannot overwrite the replacement batch's scores or revive its queue.
     pending.forEach((response, index) => response.resolve(scoredBy(() => 0.01)(calls.classify[index].body)));
     await new Promise((resolve) => setTimeout(resolve, 20));
     elements.minLikes.value = '100';
@@ -353,7 +348,6 @@ describe('topic filter', () => {
     );
     expect(visibleUris()).toHaveLength(2);
 
-    // It does not keep asking during this search.
     elements.minLikes.value = '40';
     search.applyMinLikesFilter();
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -545,7 +539,6 @@ describe('topic filter', () => {
     for (let rebuild = 0; rebuild < 3; rebuild += 1) await checkAll();
     expect(calls.classify).toHaveLength(firstPass);
 
-    // A new session carries over a bounded cache, then retains all its own scores.
     resetTopicScoring();
     await checkAll();
     const rescoredPairs = calls.classify.slice(firstPass)
@@ -576,7 +569,6 @@ describe('topic filter', () => {
     await vi.waitFor(() => expect(summaryText()).toBe('No off-topic posts found.'));
     expect(visibleUris()).toEqual([uri('netflix')]);
 
-    // A late answer for the old search changes nothing.
     pending.resolve(ok({ results: [{ id: uri('apple'), scores: [0] }] }));
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(visibleUris()).toEqual([uri('netflix')]);
