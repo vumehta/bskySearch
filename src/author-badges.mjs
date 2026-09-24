@@ -7,6 +7,10 @@ function getVerificationBadge(verification) {
     : { className: 'verified', text: 'Verified', title: 'Verified account' };
 }
 
+export function isVerifiedAuthor(author) {
+  return getVerificationBadge(author?.verification) !== null;
+}
+
 function isLive(status) {
   return status?.status === LIVE_STATUS
     && !status.isDisabled

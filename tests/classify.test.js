@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CLASSIFY_ADMISSION_LIMITS, POST, buildTopicQuestion, testUtils } from '../api/classify.mjs';
+import { CLASSIFY_ADMISSION_LIMITS, POST, buildMentionQuestion, buildTopicQuestion, testUtils } from '../api/classify.mjs';
 import { TOPIC_JOB_TIMEOUT_MS } from '../src/constants.mjs';
 import { TOPIC_LIMITS } from '../src/topic-context.mjs';
 
@@ -19,6 +19,10 @@ function item(id, keywords = ['Meta'], text = `post ${id}`) {
   return { id, keywords, context: { post_text: text, author: 'Alice (@alice.example)' } };
 }
 
+function answers(noul, count = 2) {
+  return { answers: Object.fromEntries(Array.from({ length: count }, (_, index) => [`k${index}`, { type: 'noul', noul }])) };
+}
+
 function request(body, { headers = {}, method = 'POST', signal } = {}) {
   return new Request('https://example.com/api/classify', {
     method,
@@ -35,7 +39,7 @@ function upstream(scoreFor = () => 0.9) {
     calls.push({ url, options, body });
     const answers = Object.fromEntries(Object.entries(body.questions).map(([key, question]) => {
       const keyword = question.instructions.subject;
-      return [key, { type: 'noul', noul: scoreFor(keyword, body.state) }];
+      return [key, { type: 'noul', noul: scoreFor(keyword, body.state, question) }];
     }));
     return Response.json({ model: body.model, answers, usage: { input_tokens: 1, output_tokens: 1 } });
   });
@@ -131,11 +135,11 @@ describe('request validation', () => {
 });
 
 describe('scoring', () => {
-  it('asks one question per keyword over one shared state', async () => {
+  it('asks a topic and a mention question per keyword over one shared state', async () => {
     const calls = upstream((keyword) => (keyword === 'Meta' ? 0.97 : 0.04));
     const response = await POST(request({ items: [item('at://post/1', ['Meta', 'Apple'])] }), context);
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ results: [{ id: 'at://post/1', scores: [0.97, 0.04] }] });
+    await expect(response.json()).resolves.toEqual({ results: [{ id: 'at://post/1', scores: [0.97, 0.04], mentionScores: [0.97, 0.04] }] });
 
     expect(calls).toHaveLength(1);
     const [{ url, options, body }] = calls;
@@ -144,7 +148,12 @@ describe('scoring', () => {
     expect(options.headers.Authorization).toBe('Bearer test-key');
     expect(body.model).toBe('jev-latest');
     expect(body.state).toEqual({ post_text: 'post at://post/1', author: 'Alice (@alice.example)' });
-    expect(body.questions).toEqual({ k0: buildTopicQuestion('Meta'), k1: buildTopicQuestion('Apple') });
+    expect(body.questions).toEqual({
+      k0: buildTopicQuestion('Meta'),
+      k1: buildTopicQuestion('Apple'),
+      k2: buildMentionQuestion('Meta'),
+      k3: buildMentionQuestion('Apple'),
+    });
     expect(body.questions.k0.type).toBe('noul');
   });
 
@@ -189,7 +198,7 @@ describe('scoring', () => {
     };
     const response = await POST(request({ items: [candidate] }), context);
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ results: [{ id: 'quote', scores: [0.9] }] });
+    await expect(response.json()).resolves.toEqual({ results: [{ id: 'quote', scores: [0.9], mentionScores: [0.9] }] });
     expect(calls[0].body.state.quoted_post).toEqual({
       link_title: 'Read more',
       link_description: 'Apple announces the iPhone',
@@ -198,8 +207,29 @@ describe('scoring', () => {
     });
     candidate.context.quoted_post.link_description = 'Apple pie recipe';
     const updated = await POST(request({ items: [candidate] }), context);
-    await expect(updated.json()).resolves.toEqual({ results: [{ id: 'quote', scores: [0.1] }] });
+    await expect(updated.json()).resolves.toEqual({ results: [{ id: 'quote', scores: [0.1], mentionScores: [0.1] }] });
     expect(calls).toHaveLength(2);
+  });
+
+  it('returns mention scores separately from topic scores', async () => {
+    upstream((keyword, _state, question) => {
+      if (question.instructions.question === buildMentionQuestion(keyword).instructions.question) return 0.8;
+      return keyword === 'Meta' ? 0.2 : 0.1;
+    });
+    const response = await POST(request({ items: [item('a', ['Meta', 'Apple'])] }), context);
+    await expect(response.json()).resolves.toEqual({ results: [{ id: 'a', scores: [0.2, 0.1], mentionScores: [0.8, 0.8] }] });
+  });
+
+  it('caches a mention score even when the topic score is unusable', async () => {
+    globalThis.fetch = vi.fn(async () => Response.json({ answers: { k0: { type: 'noul', noul: 'high' }, k1: { type: 'noul', noul: 0.6 } } }));
+    const response = await POST(request({ items: [item('a')] }), context);
+    await expect(response.json()).resolves.toEqual({ results: [{ id: 'a', scores: [null], mentionScores: [0.6] }] });
+    expect(scoreCache.size).toBe(1);
+
+    const calls = upstream(() => 0.4);
+    const retried = await POST(request({ items: [item('a')] }), context);
+    expect(calls[0].body.questions).toEqual({ k0: buildTopicQuestion('Meta') });
+    await expect(retried.json()).resolves.toEqual({ results: [{ id: 'a', scores: [0.4], mentionScores: [0.6] }] });
   });
 
   it('uses a configured model', async () => {
@@ -216,9 +246,8 @@ describe('scoring', () => {
 
     const response = await POST(request({ items: [item('a', ['Meta', 'Apple'])] }), context);
     expect(calls).toHaveLength(2);
-    expect(Object.keys(calls[1].body.questions)).toEqual(['k0']);
-    expect(calls[1].body.questions.k0).toEqual(buildTopicQuestion('Apple'));
-    await expect(response.json()).resolves.toEqual({ results: [{ id: 'a', scores: [0.9, 0.9] }] });
+    expect(calls[1].body.questions).toEqual({ k0: buildTopicQuestion('Apple'), k1: buildMentionQuestion('Apple') });
+    await expect(response.json()).resolves.toEqual({ results: [{ id: 'a', scores: [0.9, 0.9], mentionScores: [0.9, 0.9] }] });
   });
 
   it('keys the cache on content, so a caller cannot plant a score for a real post', async () => {
@@ -226,7 +255,7 @@ describe('scoring', () => {
     await POST(request({ items: [item('at://real', ['Meta'], 'planted')] }), context);
     const response = await POST(request({ items: [item('at://real', ['Meta'], 'Meta ships a new headset')] }), context);
     expect(calls).toHaveLength(2);
-    await expect(response.json()).resolves.toEqual({ results: [{ id: 'at://real', scores: [0.99] }] });
+    await expect(response.json()).resolves.toEqual({ results: [{ id: 'at://real', scores: [0.99], mentionScores: [0.99] }] });
   });
 
   it('expires cached scores', async () => {
@@ -243,10 +272,10 @@ describe('scoring', () => {
     ['not a number', 'high'],
     ['missing', undefined],
   ])('reports an answer that is %s as unscored and does not cache it', async (_label, noul) => {
-    globalThis.fetch = vi.fn(async () => Response.json({ answers: { k0: { type: 'noul', noul } } }));
+    globalThis.fetch = vi.fn(async () => Response.json(answers(noul)));
     const response = await POST(request({ items: [item('a')] }), context);
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ results: [{ id: 'a', scores: [null] }] });
+    await expect(response.json()).resolves.toEqual({ results: [{ id: 'a', scores: [null], mentionScores: [null] }] });
     expect(scoreCache.size).toBe(0);
   });
 });
@@ -258,10 +287,10 @@ describe('upstream failures', () => {
     globalThis.fetch = vi.fn(async () => {
       attempts += 1;
       if (attempts === 1) return Response.json({ error: 'overloaded' }, { status: 529 });
-      return Response.json({ answers: { k0: { type: 'noul', noul: 0.8 } } });
+      return Response.json(answers(0.8));
     });
     const response = await advanceUntilSettled(POST(request({ items: [item('a')] }), context));
-    await expect(response.json()).resolves.toEqual({ results: [{ id: 'a', scores: [0.8] }] });
+    await expect(response.json()).resolves.toEqual({ results: [{ id: 'a', scores: [0.8], mentionScores: [0.8] }] });
     expect(attempts).toBe(2);
     expect(vi.getTimerCount()).toBe(0);
   });
@@ -279,11 +308,11 @@ describe('upstream failures', () => {
       if (attemptedAt.length === 1) {
         return Response.json({ error: 'try later' }, { status, headers: { 'Retry-After': header() } });
       }
-      return Response.json({ answers: { k0: { type: 'noul', noul: 0.8 } } });
+      return Response.json(answers(0.8));
     });
     const response = await advanceUntilSettled(POST(request({ items: [item('a')] }), context), 50);
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ results: [{ id: 'a', scores: [0.8] }] });
+    await expect(response.json()).resolves.toEqual({ results: [{ id: 'a', scores: [0.8], mentionScores: [0.8] }] });
     expect(attemptedAt).toHaveLength(2);
     expect(attemptedAt[1] - attemptedAt[0]).toBeGreaterThanOrEqual(minimumDelay);
     expect(vi.getTimerCount()).toBe(0);
@@ -295,12 +324,12 @@ describe('upstream failures', () => {
       if (JSON.parse(options.body).state.post_text === 'post throttled') {
         return Response.json({ error: 'try later' }, { status: 429, headers: { 'Retry-After': '60' } });
       }
-      return Response.json({ answers: { k0: { type: 'noul', noul: 0.8 } } });
+      return Response.json(answers(0.8));
     });
     const response = await advanceUntilSettled(POST(request({ items: [item('good'), item('throttled')] }), context));
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      results: [{ id: 'good', scores: [0.8] }, { id: 'throttled', scores: [null] }],
+      results: [{ id: 'good', scores: [0.8], mentionScores: [0.8] }, { id: 'throttled', scores: [null], mentionScores: [null] }],
     });
     expect(globalThis.fetch).toHaveBeenCalledTimes(2);
     expect(vi.getTimerCount()).toBe(0);
@@ -311,7 +340,7 @@ describe('upstream failures', () => {
     let upstreamSignal;
     globalThis.fetch = vi.fn(async (_url, options) => {
       if (globalThis.fetch.mock.calls.length > 1) {
-        return Response.json({ answers: { k0: { type: 'noul', noul: 0.8 } } });
+        return Response.json(answers(0.8));
       }
       upstreamSignal = options.signal;
       return {
@@ -324,7 +353,7 @@ describe('upstream failures', () => {
     });
     const response = await advanceUntilSettled(POST(request({ items: [item('a')] }), context));
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ results: [{ id: 'a', scores: [null] }] });
+    await expect(response.json()).resolves.toEqual({ results: [{ id: 'a', scores: [null], mentionScores: [null] }] });
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
     expect(upstreamSignal.aborted).toBe(true);
     expect(vi.getTimerCount()).toBe(0);
@@ -349,14 +378,14 @@ describe('upstream failures', () => {
     globalThis.fetch = vi.fn(async (_url, options) => {
       const { state } = JSON.parse(options.body);
       if (state.post_text === 'post bad') return new Response('<html>', { status: 500 });
-      return Response.json({ answers: { k0: { type: 'noul', noul: 0.7 } } });
+      return Response.json(answers(0.7));
     });
     const response = await advanceUntilSettled(POST(request({ items: [item('good'), item('bad')] }), context));
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      results: [{ id: 'good', scores: [0.7] }, { id: 'bad', scores: [null] }],
+      results: [{ id: 'good', scores: [0.7], mentionScores: [0.7] }, { id: 'bad', scores: [null], mentionScores: [null] }],
     });
-    expect(scoreCache.size).toBe(1);
+    expect(scoreCache.size).toBe(2);
   });
 
   it('does not retry a rejected request, and logs why for the function logs', async () => {
@@ -365,7 +394,7 @@ describe('upstream failures', () => {
       { status: 422 },
     ));
     const response = await POST(request({ items: [item('a')] }), context);
-    await expect(response.json()).resolves.toEqual({ results: [{ id: 'a', scores: [null] }] });
+    await expect(response.json()).resolves.toEqual({ results: [{ id: 'a', scores: [null], mentionScores: [null] }] });
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
     expect(console.warn).toHaveBeenCalledTimes(1);
     const logged = console.warn.mock.calls[0].join(' ');
@@ -395,7 +424,7 @@ describe('upstream failures', () => {
     const startedAt = Date.now();
     const response = await advanceUntilSettled(POST(request({ items: [item('a')] }), context));
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ results: [{ id: 'a', scores: [null] }] });
+    await expect(response.json()).resolves.toEqual({ results: [{ id: 'a', scores: [null], mentionScores: [null] }] });
     expect(Date.now() - startedAt).toBeGreaterThanOrEqual(UPSTREAM_TIMEOUT_MS * 2 + UPSTREAM_RETRY_DELAY_MS);
     expect(signals).toHaveLength(2);
     expect(signals.every((signal) => signal.aborted)).toBe(true);

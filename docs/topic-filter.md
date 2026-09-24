@@ -22,8 +22,16 @@ follow-me requests, casual photo sharing, and unrelated commentary are excluded.
 The searched subject does not have to be the only subject, but the useful
 information must be about it. An official author does not qualify automatically.
 
-`buildTopicQuestion` in `api/classify.mjs` defines the rubric. It asks one Noul
-per original search term, sharing the evidence in one request per post.
+Posts with reach get a lower bar. A post with at least 50 likes, or from a
+verified account, stays when it says anything about the company: a joke, an
+unsupported complaint, or a bare call to cancel counts. Credits, hashtags, and
+other word senses still do not. The card labels these posts "High reach" or
+"Verified author" next to their match percentage.
+
+`buildTopicQuestion` in `api/classify.mjs` defines the rubric, and
+`buildMentionQuestion` defines the lower bar. Each original search term gets
+both Nouls, sharing the evidence in one request per post, so a post that later
+reaches 50 likes needs no second check. The browser applies the reach rule.
 The server hashes the entire question with its evidence, so rubric changes
 invalidate earlier scores. Unchecked posts remain visible and hidden posts can
 be revealed using **Show them**. While the filter is enabled, match percentages

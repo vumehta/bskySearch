@@ -60,21 +60,49 @@ function jsonNoStore(payload, status = 200, extraHeaders = {}) {
   });
 }
 
+const SEARCH_INTENT = 'The user is tracking companies, brands, and platforms and their products and services. ' +
+  'Interpret the search term as the named business or platform, regardless of capitalization, ' +
+  'not as an ordinary word, acronym, or unrelated entity. For example, Intel means the chip company, ' +
+  'not intelligence reports or military intel; Apple means the technology company, not fruit; ' +
+  'Meta means the technology company, not gaming strategy or self-referential commentary. ' +
+  'Apply this same business/product interpretation to every search term, including Instagram, WhatsApp, and Netflix.';
+
+const EVIDENCE = 'Consider `post_text`, `link_card`, `image_descriptions`, and `quoted_post` together. ' +
+  'Use only the supplied content; do not assume an unseen article or missing thread adds useful information.';
+
+export function buildMentionQuestion(keyword) {
+  return {
+    type: 'noul',
+    instructions: {
+      subject: keyword,
+      search_intent: SEARCH_INTENT,
+      question: 'Does this post say anything about `subject`, in the intended business/product sense described above?',
+      evidence: EVIDENCE,
+    },
+    criteria: {
+      true:
+        'The post says something about the intended company, brand, or platform, or about one of its products, ' +
+        'services, shows, apps, devices, or executives: news, an opinion, praise, a complaint, a joke, or a call ' +
+        'to action. Brief, low-effort, and unsupported remarks count, and so does a remark aimed at several ' +
+        'companies at once.',
+      false:
+        'Nothing in the supplied evidence says anything about the intended business. The search term is absent, ' +
+        'used with a different meaning (an ordinary word, slang, a game term, intelligence reports, or a different ' +
+        'thing with the same name), or appears only as a source or photo credit, a hashtag, a follow-me request, ' +
+        'or the place where something was posted.',
+    },
+  };
+}
+
 export function buildTopicQuestion(keyword) {
   return {
     type: 'noul',
     instructions: {
       subject: keyword,
-      search_intent: 'The user is tracking companies, brands, and platforms and their products and services. ' +
-        'Interpret the search term as the named business or platform, regardless of capitalization, ' +
-        'not as an ordinary word, acronym, or unrelated entity. For example, Intel means the chip company, ' +
-        'not intelligence reports or military intel; Apple means the technology company, not fruit; ' +
-        'Meta means the technology company, not gaming strategy or self-referential commentary. ' +
-        'Apply this same business/product interpretation to every search term, including Instagram, WhatsApp, and Netflix.',
+      search_intent: SEARCH_INTENT,
       question: 'Does this post provide substantive analysis, news, or reasoned criticism about `subject`, ' +
         'in the intended business/product sense described above?',
-      evidence: 'Consider `post_text`, `link_card`, `image_descriptions`, and `quoted_post` together. ' +
-        'Use only the supplied content; do not assume an unseen article or missing thread adds useful information.',
+      evidence: EVIDENCE,
     },
     criteria: {
       true:
@@ -149,8 +177,8 @@ async function readJsonBody(request) {
   }
 }
 
-async function getScoreCacheKey(keyword, context) {
-  const bytes = new TextEncoder().encode(JSON.stringify([buildTopicQuestion(keyword), context]));
+async function getScoreCacheKey(question, context) {
+  const bytes = new TextEncoder().encode(JSON.stringify([question, context]));
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
@@ -281,10 +309,13 @@ function describeUpstreamFailure(payload) {
   return (text || 'no error body').slice(0, 300);
 }
 
-async function scoreItem(keywords, context, { apiKey, model, signal, deadlineAt }) {
-  const questions = Object.fromEntries(keywords.map((keyword, index) => [`k${index}`, buildTopicQuestion(keyword)]));
-  const body = { model, state: context, questions };
-  const unscored = keywords.map(() => null);
+async function scoreItem(questions, context, { apiKey, model, signal, deadlineAt }) {
+  const body = {
+    model,
+    state: context,
+    questions: Object.fromEntries(questions.map((question, index) => [`k${index}`, question])),
+  };
+  const unscored = questions.map(() => null);
   let retryDelayMs = UPSTREAM_RETRY_DELAY_MS;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     throwIfAborted(signal);
@@ -315,7 +346,7 @@ async function scoreItem(keywords, context, { apiKey, model, signal, deadlineAt 
       return unscored;
     }
     const answers = isObject(result.payload?.answers) ? result.payload.answers : {};
-    const scores = keywords.map((_, index) => {
+    const scores = questions.map((_, index) => {
       const score = answers[`k${index}`]?.noul;
       return Number.isFinite(score) && score >= 0 && score <= 1 ? score : null;
     });
@@ -344,21 +375,22 @@ async function runWithConcurrency(tasks, concurrency) {
 }
 
 async function classifyItems(items, options) {
-  const results = [];
+  const scored = [];
   const tasks = [];
   for (const item of items) {
-    const cacheKeys = await Promise.all(item.keywords.map((keyword) => getScoreCacheKey(keyword, item.context)));
+    const questions = [...item.keywords.map(buildTopicQuestion), ...item.keywords.map(buildMentionQuestion)];
+    const cacheKeys = await Promise.all(questions.map((question) => getScoreCacheKey(question, item.context)));
     const scores = cacheKeys.map(getCachedScore);
-    results.push({ id: item.id, scores });
+    scored.push({ id: item.id, keywordCount: item.keywords.length, scores });
     const missing = scores.flatMap((score, index) => (score === null ? [index] : []));
     if (missing.length === 0) continue;
     tasks.push(async () => {
-      const fresh = await scoreItem(missing.map((index) => item.keywords[index]), item.context, options);
-      missing.forEach((keywordIndex, position) => {
+      const fresh = await scoreItem(missing.map((index) => questions[index]), item.context, options);
+      missing.forEach((questionIndex, position) => {
         const score = fresh[position];
         if (score === null) return;
-        scores[keywordIndex] = score;
-        cacheScore(cacheKeys[keywordIndex], score);
+        scores[questionIndex] = score;
+        cacheScore(cacheKeys[questionIndex], score);
       });
     });
   }
@@ -366,7 +398,11 @@ async function classifyItems(items, options) {
     admitUpstreamCalls(tasks.length);
     await runWithConcurrency(tasks, UPSTREAM_CONCURRENCY);
   }
-  return results;
+  return scored.map(({ id, keywordCount, scores }) => ({
+    id,
+    scores: scores.slice(0, keywordCount),
+    mentionScores: scores.slice(keywordCount),
+  }));
 }
 
 function withDeadline(start, signal, timeoutMs) {

@@ -1,6 +1,9 @@
+import { isVerifiedAuthor } from './author-badges.mjs';
 import {
   CLASSIFY_API,
   MAX_TOPIC_SCORE_CACHE_SIZE,
+  TOPIC_MENTION_THRESHOLD,
+  TOPIC_REACH_MIN_LIKES,
   TOPIC_REQUEST_CONCURRENCY,
   TOPIC_REQUEST_TIMEOUT_MS,
   TOPIC_SCORE_THRESHOLD,
@@ -35,22 +38,39 @@ function getTopicKeywords() {
   return keywords;
 }
 
-function rememberScore(key, score) {
+function rememberScores(key, entry) {
   scores.delete(key);
-  scores.set(key, score);
+  scores.set(key, entry);
+}
+
+function isFullyScored(key) {
+  const entry = scores.get(key);
+  return entry?.topic !== undefined && entry?.mention !== undefined;
+}
+
+function getReachReason(post) {
+  if ((post.likeCount || 0) >= TOPIC_REACH_MIN_LIKES) return 'High reach';
+  if (isVerifiedAuthor(post.author)) return 'Verified author';
+  return null;
 }
 
 export function getTopicVerdict(post) {
   const context = buildTopicContext(post);
   const keywords = getTopicKeywords();
+  const reach = getReachReason(post);
   let best = null;
+  let bestMention = null;
   let complete = keywords.length > 0;
   for (const keyword of keywords) {
-    const score = scores.get(scoreKey(post.uri, keyword, context));
+    const { topic: score, mention } = scores.get(scoreKey(post.uri, keyword, context)) || {};
     if (score === undefined) complete = false;
     else if (best === null || score > best) best = score;
+    if (!reach) continue;
+    if (mention === undefined) complete = false;
+    else if (bestMention === null || mention > bestMention) bestMention = mention;
   }
   if (best !== null && best >= TOPIC_SCORE_THRESHOLD) return { verdict: 'on', score: best };
+  if (bestMention !== null && bestMention >= TOPIC_MENTION_THRESHOLD) return { verdict: 'on', score: best, keptFor: reach };
   if (complete) return { verdict: 'off', score: best };
   return { verdict: 'unknown', score: best };
 }
@@ -68,16 +88,20 @@ export function getTopicProgress(posts) {
   return { pending: pendingPosts, failed: failedPosts, unavailableReason };
 }
 
+const scoreAt = (values, index) => (Array.isArray(values) && isScore(values[index]) ? values[index] : undefined);
+
 function settleBatch(items, results) {
-  const byId = new Map((Array.isArray(results) ? results : []).map((result) => [result?.id, result?.scores]));
+  const byId = new Map((Array.isArray(results) ? results : []).map((result) => [result?.id, result]));
   for (const item of items) {
     const returned = byId.get(item.id);
     item.keywords.forEach((keyword, index) => {
       const key = scoreKey(item.id, keyword, item.context);
-      const score = Array.isArray(returned) ? returned[index] : null;
+      const entry = { ...scores.get(key) };
+      entry.topic = scoreAt(returned?.scores, index) ?? entry.topic;
+      entry.mention = scoreAt(returned?.mentionScores, index) ?? entry.mention;
       pending.delete(key);
-      if (isScore(score)) rememberScore(key, score);
-      else failed.add(key);
+      if (entry.topic !== undefined || entry.mention !== undefined) rememberScores(key, entry);
+      if (!isFullyScored(key)) failed.add(key);
     });
   }
 }
@@ -129,7 +153,7 @@ export function requestTopicScores(posts, onUpdate) {
     const context = buildTopicContext(post);
     const keywords = topicKeywords.filter((keyword) => {
       const key = scoreKey(post.uri, keyword, context);
-      return !scores.has(key) && !pending.has(key) && !failed.has(key);
+      return !isFullyScored(key) && !pending.has(key) && !failed.has(key);
     });
     if (keywords.length === 0) continue;
     if (!hasTopicEvidence(context)) {

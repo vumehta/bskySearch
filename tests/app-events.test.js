@@ -275,7 +275,13 @@ describe('topic filter control', () => {
     fetch.mockImplementation(async (url, options) => {
       if (!String(url).startsWith('/api/classify')) return Response.json({ posts: [makePost()] });
       const { items } = JSON.parse(options.body);
-      return Response.json({ results: items.map((item) => ({ id: item.id, scores: item.keywords.map(() => 0.03) })) });
+      return Response.json({
+        results: items.map((item) => ({
+          id: item.id,
+          scores: item.keywords.map(() => 0.03),
+          mentionScores: item.keywords.map(() => 0.03),
+        })),
+      });
     });
   }
 

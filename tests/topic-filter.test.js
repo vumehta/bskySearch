@@ -27,7 +27,8 @@ const failure = (status, payload) => ({ ok: false, status, json: async () => pay
 const scoredBy = (scoreFor) => (body) => ok({
   results: body.items.map((item) => ({
     id: item.id,
-    scores: item.keywords.map((keyword) => scoreFor(item, keyword)),
+    scores: item.keywords.map((keyword) => scoreFor(item, keyword, 'topic')),
+    mentionScores: item.keywords.map((keyword) => scoreFor(item, keyword, 'mention')),
   })),
 });
 
@@ -370,6 +371,63 @@ describe('topic filter', () => {
     await vi.waitFor(() => expect(visibleUris()).toEqual([]));
     expect(calls.classify).toHaveLength(2);
     expect(summaryText()).toBe('1 off-topic post hidden.');
+  });
+
+  it('keeps high-reach and verified posts that say anything about the company, and labels why', async () => {
+    const verifiedAuthor = {
+      did: 'did:plc:verified',
+      handle: 'reporter.bsky.social',
+      displayName: 'Reporter',
+      verification: { verifiedStatus: 'valid', trustedVerifierStatus: 'none' },
+    };
+    const mentions = { viral: 0.8, verified: 0.8, quiet: 0.8, fruit: 0.1 };
+    installFetch({
+      posts: [
+        makePost('viral', 'Cancel Apple, they only care about money', 50),
+        makePost('verified', 'Apple is so overrated', 3, { author: verifiedAuthor }),
+        makePost('quiet', 'Apple is so overrated', 49),
+        makePost('fruit', 'apple pie recipe', 500),
+      ],
+      classify: scoredBy((item, _keyword, kind) => {
+        const id = item.id.split('/').pop();
+        return kind === 'mention' ? mentions[id] : 0.1;
+      }),
+    });
+    state.hideOffTopic = true;
+    await search.performSearch();
+    await vi.waitFor(() => expect(summaryText()).toBe('2 off-topic posts hidden.'));
+    expect(visibleUris().sort()).toEqual([uri('verified'), uri('viral')]);
+    const tags = Array.from(elements.results.querySelectorAll('.topic-score-tag'), (tag) => tag.textContent);
+    expect(tags.sort()).toEqual(['High reach \xB7 10% match', 'Verified author \xB7 10% match']);
+  });
+
+  it('applies the reach rule as likes grow, without checking the post again', async () => {
+    const { getTopicVerdict, requestTopicScores } = await import('../src/topic-filter.mjs');
+    const post = makePost('growing', 'Apple is so overrated', 49, { matchedTerms: ['apple'] });
+    const calls = installFetch({
+      posts: [],
+      classify: scoredBy((_item, _keyword, kind) => (kind === 'mention' ? 0.7 : 0.2)),
+    });
+    requestTopicScores([post], () => {});
+    await vi.waitFor(() => expect(getTopicVerdict(post)).toEqual({ verdict: 'off', score: 0.2 }));
+
+    const popular = { ...post, likeCount: 50 };
+    requestTopicScores([popular], () => {});
+    expect(getTopicVerdict(popular)).toEqual({ verdict: 'on', score: 0.2, keptFor: 'High reach' });
+    expect(calls.classify).toHaveLength(1);
+  });
+
+  it('keeps a high-reach post visible when its mention check fails', async () => {
+    const { getTopicVerdict, requestTopicScores } = await import('../src/topic-filter.mjs');
+    const popular = makePost('popular', 'Apple is so overrated', 500, { matchedTerms: ['apple'] });
+    const quiet = makePost('quiet', 'Apple is so overrated', 5, { matchedTerms: ['apple'] });
+    installFetch({
+      posts: [],
+      classify: (body) => ok({ results: body.items.map((item) => ({ id: item.id, scores: [0.2], mentionScores: [null] })) }),
+    });
+    requestTopicScores([popular, quiet], () => {});
+    await vi.waitFor(() => expect(getTopicVerdict(quiet)).toEqual({ verdict: 'off', score: 0.2 }));
+    expect(getTopicVerdict(popular)).toEqual({ verdict: 'unknown', score: 0.2 });
   });
 
   it('never sends a post that has nothing to judge', async () => {

@@ -137,7 +137,9 @@ test('topic filter hides off-topic posts, reveals them on request, and survives 
         external: { uri: 'https://news.example/instagram', title: 'Instagram expands teen account protections', description: 'Messages from strangers will be blocked by default.' },
       },
     },
+    post('boycott', 'Delete Instagram. It only cares about money.', 60),
   ];
+  const keptTags = ['95% match', '95% match', 'High reach \xB7 20% match'];
   const classified = [];
   await page.route('**/api/search?**', (route) => route.fulfill({ json: { posts } }));
   await page.route('**/api/classify', async (route) => {
@@ -150,7 +152,8 @@ test('topic filter hides off-topic posts, reveals them on request, and survives 
       json: {
         results: items.map((item) => ({
           id: item.id,
-          scores: item.keywords.map(() => (/\/(company|reaction)$/.test(item.id) ? 0.95 : 0.03)),
+          scores: item.keywords.map(() => (/\/(company|reaction)$/.test(item.id) ? 0.95 : /\/boycott$/.test(item.id) ? 0.2 : 0.03)),
+          mentionScores: item.keywords.map(() => (/\/(company|reaction|boycott)$/.test(item.id) ? 0.9 : 0.03)),
         })),
       },
     });
@@ -159,16 +162,16 @@ test('topic filter hides off-topic posts, reveals them on request, and survives 
   await page.goto('/');
   await page.getByLabel('Search Terms (comma-separated)', { exact: true }).fill('Instagram');
   await page.getByRole('button', { name: 'Search', exact: true }).click();
-  await expect(page.locator('#results .post')).toHaveCount(5);
+  await expect(page.locator('#results .post')).toHaveCount(6);
   expect(classified).toEqual([]);
 
   await expect(page.getByText('Keep analysis and substantive news', { exact: true })).toBeVisible();
   await page.getByLabel('Topic Filter', { exact: true }).check();
-  await expect(page.locator('#results .post')).toHaveCount(2);
+  await expect(page.locator('#results .post')).toHaveCount(3);
   await expect(page.locator('#results .topic-summary')).toContainText('3 off-topic posts hidden.');
-  await expect(page.locator('#results .topic-score-tag')).toHaveText(['95% match', '95% match']);
+  await expect(page.locator('#results .topic-score-tag')).toHaveText(keptTags);
   await expect(page).toHaveURL(/[?&]topic=1/);
-  expect(classified.map((item) => item.keywords)).toEqual(Array.from({ length: 5 }, () => ['Instagram']));
+  expect(classified.map((item) => item.keywords)).toEqual(Array.from({ length: 6 }, () => ['Instagram']));
   expect(classified.find((item) => item.id.endsWith('/reaction')).context.link_card).toEqual({
     title: 'Instagram expands teen account protections',
     description: 'Messages from strangers will be blocked by default.',
@@ -179,25 +182,25 @@ test('topic filter hides off-topic posts, reveals them on request, and survives 
   await expect(page.locator('#results .post', { hasText: 'wow' }).locator('.embed-link-title')).toHaveText('Instagram expands teen account protections');
 
   await page.getByRole('button', { name: 'Show them', exact: true }).click();
-  await expect(page.locator('#results .post')).toHaveCount(5);
+  await expect(page.locator('#results .post')).toHaveCount(6);
   await expect(page.locator('#results .post.off-topic .off-topic-tag')).toHaveText(Array(3).fill('Off-topic \xB7 3% match'));
   await expect(page.locator('#results .post.off-topic .post-text')).toHaveText(posts.slice(1, 4).map((item) => item.record.text));
-  await expect(page.locator('#results .topic-score-tag')).toHaveText(['95% match', '95% match']);
+  await expect(page.locator('#results .topic-score-tag')).toHaveText(keptTags);
   await page.screenshot({ path: testInfo.outputPath('topic-filter.png'), fullPage: true });
 
   await page.getByRole('button', { name: 'Hide them again', exact: true }).click();
-  await expect(page.locator('#results .post')).toHaveCount(2);
-  await expect(page.locator('#results .topic-score-tag')).toHaveText(['95% match', '95% match']);
+  await expect(page.locator('#results .post')).toHaveCount(3);
+  await expect(page.locator('#results .topic-score-tag')).toHaveText(keptTags);
   await page.getByLabel('Topic Filter', { exact: true }).uncheck();
-  await expect(page.locator('#results .post')).toHaveCount(5);
+  await expect(page.locator('#results .post')).toHaveCount(6);
   await expect(page.locator('#results .topic-score-tag, #results .off-topic-tag')).toHaveCount(0);
   await page.getByLabel('Topic Filter', { exact: true }).check();
 
   await page.reload();
   await expect(page.getByLabel('Topic Filter', { exact: true })).toBeChecked();
-  await expect(page.locator('#results .post')).toHaveCount(2);
-  await expect(page.locator('#results .post-text')).toHaveText([posts[0].record.text, 'wow']);
-  await expect(page.locator('#results .topic-score-tag')).toHaveText(['95% match', '95% match']);
+  await expect(page.locator('#results .post')).toHaveCount(3);
+  await expect(page.locator('#results .post-text')).toHaveText([posts[0].record.text, 'wow', posts[5].record.text]);
+  await expect(page.locator('#results .topic-score-tag')).toHaveText(keptTags);
 });
 
 test('cards show link cards and quoted posts as text, linking only to checked URLs', async ({ page }, testInfo) => {
