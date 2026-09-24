@@ -11,9 +11,4 @@ if [ -z "${BROWSER_TEST_EXECUTABLE:-}" ] && [ -x /opt/pw-browsers/chromium ] && 
   echo 'export BROWSER_TEST_EXECUTABLE=/opt/pw-browsers/chromium' >> "$CLAUDE_ENV_FILE"
 fi
 
-if [ -f node_modules/.package-lock.json ] && [ node_modules/.package-lock.json -nt package-lock.json ] \
-  && npm ls --all >/dev/null 2>&1; then
-  exit 0
-fi
-
 npm ci --no-audit --no-fund >&2
