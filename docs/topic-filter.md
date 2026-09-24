@@ -2,7 +2,9 @@
 
 The filter keeps analysis and substantive news about a searched company,
 platform, or its products and services. Concrete developments, reasoned
-criticism, useful comparisons, and specific product experiences qualify.
+criticism, useful comparisons, and specific product experiences qualify. So do
+opinions and calls to action that give a business reason, such as a boycott over
+price increases, including when the same criticism names several companies.
 The evidence can come from the post, a link preview, a quote, or image alt text.
 
 All keywords share one business/product intent, regardless of capitalization:

@@ -151,5 +151,23 @@
     "keyword": "Netflix",
     "keep": true,
     "context": { "post_text": "Netflix is raising subscription prices again. The increase improves revenue per subscriber but could push price-sensitive households toward the cheaper advertising tier." }
+  },
+  {
+    "id": "boycott-several-services-over-prices",
+    "keyword": "Netflix",
+    "keep": true,
+    "context": { "post_text": "Time for a mass cancellation of Disney+, Netflix, Peacock, Max, and Prime Video. Every one of them raised prices while people are struggling with rent and groceries. A coordinated boycott is the only message they'll hear." }
+  },
+  {
+    "id": "boycott-single-service-over-prices",
+    "keyword": "Netflix",
+    "keep": true,
+    "context": { "post_text": "Cancelling Netflix today. Another price increase while households are cutting back on groceries, and they expect us to keep paying." }
+  },
+  {
+    "id": "services-listed-casually",
+    "keyword": "Netflix",
+    "keep": false,
+    "context": { "post_text": "I've got Netflix, Hulu, and Max and still can't find anything to watch tonight. Recommendations?" }
   }
 ]

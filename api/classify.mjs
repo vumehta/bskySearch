@@ -71,7 +71,7 @@ export function buildTopicQuestion(keyword) {
         'not intelligence reports or military intel; Apple means the technology company, not fruit; ' +
         'Meta means the technology company, not gaming strategy or self-referential commentary. ' +
         'Apply this same business/product interpretation to every search term, including Instagram, WhatsApp, and Netflix.',
-      question: 'Does this post provide substantive analysis or news about `subject`, ' +
+      question: 'Does this post provide substantive analysis, news, or reasoned criticism about `subject`, ' +
         'in the intended business/product sense described above?',
       evidence: 'Consider `post_text`, `link_card`, `image_descriptions`, and `quoted_post` together. ' +
         'Use only the supplied content; do not assume an unseen article or missing thread adds useful information.',
@@ -82,11 +82,14 @@ export function buildTopicQuestion(keyword) {
         'It explains, evaluates, compares, or reports a concrete development concerning `subject` or its products ' +
         'and services: for example features, business performance, strategy, competition, privacy, moderation, ' +
         'regulation, security, reliability, or effects on users. Reasoned criticism, specific product experiences, ' +
-        'and brief factual news count. The subject need not be the only focus, but there must be substantive ' +
+        'and brief factual news count. So do opinions and calls to action that give a reason tied to the ' +
+        'business, such as urging people to cancel or boycott `subject` because it raised prices or changed a policy. ' +
+        'When a post names several companies and its claim or criticism applies to all of them, it counts for each ' +
+        'one named. The subject need not be the only focus, but there must be substantive ' +
         'information about it. A clearly identifiable product or service can establish the connection without ' +
         'repeating the company name. A link preview or quoted post can supply that information even when the post itself is a short reaction.',
       false:
-        'No substantive analysis or news about the intended business or its products and services. ' +
+        'No substantive analysis, news, or reasoned criticism about the intended business or its products and services. ' +
         'Detailed news or analysis about another meaning of the search term does not qualify. ' +
         'An ambiguous word alone is not evidence of a connection to the business. ' +
         'If multiple meanings occur, judge only the information about the intended business and its products. ' +
@@ -94,7 +97,7 @@ export function buildTopicQuestion(keyword) {
         '(such as "via Instagram"), follow-me requests, promotions of unrelated content, and casual personal ' +
         'updates do not count. Neither does using the platform to post a photo, share content, or contact someone. ' +
         'Analysis of unrelated content does not qualify just because the platform is credited. ' +
-        'Bare praise or complaints, fandom about a show, an official author alone, and a different meaning of the word do not count.',
+        'Praise or complaints that give no reason, fandom about a show, an official author alone, and a different meaning of the word do not count.',
     },
   };
 }
