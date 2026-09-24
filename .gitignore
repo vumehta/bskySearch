@@ -1,4 +1,6 @@
-.claude/
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
 .DS_Store
 .vercel
 .env
