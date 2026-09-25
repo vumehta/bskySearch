@@ -18,6 +18,7 @@ import {
   applySearchSortChange,
   applyTopicFilterChange,
   cancelDebouncedSearch,
+  debouncedMinLikesFilter,
   debouncedSearch,
   focusSearchInput,
   performSearch,
@@ -138,7 +139,7 @@ termsInput.addEventListener('input', () => {
   debouncedSearch();
 });
 
-minLikesInput.addEventListener('input', applyMinLikesFilter);
+minLikesInput.addEventListener('input', debouncedMinLikesFilter);
 
 expandTermsToggle.addEventListener('change', () => {
   updateSearchURL();

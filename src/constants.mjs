@@ -5,6 +5,7 @@ export const SEARCH_REQUEST_TIMEOUT_MS = SEARCH_JOB_TIMEOUT_MS + 2000;
 export const INITIAL_RENDER_LIMIT = 200;
 export const RENDER_STEP = 100;
 export const SEARCH_DEBOUNCE_MS = 300;
+export const MIN_LIKES_DEBOUNCE_MS = 300;
 export const INITIAL_MAX_PAGES = 2;
 export const SEARCH_CONCURRENCY = 4;
 export const SEARCH_CACHE_TTL_MS = 30000;

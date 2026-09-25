@@ -1,6 +1,7 @@
 import {
   INITIAL_MAX_PAGES,
   INITIAL_RENDER_LIMIT,
+  MIN_LIKES_DEBOUNCE_MS,
   RENDER_STEP,
   SEARCH_API,
   SEARCH_DEBOUNCE_MS,
@@ -42,7 +43,7 @@ import { getEmbedPreviews } from './post-data.mjs';
 import { createHighlightMatcher, getMatchedTermsForPost, getPostRenderFingerprint, ingestSearchPosts, nextSearchCursor, settleWithConcurrency, validateSearchPage } from './search-model.mjs';
 import { setQueryParam, updateURLWithParams } from './url.mjs';
 import { cancelThreadRequest, cancelThreadRequests, initializeThreadToggle, isReplyPost, toggleThread } from './thread.mjs';
-import { cancelTopicScoring, getTopicProgress, getTopicVerdict, requestTopicScores, resetTopicScoring } from './topic-filter.mjs';
+import { cancelTopicScoring, dropQueuedTopicScores, getTopicProgress, getTopicVerdict, requestTopicScores, resetTopicScoring } from './topic-filter.mjs';
 
 const DERIVE_THROTTLE_MS = 120;
 const SORT_LABELS = {
@@ -55,6 +56,7 @@ const ingestedPostsByUri = new Map();
 let activeSearchController = null;
 const searchSeenCursors = new Map();
 let deriveTimerId = null;
+let minLikesTimerId = null;
 
 let pendingRenderFrame = null;
 
@@ -717,6 +719,7 @@ function renderResults() {
 
 export async function performSearch() {
   cancelDebouncedSearch();
+  cancelDebouncedMinLikesFilter();
   cancelActiveSearch();
   const termsValue = termsInput.value.trim();
   state.rawSearchTerms = termsValue.split(',').map(normalizeTerm).filter(Boolean);
@@ -754,10 +757,26 @@ export async function loadMore() {
   await runSearchPages(terms, 1, createSearchContext(), { loadingMore: true });
 }
 
+function cancelDebouncedMinLikesFilter() {
+  if (minLikesTimerId) {
+    clearTimeout(minLikesTimerId);
+    minLikesTimerId = null;
+  }
+}
+
+export function debouncedMinLikesFilter() {
+  cancelDebouncedMinLikesFilter();
+  minLikesTimerId = setTimeout(() => {
+    minLikesTimerId = null;
+    applyMinLikesFilter();
+  }, MIN_LIKES_DEBOUNCE_MS);
+}
+
 export function applyMinLikesFilter() {
+  cancelDebouncedMinLikesFilter();
   const minLikes = Math.max(0, parseInt(minLikesInput.value, 10) || 0);
   if (state.hideOffTopic && minLikes > state.minLikes) {
-    cancelTopicScoring();
+    dropQueuedTopicScores();
   }
   state.minLikes = minLikes;
   updateSearchURL();
@@ -800,6 +819,7 @@ export function cancelDebouncedSearch() {
 
 export function clearSearchResults() {
   cancelDebouncedSearch();
+  cancelDebouncedMinLikesFilter();
   cancelActiveSearch();
   state.allPosts = [];
   state.currentCursors = Object.create(null);
