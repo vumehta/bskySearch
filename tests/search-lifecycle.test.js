@@ -578,17 +578,30 @@ describe('coalescing and cancellation', () => {
     expect(handlers.search.mock.calls[0][0].searchParams.get('q')).toBe('active');
   });
 
-  it('aborts abandoned authentication and can immediately start a fresh login', async () => {
-    const handlers = upstream({ create: () => new Promise(() => {}) });
-    const controller = new AbortController();
-    const cancelled = GET(request('cancelled', { signal: controller.signal }), context);
+  it.each([
+    ['the caller that started it', ['joiner', 'starter']],
+    ['a caller that joined it', ['starter', 'joiner']],
+  ])('finishes a login when %s leaves last, so the next search reuses it', async (_who, leaveOrder) => {
+    const auth = deferred();
+    const handlers = upstream({ create: () => ({ ok: true, status: 200, json: () => auth.promise }) });
+    const controllers = { starter: new AbortController(), joiner: new AbortController() };
+    const responses = {
+      starter: GET(request('started', { signal: controllers.starter.signal }), context),
+      joiner: GET(request('joined', { signal: controllers.joiner.signal }), context),
+    };
     await vi.waitFor(() => expect(handlers.create).toHaveBeenCalledTimes(1));
-    controller.abort();
-    expect((await cancelled).status).toBe(499);
-    expect(handlers.create.mock.calls[0][0].signal.aborted).toBe(true);
-    handlers.create.mockImplementation(() => Response.json(session()));
-    expect((await GET(request('replacement'), context)).status).toBe(200);
-    expect(handlers.create).toHaveBeenCalledTimes(2);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    for (const caller of leaveOrder) {
+      controllers[caller].abort();
+      expect((await responses[caller]).status).toBe(499);
+    }
+    expect(handlers.create.mock.calls[0][0].signal.aborted).toBe(false);
+    const replacement = GET(request('replacement'), context);
+    auth.resolve(session());
+    expect((await replacement).status).toBe(200);
+    expect(handlers.create).toHaveBeenCalledTimes(1);
+    expect(handlers.search).toHaveBeenCalledTimes(1);
+    expect(handlers.search.mock.calls[0][0].searchParams.get('q')).toBe('replacement');
   });
 });
 

@@ -117,7 +117,7 @@ function createSharedOperation(start, onSettled, timeoutMs) {
   return operation;
 }
 
-function subscribe(operation, signal) {
+function subscribe(operation, signal, { abortWhenIdle = true } = {}) {
   throwIfAborted(signal);
   operation.subscribers += 1;
   return new Promise((resolve, reject) => {
@@ -127,7 +127,7 @@ function subscribe(operation, signal) {
       finished = true;
       signal?.removeEventListener('abort', onAbort);
       operation.subscribers -= 1;
-      if (!operation.settled && operation.subscribers === 0) {
+      if (abortWhenIdle && !operation.settled && operation.subscribers === 0) {
         operation.controller.abort();
       }
       complete(value);
@@ -305,7 +305,7 @@ async function ensureSession(handle, appPassword, signal, rejectedAccessJwt = nu
     sessionCreatedAt = null;
   }
   if (sessionOperation && !sessionOperation.controller.signal.aborted) {
-    return subscribe(sessionOperation, signal);
+    return subscribe(sessionOperation, signal, { abortWhenIdle: false });
   }
   if (
     cachedSession &&
@@ -340,7 +340,7 @@ async function ensureSession(handle, appPassword, signal, rejectedAccessJwt = nu
       if (sessionOperation === operation) sessionOperation = null;
     },
   );
-  return subscribe(sessionOperation, signal);
+  return subscribe(sessionOperation, signal, { abortWhenIdle: false });
 }
 
 function getSearchCacheKey(term, cursor, sort, since = '') {
