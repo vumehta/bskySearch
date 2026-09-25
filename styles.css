@@ -240,7 +240,7 @@ input[type="url"] {
 input[type="text"]:focus-visible,
 input[type="number"]:focus-visible,
 input[type="url"]:focus-visible {
-    outline: none;
+    outline: 2px solid transparent;
     border-color: var(--accent);
     box-shadow: 0 0 0 2px var(--focus-ring);
 }
@@ -255,7 +255,7 @@ select {
 }
 
 select:focus-visible {
-    outline: none;
+    outline: 2px solid transparent;
     border-color: var(--accent);
     box-shadow: 0 0 0 2px var(--focus-ring);
 }
@@ -277,7 +277,7 @@ button:hover {
 }
 
 button:focus-visible {
-    outline: none;
+    outline: 2px solid transparent;
     box-shadow: 0 0 0 2px var(--focus-ring), 0 0 0 4px var(--accent);
 }
 
@@ -337,7 +337,7 @@ button[aria-disabled="true"]:hover {
 .post:focus-visible,
 .quote-post:focus-visible,
 .no-results:focus-visible {
-    outline: none;
+    outline: 2px solid transparent;
     box-shadow: 0 0 0 2px var(--focus-ring), 0 0 0 4px var(--accent);
 }
 
