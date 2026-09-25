@@ -345,13 +345,14 @@ async function runWithConcurrency(tasks, concurrency) {
   await Promise.all(Array.from({ length: Math.min(concurrency, tasks.length) }, worker));
 }
 
-async function classifyItems(items, options) {
-  const results = [];
+async function classifyItems(items, results, options) {
   const tasks = [];
-  for (const item of items) {
+  for (const [itemIndex, item] of items.entries()) {
+    const { scores } = results[itemIndex];
     const cacheKeys = await Promise.all(item.keywords.map((keyword) => getScoreCacheKey(keyword, item.context)));
-    const scores = cacheKeys.map(getCachedScore);
-    results.push({ id: item.id, scores });
+    cacheKeys.forEach((cacheKey, keywordIndex) => {
+      scores[keywordIndex] = getCachedScore(cacheKey);
+    });
     const missing = scores.flatMap((score, index) => (score === null ? [index] : []));
     if (missing.length === 0) continue;
     tasks.push(async () => {
@@ -365,20 +366,22 @@ async function classifyItems(items, options) {
     });
   }
   if (tasks.length > 0) {
+    throwIfAborted(options.signal);
     admitUpstreamCalls(tasks.length);
     await runWithConcurrency(tasks, UPSTREAM_CONCURRENCY);
   }
-  return results;
 }
+
+const DEADLINE_PASSED = Symbol('deadline passed');
 
 function withDeadline(start, signal, timeoutMs) {
   const controller = new AbortController();
   const cancel = () => controller.abort();
   signal?.addEventListener('abort', cancel, { once: true });
   let timer;
-  const deadline = new Promise((_, reject) => {
+  const deadline = new Promise((resolve) => {
     timer = setTimeout(() => {
-      reject(httpError('Topic check timed out.', 504));
+      resolve(DEADLINE_PASSED);
       controller.abort();
     }, timeoutMs);
   });
@@ -413,11 +416,17 @@ export async function POST(request, context) {
   try {
     const items = parseItems(await readJsonBody(request));
     throwIfAborted(request.signal);
-    const results = await withDeadline(
-      (signal, deadlineAt) => classifyItems(items, { apiKey, model: configuredModel || DEFAULT_MODEL, signal, deadlineAt }),
+    const results = items.map(({ id, keywords }) => ({ id, scores: keywords.map(() => null) }));
+    const outcome = await withDeadline(
+      (signal, deadlineAt) => classifyItems(items, results, { apiKey, model: configuredModel || DEFAULT_MODEL, signal, deadlineAt }),
       request.signal,
       TOPIC_JOB_TIMEOUT_MS,
     );
+    if (outcome === DEADLINE_PASSED) {
+      const scores = results.flatMap((result) => result.scores);
+      const scored = scores.filter((score) => score !== null).length;
+      console.warn(`Topic check reached its deadline with ${scored} of ${scores.length} scores.`);
+    }
     return jsonNoStore({ results }, 200);
   } catch (error) {
     if (error?.name === 'AbortError') {
