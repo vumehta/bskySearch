@@ -42,10 +42,11 @@ appear as scores arrive, whether or not hidden posts are revealed.
 
 A batch of up to 25 posts has 20 seconds on the server. When that runs out, the
 server returns the scores that finished and the remaining posts stay visible as
-unchecked. Changes to **Min. Likes** apply once typing pauses (or on Enter), and
-raising it lets checks already in flight finish while dropping queued checks for
-posts that no longer qualify. `vercel.json` enables request cancellation, so a
-batch the browser abandons stops calling TypeSafe.
+unchecked. Changes to **Min. Likes** apply once typing pauses (or on Enter, or
+when the topic filter is toggled). While a change is pending, queued checks are
+dropped and no new ones start; checks already in flight finish. Once the change
+applies, only posts that meet it are queued again. `vercel.json` enables request
+cancellation, so a batch the browser abandons stops calling TypeSafe.
 
 ## Evaluate a rubric change
 

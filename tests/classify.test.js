@@ -471,6 +471,30 @@ describe('upstream failures', () => {
 });
 
 describe('admission', () => {
+  it('charges nothing when the caller goes away before any call is made', async () => {
+    useFakeClock();
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+    upstream();
+    const fillCalls = CLASSIFY_ADMISSION_LIMITS.burst - TOPIC_LIMITS.maxItems;
+    for (let start = 0; start < fillCalls; start += TOPIC_LIMITS.maxItems) {
+      const items = Array.from({ length: TOPIC_LIMITS.maxItems }, (_, index) => item('fill' + (start + index)));
+      expect((await POST(request({ items }), context)).status).toBe(200);
+    }
+    globalThis.fetch.mockClear();
+    const controller = new AbortController();
+    const digest = crypto.subtle.digest.bind(crypto.subtle);
+    const spy = vi.spyOn(crypto.subtle, 'digest').mockImplementation((...args) => {
+      controller.abort();
+      return digest(...args);
+    });
+    const abandoned = Array.from({ length: TOPIC_LIMITS.maxItems }, (_, index) => item('gone' + index));
+    expect((await POST(request({ items: abandoned }, { signal: controller.signal }), context)).status).toBe(499);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    spy.mockRestore();
+    const next = Array.from({ length: TOPIC_LIMITS.maxItems }, (_, index) => item('next' + index));
+    expect((await POST(request({ items: next }), context)).status).toBe(200);
+  });
+
   it('charges every retry against admission, including concurrent retries', async () => {
     useFakeClock();
     vi.spyOn(Date, 'now').mockReturnValue(Date.now());

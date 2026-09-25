@@ -768,6 +768,7 @@ function cancelDebouncedMinLikesFilter() {
 
 export function debouncedMinLikesFilter() {
   cancelDebouncedMinLikesFilter();
+  if (state.hideOffTopic) dropQueuedTopicScores();
   minLikesTimerId = setTimeout(() => {
     minLikesTimerId = null;
     applyMinLikesFilter();

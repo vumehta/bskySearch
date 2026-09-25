@@ -334,6 +334,34 @@ describe('topic filter', () => {
     expect(visibleUris()).toHaveLength(51);
   });
 
+  it('asks again for every keyword of a dropped post once it qualifies again', async () => {
+    const posts = Array.from({ length: 100 }, (_, index) => makePost(`p${index}`, 'Apple and Meta news', 100 - index));
+    const pending = [deferred(), deferred()];
+    let attempt = 0;
+    const calls = installFetch({
+      posts,
+      classify: (body) => pending[attempt++]?.promise || scoredBy(() => 0.9)(body),
+    });
+    elements.terms.value = 'apple, meta';
+    state.hideOffTopic = true;
+    await search.performSearch();
+    expect(calls.classify).toHaveLength(2);
+    expect(calls.classify[0].body.items[0].keywords).toEqual(['apple', 'meta']);
+
+    elements.minLikes.value = '99';
+    search.applyMinLikesFilter();
+    pending.forEach((response, index) => response.resolve(scoredBy(() => 0.9)(calls.classify[index].body)));
+    await vi.waitFor(() => expect(summaryText()).toBe('No off-topic posts found.'));
+
+    elements.minLikes.value = '50';
+    search.applyMinLikesFilter();
+    await vi.waitFor(() => expect(summaryText()).toBe('No off-topic posts found.'));
+    expect(calls.classify).toHaveLength(3);
+    expect(calls.classify[2].body.items).toEqual([
+      expect.objectContaining({ id: uri('p50'), keywords: ['apple', 'meta'] }),
+    ]);
+  });
+
   it.each([
     [503, { error: 'The topic filter is not configured on this server.' }, 'The topic filter is not configured on this server.'],
     [429, { error: { code: '429', message: 'Too Many Requests' } }, 'Too many topic checks. Try again in a minute.'],

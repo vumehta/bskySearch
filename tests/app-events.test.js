@@ -214,6 +214,40 @@ describe('app search controls', () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
+  it('drops a pending minimum likes change when a new search starts', async () => {
+    await bootApp('?terms=apple');
+    const pending = deferred();
+    fetch.mockReturnValueOnce(pending.promise);
+    elements.terms.value = 'banana';
+    elements.minLikes.value = '5';
+    dispatch('minLikes', 'input');
+    dispatch('searchBtn', 'click');
+    await vi.advanceTimersByTimeAsync(0);
+    const loading = elements.results.textContent;
+    await vi.advanceTimersByTimeAsync(300);
+    expect(elements.results.textContent).toBe(loading);
+    expect(state.minLikes).toBe(5);
+    pending.resolve(Response.json({ posts: [makePost('banana')] }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(elements.results.querySelectorAll('.post')).toHaveLength(1);
+  });
+
+  it('keeps a pending term search scheduled when a minimum likes change applies', async () => {
+    await bootApp();
+    elements.minLikes.value = '60';
+    dispatch('minLikes', 'input');
+    await vi.advanceTimersByTimeAsync(100);
+    elements.terms.value = 'apple';
+    dispatch('terms', 'input');
+    await vi.advanceTimersByTimeAsync(200);
+    expect(state.minLikes).toBe(60);
+    expect(state.searchDebounceTimer).not.toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(state.searchDebounceTimer).toBeNull();
+  });
+
   it('keeps a pending term search scheduled when minimum likes changes', async () => {
     await bootApp();
     elements.terms.value = 'apple';
@@ -390,6 +424,29 @@ describe('topic filter control', () => {
     await vi.advanceTimersByTimeAsync(300);
     expect(classified.sort()).toEqual(['likes110', 'likes120']);
     expect(elements.results.querySelectorAll('.post')).toHaveLength(2);
+  });
+
+  it('sends no queued topic checks while a minimum likes change is pending', async () => {
+    const batches = [];
+    fetch.mockImplementation(async (url, options) => {
+      if (!String(url).startsWith('/api/classify')) {
+        return Response.json({ posts: Array.from({ length: 100 }, (_, index) => ({ ...makePost(`p${index}`), likeCount: 100 - index })) });
+      }
+      const response = deferred();
+      batches.push({ items: JSON.parse(options.body).items, response });
+      return response.promise;
+    });
+    await bootApp('?terms=apple&minLikes=0&topic=1');
+    await vi.advanceTimersByTimeAsync(300);
+    expect(batches).toHaveLength(2);
+
+    elements.minLikes.value = '90';
+    dispatch('minLikes', 'input');
+    const [first] = batches;
+    first.response.resolve(Response.json({ results: first.items.map((item) => ({ id: item.id, scores: [0.9] })) }));
+    await vi.advanceTimersByTimeAsync(300);
+    expect(batches).toHaveLength(2);
+    expect(elements.results.querySelectorAll('.post')).toHaveLength(11);
   });
 
   it('checks only the posts that meet the minimum likes the user settles on', async () => {
