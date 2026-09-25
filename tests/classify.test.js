@@ -523,44 +523,45 @@ describe('admission', () => {
     expect((await POST(request({ items: next }), context)).status).toBe(200);
   });
 
-  it('charges every retry against admission, including concurrent retries', async () => {
+  it('charges every admitted retry against admission, including concurrent retries', async () => {
     useFakeClock();
     vi.spyOn(Date, 'now').mockReturnValue(Date.now());
     upstream();
     const retryingPosts = 4;
-    await fillAdmission(CLASSIFY_ADMISSION_LIMITS.burst - retryingPosts);
+    const admittedRetries = 2;
+    await fillAdmission(CLASSIFY_ADMISSION_LIMITS.burst - retryingPosts - admittedRetries);
     globalThis.fetch.mockImplementation(async () => Response.json({ error: 'overloaded' }, { status: 529 }));
-    const response = await advanceUntilSettled(POST(request({
-      items: Array.from({ length: retryingPosts }, (_, index) => item('retry' + index)),
-    }), context));
-    expect(response.status).toBe(429);
-    expect(Number(response.headers.get('Retry-After'))).toBeGreaterThan(0);
+    const retrying = Array.from({ length: retryingPosts }, (_, index) => item('retry' + index));
+    const response = await advanceUntilSettled(POST(request({ items: retrying }), context));
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ results: retrying.map(({ id }) => ({ id, scores: [null] })) });
     expect(globalThis.fetch).toHaveBeenCalledTimes(CLASSIFY_ADMISSION_LIMITS.burst);
     expect(vi.getTimerCount()).toBe(0);
+    expect((await POST(request({ items: [item('fresh')] }), context)).status).toBe(429);
     expect((await POST(request({ items: [item('fill0')] }), context)).status).toBe(200);
     expect(globalThis.fetch).toHaveBeenCalledTimes(CLASSIFY_ADMISSION_LIMITS.burst);
   });
 
-  it('cancels in-flight calls when a retry exhausts admission', async () => {
+  it('leaves only the post whose retry is refused unscored and keeps the rest of the batch', async () => {
     useFakeClock();
     vi.spyOn(Date, 'now').mockReturnValue(Date.now());
     upstream();
-    const initialCalls = CLASSIFY_ADMISSION_LIMITS.burst - 2;
-    await fillAdmission(initialCalls);
-    let upstreamSignal;
-    globalThis.fetch.mockClear().mockImplementation((_url, options) => {
+    await fillAdmission(CLASSIFY_ADMISSION_LIMITS.burst - 2);
+    globalThis.fetch.mockClear().mockImplementation(async (_url, options) => {
       if (JSON.parse(options.body).state.post_text === 'post retry') {
-        return Promise.resolve(Response.json({ error: 'overloaded' }, { status: 529 }));
+        return Response.json({ error: 'overloaded' }, { status: 529 });
       }
-      upstreamSignal = options.signal;
-      return new Promise(() => {});
+      return Response.json({ answers: { k0: { type: 'noul', noul: 0.8 } } });
     });
-    const response = await advanceUntilSettled(POST(request({ items: [item('stalled'), item('retry')] }), context));
-    expect(response.status).toBe(429);
-    expect(upstreamSignal.aborted).toBe(true);
-    await realPause();
+    const response = await advanceUntilSettled(POST(request({ items: [item('good'), item('retry')] }), context));
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      results: [{ id: 'good', scores: [0.8] }, { id: 'retry', scores: [null] }],
+    });
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
     expect(vi.getTimerCount()).toBe(0);
-    expect(globalThis.fetch).toHaveBeenCalledTimes(CLASSIFY_ADMISSION_LIMITS.burst - initialCalls);
+    expect((await POST(request({ items: [item('good')] }), context)).status).toBe(200);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
   });
 
   it('limits upstream calls, not cache hits, and refills over time', async () => {
@@ -613,17 +614,22 @@ describe('admission', () => {
     vi.spyOn(Date, 'now').mockReturnValue(Date.now());
     upstream();
     const retryingPosts = 4;
-    const fill = CLASSIFY_CLIENT_ADMISSION_LIMITS.burst - retryingPosts;
+    const admittedRetries = 2;
+    const fill = CLASSIFY_CLIENT_ADMISSION_LIMITS.burst - retryingPosts - admittedRetries;
     for (let start = 0; start < fill; start += TOPIC_LIMITS.maxItems) {
       const items = Array.from({ length: Math.min(TOPIC_LIMITS.maxItems, fill - start) }, (_, index) => item(`share${start + index}`));
       expect((await POST(request({ items }, { client: '203.0.113.20' }), context)).status).toBe(200);
     }
-    globalThis.fetch.mockImplementation(async () => Response.json({ error: 'overloaded' }, { status: 529 }));
+    globalThis.fetch.mockClear().mockImplementation(async () => Response.json({ error: 'overloaded' }, { status: 529 }));
     const response = await advanceUntilSettled(POST(request({
       items: Array.from({ length: retryingPosts }, (_, index) => item(`share-retry${index}`)),
     }, { client: '203.0.113.20' }), context));
-    expect(response.status).toBe(429);
+    expect(response.status).toBe(200);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(retryingPosts + admittedRetries);
     expect(vi.getTimerCount()).toBe(0);
+    upstream();
+    expect((await POST(request({ items: [item('share-next')] }, { client: '203.0.113.20' }), context)).status).toBe(429);
+    expect((await POST(request({ items: [item('share-next')] }, { client: '198.51.100.4' }), context)).status).toBe(200);
   });
 
   it('identifies a client by X-Real-IP, then by the first X-Forwarded-For address', async () => {

@@ -217,12 +217,9 @@ function admitUpstreamCalls(calls, client) {
       retryAfter = Math.max(retryAfter, Math.ceil((calls - bucket.tokens) / limits.refillPerSecond));
     }
   }
-  if (retryAfter > 0) {
-    throw httpError('Too many topic checks. Please try again shortly.', 429, {
-      'Retry-After': String(retryAfter),
-    });
-  }
+  if (retryAfter > 0) return retryAfter;
   for (const [bucket] of limited) bucket.tokens -= calls;
+  return 0;
 }
 
 function getClientKey(request) {
@@ -342,7 +339,7 @@ async function scoreItem(keywords, context, { apiKey, model, signal, deadlineAt,
       await abortableDelay(retryDelayMs, signal);
     }
     throwIfAborted(signal);
-    if (attempt > 0) admitUpstreamCalls(1, client);
+    if (attempt > 0 && admitUpstreamCalls(1, client) > 0) return unscored;
     let result;
     try {
       result = await postToTypeSafe(body, apiKey, signal);
@@ -414,7 +411,12 @@ async function classifyItems(items, results, options) {
   }
   if (tasks.length > 0) {
     throwIfAborted(options.signal);
-    admitUpstreamCalls(tasks.length, options.client);
+    const retryAfter = admitUpstreamCalls(tasks.length, options.client);
+    if (retryAfter > 0) {
+      throw httpError('Too many topic checks. Please try again shortly.', 429, {
+        'Retry-After': String(retryAfter),
+      });
+    }
     await runWithConcurrency(tasks, UPSTREAM_CONCURRENCY);
   }
 }

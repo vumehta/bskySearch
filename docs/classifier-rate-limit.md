@@ -36,10 +36,11 @@ TypeSafe calls itself, per instance: a 600-call burst refilling at five calls pe
 second, of which each client IP may use at most half (a 300-call burst refilling
 at 2.5 per second). One visitor therefore cannot use up an instance's allowance;
 a very large search from one visitor slows down instead. Both limits charge
-retries. The handler accepts only same-origin browser requests: `Sec-Fetch-Site:
-same-origin`, or a matching `Origin` from browsers that do not send
-`Sec-Fetch-Site`. That stops cross-site pages and casual scripts, not a caller
-who forges the headers. Keep TypeSafe automatic recharge off when using a
+retries; a retry they refuse leaves only that post unchecked, and the rest of
+its batch still returns its scores. The handler accepts only same-origin
+browser requests: `Sec-Fetch-Site: same-origin`, or a matching `Origin` from
+browsers that do not send `Sec-Fetch-Site`. That stops cross-site pages and
+casual scripts, not a caller who forges the headers. Keep TypeSafe automatic recharge off when using a
 prepaid credit budget; throttling cannot guarantee that existing credits will
 last.
 
