@@ -621,6 +621,8 @@ describe('admission', () => {
     await expect(response.json()).resolves.toEqual({
       results: [{ id: 'good', scores: [0.8] }, { id: 'retry', scores: [null] }],
     });
+    expect(console.warn).toHaveBeenCalledTimes(1);
+    expect(console.warn).toHaveBeenCalledWith('Topic classifier retry was refused by admission.');
     expect(globalThis.fetch).toHaveBeenCalledTimes(2);
     expect(vi.getTimerCount()).toBe(0);
     expect((await POST(request({ items: [item('good')] }), context)).status).toBe(200);

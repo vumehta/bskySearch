@@ -339,7 +339,10 @@ async function scoreItem(keywords, context, { apiKey, model, signal, deadlineAt,
       await abortableDelay(retryDelayMs, signal);
     }
     throwIfAborted(signal);
-    if (attempt > 0 && admitUpstreamCalls(1, client) > 0) return unscored;
+    if (attempt > 0 && admitUpstreamCalls(1, client) > 0) {
+      console.warn('Topic classifier retry was refused by admission.');
+      return unscored;
+    }
     let result;
     try {
       result = await postToTypeSafe(body, apiKey, signal);
