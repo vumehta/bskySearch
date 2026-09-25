@@ -620,6 +620,28 @@ describe('Bluesky search rate limits', () => {
     await expect(blocked.json()).resolves.toEqual(rateLimited);
     expect(handlers.search).toHaveBeenCalledTimes(1);
   });
+
+  it('does not charge a client for searches refused while search is rate limited', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(limitedAt);
+    const handlers = upstream({
+      search: () => Response.json({ error: 'RateLimitExceeded' }, { status: 429, headers: { 'Retry-After': '10' } }),
+    });
+    const client = { headers: { 'X-Real-IP': '203.0.113.10' } };
+    expect((await GET(request('limited', client), context)).status).toBe(429);
+    for (let index = 0; index <= SEARCH_CLIENT_ADMISSION_LIMITS.burst; index += 1) {
+      const blocked = await GET(request(`blocked-${index}`, client), context);
+      expect(blocked.status).toBe(429);
+      await expect(blocked.json()).resolves.toEqual(rateLimited);
+    }
+    expect(handlers.search).toHaveBeenCalledTimes(1);
+    vi.setSystemTime(limitedAt + 10_000);
+    handlers.search.mockImplementation(() => Response.json(posts));
+    for (let index = 0; index < SEARCH_CLIENT_ADMISSION_LIMITS.burst; index += 1) {
+      expect((await GET(request(`after-${index}`, client), context)).status).toBe(200);
+    }
+    expect(handlers.search).toHaveBeenCalledTimes(SEARCH_CLIENT_ADMISSION_LIMITS.burst + 1);
+  });
 });
 
 describe('coalescing and cancellation', () => {
@@ -807,6 +829,21 @@ describe('bounded search admission', () => {
     expect((await GET(request('greedy-more', greedy), context)).status).toBe(200);
   });
 
+  it('does not let a client over its share use up the instance budget', async () => {
+    vi.useFakeTimers();
+    const handlers = upstream();
+    const greedy = { headers: { 'X-Real-IP': '203.0.113.7' } };
+    for (let index = 0; index < SEARCH_ADMISSION_LIMITS.burst; index += 1) {
+      const response = await GET(request(`greedy-${index}`, greedy), context);
+      expect(response.status).toBe(index < SEARCH_CLIENT_ADMISSION_LIMITS.burst ? 200 : 429);
+    }
+    const other = { headers: { 'X-Real-IP': '198.51.100.4' } };
+    for (let index = 0; index < SEARCH_CLIENT_ADMISSION_LIMITS.burst; index += 1) {
+      expect((await GET(request(`other-${index}`, other), context)).status).toBe(200);
+    }
+    expect(handlers.search).toHaveBeenCalledTimes(2 * SEARCH_CLIENT_ADMISSION_LIMITS.burst);
+  });
+
   it('lets a client whose share is used up join a pending identical search', async () => {
     vi.useFakeTimers();
     const body = deferred();
@@ -838,16 +875,22 @@ describe('bounded search admission', () => {
     expect((await GET(request('after', { headers: { 'X-Forwarded-For': '10.0.0.1, 203.0.113.9' } }), context)).status).toBe(200);
   });
 
-  it('remembers a bounded number of clients', async () => {
+  it('remembers a bounded number of clients, forgetting the least recently seen first', async () => {
     vi.useFakeTimers();
     upstream();
-    for (let index = 0; index <= MAX_ADMISSION_CLIENTS; index += 1) {
+    const clients = [
+      ...Array.from({ length: MAX_ADMISSION_CLIENTS }, (_, index) => `client-${index}`),
+      'client-0',
+      `client-${MAX_ADMISSION_CLIENTS}`,
+    ];
+    for (const [index, client] of clients.entries()) {
       vi.setSystemTime(Date.now() + 1000 / SEARCH_ADMISSION_LIMITS.refillPerSecond);
-      const response = await GET(request(`visitor-${index}`, { headers: { 'X-Real-IP': `client-${index}` } }), context);
+      const response = await GET(request(`visitor-${index}`, { headers: { 'X-Real-IP': client } }), context);
       expect(response.status).toBe(200);
     }
     expect(clientAdmissions.size).toBe(MAX_ADMISSION_CLIENTS);
-    expect(clientAdmissions.has('client-0')).toBe(false);
+    expect(clientAdmissions.has('client-0')).toBe(true);
+    expect(clientAdmissions.has('client-1')).toBe(false);
     expect(clientAdmissions.has(`client-${MAX_ADMISSION_CLIENTS}`)).toBe(true);
   });
 });
@@ -918,7 +961,7 @@ describe('handler input boundaries', () => {
     expect(params.get('q')).toBe('a'.repeat(500));
     expect(params.get('cursor')).toBe('b'.repeat(1000));
     expect(params.get('sort')).toBe('latest');
-    expect(params.get('lang')).toBe('en');
+    expect(params.getAll('lang')).toEqual(['en']);
     expect(params.get('limit')).toBe('100');
     expect(params.has('since')).toBe(false);
   });
