@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 
 const did = 'did:plc:browserfixture';
 const browserErrors = new WeakMap();
+const pixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
 
 function post(id, text, author = { did, handle: 'alice.bsky.social', displayName: 'Alice' }) {
   const createdAt = new Date().toISOString();
@@ -138,4 +139,20 @@ test('choosing Light or Dark overrides the system preference', async ({ page }) 
   await expect(body).toHaveCSS('background-color', 'rgb(10, 10, 10)');
   await theme.selectOption('system');
   await expect(body).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+});
+
+test('the image CDN preconnect matches the no-cors image loads it is for', async ({ page }) => {
+  const avatar = 'https://cdn.bsky.app/img/avatar/plain/did:plc:browserfixture/avatar@jpeg';
+  await page.route('https://cdn.bsky.app/**', (route) => route.fulfill({ body: pixel, contentType: 'image/png' }));
+  await page.route('**/api/search?**', (route) => route.fulfill({
+    json: { posts: [post('avatar', 'apple avatar', { did, handle: 'alice.bsky.social', avatar })] },
+  }));
+  await page.goto('/');
+  await expect(page.locator('link[rel="preconnect"][href="https://public.api.bsky.app"]')).toHaveAttribute('crossorigin', '');
+  await expect(page.locator('link[rel="preconnect"][href="https://cdn.bsky.app"]')).not.toHaveAttribute('crossorigin');
+
+  await searchFor(page, 'apple');
+  const image = page.locator('#results img.avatar');
+  await expect(image).toHaveAttribute('src', avatar);
+  await expect(image).not.toHaveAttribute('crossorigin');
 });
