@@ -341,6 +341,57 @@ describe('topic filter control', () => {
     expect(window.location.search).not.toContain('topic=');
   });
 
+  function serveLikes(pages, classified) {
+    fetch.mockImplementation(async (url, options) => {
+      if (!String(url).startsWith('/api/classify')) {
+        const cursor = new URL(url, window.location).searchParams.get('cursor') || '';
+        const { likes, next } = pages[cursor];
+        return Response.json({ posts: likes.map((likeCount) => ({ ...makePost(`likes${likeCount}`), likeCount })), cursor: next });
+      }
+      const { items } = JSON.parse(options.body);
+      classified.push(...items.map((item) => item.id.split('/').pop()));
+      return Response.json({ results: items.map((item) => ({ id: item.id, scores: item.keywords.map(() => 0.9) })) });
+    });
+  }
+
+  it('applies a pending minimum likes change before turning the topic filter on', async () => {
+    const classified = [];
+    serveLikes({ '': { likes: [10, 60, 120] } }, classified);
+    await bootApp('?terms=apple&minLikes=0');
+    await vi.advanceTimersByTimeAsync(300);
+
+    elements.minLikes.value = '100';
+    dispatch('minLikes', 'input');
+    elements.topicFilterToggle.checked = true;
+    dispatch('topicFilterToggle', 'change');
+    expect(state.minLikes).toBe(100);
+    expect(classified).toEqual(['likes120']);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(classified).toEqual(['likes120']);
+    expect(elements.results.querySelectorAll('.post')).toHaveLength(1);
+  });
+
+  it('starts no topic checks for newly loaded posts while a minimum likes change is pending', async () => {
+    const classified = [];
+    serveLikes({
+      '': { likes: [120], next: 'c1' },
+      c1: { likes: [110], next: 'c2' },
+      c2: { likes: [10, 20] },
+    }, classified);
+    await bootApp('?terms=apple&minLikes=0&topic=1');
+    await vi.advanceTimersByTimeAsync(300);
+    expect(classified.sort()).toEqual(['likes110', 'likes120']);
+
+    elements.minLikes.value = '100';
+    dispatch('minLikes', 'input');
+    await search.loadMore();
+    expect(state.allPosts.map((post) => post.uri.split('/').pop())).toContain('likes10');
+    expect(classified.sort()).toEqual(['likes110', 'likes120']);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(classified.sort()).toEqual(['likes110', 'likes120']);
+    expect(elements.results.querySelectorAll('.post')).toHaveLength(2);
+  });
+
   it('checks only the posts that meet the minimum likes the user settles on', async () => {
     const classified = [];
     fetch.mockImplementation(async (url, options) => {

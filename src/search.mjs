@@ -272,9 +272,11 @@ function applyTopicFilter(posts) {
     if (state.showOffTopic) kept.push({ ...post, topicMatch: { offTopic: true, score } });
   }
   const generation = state.searchGeneration;
-  requestTopicScores(posts, () => {
-    if (isCurrentSearchGeneration(generation)) scheduleDerivedPostsRebuild();
-  });
+  if (!minLikesTimerId) {
+    requestTopicScores(posts, () => {
+      if (isCurrentSearchGeneration(generation)) scheduleDerivedPostsRebuild();
+    });
+  }
   topicSummary = { checked: posts.length, hidden, ...getTopicProgress(posts) };
   return kept;
 }
@@ -772,13 +774,17 @@ export function debouncedMinLikesFilter() {
   }, MIN_LIKES_DEBOUNCE_MS);
 }
 
-export function applyMinLikesFilter() {
+function syncMinLikes() {
   cancelDebouncedMinLikesFilter();
   const minLikes = Math.max(0, parseInt(minLikesInput.value, 10) || 0);
   if (state.hideOffTopic && minLikes > state.minLikes) {
     dropQueuedTopicScores();
   }
   state.minLikes = minLikes;
+}
+
+export function applyMinLikesFilter() {
+  syncMinLikes();
   updateSearchURL();
   if (!state.searchTerms.length) return;
   flushDerivedPostsRebuild();
@@ -786,6 +792,7 @@ export function applyMinLikesFilter() {
 }
 
 export function applyTopicFilterChange(enabled) {
+  syncMinLikes();
   state.hideOffTopic = Boolean(enabled);
   state.showOffTopic = false;
   resetTopicScoring();
