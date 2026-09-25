@@ -263,7 +263,7 @@ function applyTopicFilter(posts) {
   for (const post of posts) {
     const { verdict, score, keptFor } = getTopicVerdict(post);
     if (verdict !== 'off') {
-      kept.push(score !== null || keptFor ? { ...post, topicMatch: { offTopic: false, score, keptFor } } : post);
+      kept.push(score !== null ? { ...post, topicMatch: { offTopic: false, score, keptFor } } : post);
       continue;
     }
     hidden += 1;
@@ -350,9 +350,9 @@ function syncTopicMatch(postElement, topicMatch) {
     termsDiv.appendChild(tag);
   }
   tag.className = offTopic ? 'term-tag off-topic-tag' : 'term-tag topic-score-tag';
-  const match = topicMatch.score === null ? '' : `${Math.round(topicMatch.score * 100)}% match`;
+  const match = `${Math.round(topicMatch.score * 100)}% match`;
   const label = offTopic ? 'Off-topic' : topicMatch.keptFor;
-  tag.textContent = [label, match].filter(Boolean).join(' \xB7 ');
+  tag.textContent = label ? `${label} \xB7 ${match}` : match;
 }
 
 function createPostElement(post) {
