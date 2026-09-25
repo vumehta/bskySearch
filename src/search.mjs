@@ -487,10 +487,10 @@ function createPostElement(post, { imagesShown = false } = {}) {
       toggle.textContent = `${shown ? 'Hide' : 'Show'} ${noun}`;
     };
     toggle.addEventListener('click', () => showImages(toggle.getAttribute('aria-expanded') !== 'true'));
-    showImages(imagesShown);
 
     placeholder.appendChild(toggle);
     imagesContainer.appendChild(placeholder);
+    showImages(imagesShown);
     postDiv.appendChild(imagesContainer);
   }
 

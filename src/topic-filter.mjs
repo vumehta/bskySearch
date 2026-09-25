@@ -134,7 +134,8 @@ async function runBatch(batch) {
     error = caught;
   }
   if (batchOwner !== owner) return;
-  if (error instanceof HttpError && error.status === 429 && (batch.rateLimited ?? 0) < MAX_RATE_LIMITED_ATTEMPTS) {
+  const canRetry = !unavailableReason && (batch.rateLimited ?? 0) < MAX_RATE_LIMITED_ATTEMPTS;
+  if (error instanceof HttpError && error.status === 429 && canRetry) {
     batch.rateLimited = (batch.rateLimited ?? 0) + 1;
     queue.unshift(batch);
     pauseForRateLimit(getRateLimitWaitMs(error.retryAfter), onUpdate);

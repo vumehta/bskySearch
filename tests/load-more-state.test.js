@@ -470,6 +470,8 @@ describe('search pagination and lifecycle', () => {
     expect(threadButton.getAttribute('aria-expanded')).toBe('true');
     expect(threadButton.getAttribute('aria-controls')).toBe(context.id);
     expect(updated.querySelector('.image-toggle').getAttribute('aria-expanded')).toBe('true');
+    expect(updated.querySelector('.post-images-container').children.map((child) => child.className))
+      .toEqual(['image-placeholder revealed', 'post-images single']);
     expect(updated.querySelectorAll('.post-image').map((image) => image.src)).toEqual(['https://cdn.bsky.app/kept.jpg']);
     expect(testDocument.activeElement).toBe(updated.querySelectorAll('a.thread-link')[0]);
 

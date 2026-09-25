@@ -434,6 +434,41 @@ describe('topic filter', () => {
     expect(summaryText()).toBe('No off-topic posts found.');
   });
 
+  it('stops a batch still in flight from retrying once repeated rate limits have turned the filter off', async () => {
+    vi.useFakeTimers();
+    const pages = {
+      '': { posts: Array.from({ length: 25 }, (_, index) => makePost(`first${index}`, 'Apple news', 90)), cursor: 'c1' },
+      c1: { posts: [], cursor: 'c2' },
+      c2: { posts: Array.from({ length: 25 }, (_, index) => makePost(`late${index}`, 'Apple news', 80)) },
+    };
+    const late = deferred();
+    const classified = [];
+    globalThis.fetch = vi.fn(async (url, options = {}) => {
+      if (String(url).startsWith('/api/classify')) {
+        const [{ id }] = JSON.parse(options.body).items;
+        classified.push(id);
+        return id === uri('first0') ? rateLimited() : late.promise;
+      }
+      return ok(pages[new URL(url, 'https://example.test').searchParams.get('cursor') || '']);
+    });
+    state.hideOffTopic = true;
+    await search.performSearch();
+    await vi.advanceTimersByTimeAsync(4 * 60000 + 500);
+    expect(classified).toEqual(Array(5).fill(uri('first0')));
+
+    await search.loadMore();
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(classified.slice(5)).toEqual([uri('first0'), uri('late0')]);
+    expect(summaryText()).toContain('Topic filter unavailable');
+
+    late.resolve(rateLimited());
+    await vi.advanceTimersByTimeAsync(3 * 60000);
+    expect(classified).toHaveLength(7);
+    expect(summaryText()).toBe(
+      'Topic filter unavailable: Too many topic checks. Try again in a minute. Unchecked posts stay visible.',
+    );
+  });
+
   it('turns the filter off after repeated rate limits and keeps unchecked posts visible', async () => {
     vi.useFakeTimers();
     const calls = installFetch({
