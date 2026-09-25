@@ -20,6 +20,7 @@ let activeRequests = 0;
 let owner = null;
 let unavailableReason = '';
 let resumeTimer = null;
+let resumeAt = 0;
 
 const BATCH_ONLY_STATUSES = new Set([400, 413, 504]);
 const RATE_LIMIT_DEFAULT_WAIT_MS = 60000;
@@ -109,7 +110,10 @@ function getRateLimitWaitMs(retryAfter) {
 }
 
 function pauseForRateLimit(waitMs, onUpdate) {
-  if (resumeTimer !== null) return;
+  const until = Date.now() + waitMs;
+  if (resumeTimer !== null && until <= resumeAt) return;
+  clearTimeout(resumeTimer);
+  resumeAt = until;
   resumeTimer = setTimeout(() => {
     resumeTimer = null;
     pump();

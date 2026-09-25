@@ -415,6 +415,31 @@ describe('topic filter', () => {
     expect(summaryText()).toBe('1 off-topic post hidden.');
   });
 
+  it('waits for the longest Retry-After when concurrent batches are rate limited', async () => {
+    vi.useFakeTimers();
+    const posts = Array.from({ length: 50 }, (_, index) => makePost(`p${index}`, 'Apple news', 100 - index));
+    let round = 0;
+    const calls = installFetch({
+      posts,
+      classify: (body) => {
+        round += 1;
+        if (round === 1) return rateLimited('2');
+        if (round === 2) return new Promise((resolve) => setTimeout(() => resolve(rateLimited('10')), 500));
+        return scoredBy(() => 0.9)(body);
+      },
+    });
+    state.hideOffTopic = true;
+    await search.performSearch();
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(calls.classify).toHaveLength(2);
+    expect(summaryText()).toContain('Pausing briefly');
+
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(calls.classify).toHaveLength(4);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(summaryText()).toBe('No off-topic posts found.');
+  });
+
   it('starts a new search without waiting out the last search\'s rate limit', async () => {
     vi.useFakeTimers();
     let limited = true;
