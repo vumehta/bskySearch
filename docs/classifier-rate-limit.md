@@ -40,9 +40,9 @@ retries; a retry they refuse leaves only that post unchecked, and the rest of
 its batch still returns its scores. The handler accepts only same-origin
 browser requests: `Sec-Fetch-Site: same-origin`, or a matching `Origin` from
 browsers that do not send `Sec-Fetch-Site`. That stops cross-site pages and
-casual scripts, not a caller who forges the headers. Keep TypeSafe automatic recharge off when using a
-prepaid credit budget; throttling cannot guarantee that existing credits will
-last.
+casual scripts, not a caller who forges the headers. Keep TypeSafe automatic
+recharge off when using a prepaid credit budget; throttling cannot guarantee
+that existing credits will last.
 
 Validate enforcement with a bounded burst of invalid `POST` bodies (`{}`),
 which cannot invoke TypeSafe, then confirm excess requests get 429 while the
