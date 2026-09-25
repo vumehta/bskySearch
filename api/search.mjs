@@ -14,6 +14,13 @@ export const SEARCH_ADMISSION_LIMITS = Object.freeze({
   refillPerSecond: 1,
 });
 
+export const SEARCH_CLIENT_ADMISSION_LIMITS = Object.freeze({
+  burst: 30,
+  refillPerSecond: 0.5,
+});
+
+const MAX_ADMISSION_CLIENTS = 1000;
+
 function proxyError(message, status, headers = {}) {
   const error = new Error(message);
   error.status = status;
@@ -157,8 +164,8 @@ const MAX_SEARCH_CACHE_SIZE = 500;
 const searchResultsCache = new Map();
 let lastSearchCacheCleanupAt = 0;
 const pendingSearches = new Map();
-let admissionTokens = SEARCH_ADMISSION_LIMITS.burst;
-let admissionUpdatedAt = null;
+const instanceAdmission = { tokens: SEARCH_ADMISSION_LIMITS.burst, updatedAt: null };
+const clientAdmissions = new Map();
 
 function getRuntimeEnv(context) {
   if (context && typeof context === 'object' && 'env' in context) {
@@ -394,8 +401,9 @@ function resetModuleStateForTests() {
   searchResultsCache.clear();
   pendingSearches.clear();
   lastSearchCacheCleanupAt = 0;
-  admissionTokens = SEARCH_ADMISSION_LIMITS.burst;
-  admissionUpdatedAt = null;
+  instanceAdmission.tokens = SEARCH_ADMISSION_LIMITS.burst;
+  instanceAdmission.updatedAt = null;
+  clientAdmissions.clear();
 }
 
 async function searchPosts({ term, cursor, sort, since }, accessJwt, signal) {
@@ -442,26 +450,54 @@ function isValidSearchResult(payload) {
   );
 }
 
-function admitSearch() {
-  const now = Date.now();
-  if (admissionUpdatedAt !== null) {
-    admissionTokens = Math.min(
-      SEARCH_ADMISSION_LIMITS.burst,
-      admissionTokens +
-        (Math.max(0, now - admissionUpdatedAt) / 1000) * SEARCH_ADMISSION_LIMITS.refillPerSecond,
+function refillAdmission(bucket, limits, now) {
+  if (bucket.updatedAt !== null) {
+    bucket.tokens = Math.min(
+      limits.burst,
+      bucket.tokens + (Math.max(0, now - bucket.updatedAt) / 1000) * limits.refillPerSecond,
     );
   }
-  admissionUpdatedAt = Math.max(admissionUpdatedAt ?? now, now);
+  bucket.updatedAt = Math.max(bucket.updatedAt ?? now, now);
+}
+
+function getClientAdmission(client) {
+  const bucket = clientAdmissions.get(client) || { tokens: SEARCH_CLIENT_ADMISSION_LIMITS.burst, updatedAt: null };
+  clientAdmissions.delete(client);
+  clientAdmissions.set(client, bucket);
+  while (clientAdmissions.size > MAX_ADMISSION_CLIENTS) {
+    clientAdmissions.delete(clientAdmissions.keys().next().value);
+  }
+  return bucket;
+}
+
+function admitSearch(client) {
   if (pendingSearches.size >= SEARCH_ADMISSION_LIMITS.maxConcurrent) {
     throw proxyError('Search is busy. Please try again shortly.', 429, { 'Retry-After': '1' });
   }
-  if (admissionTokens < 1) {
-    const retryAfter = Math.ceil((1 - admissionTokens) / SEARCH_ADMISSION_LIMITS.refillPerSecond);
+  const now = Date.now();
+  const limited = [
+    [instanceAdmission, SEARCH_ADMISSION_LIMITS],
+    [getClientAdmission(client), SEARCH_CLIENT_ADMISSION_LIMITS],
+  ];
+  let retryAfter = 0;
+  for (const [bucket, limits] of limited) {
+    refillAdmission(bucket, limits, now);
+    if (bucket.tokens < 1) {
+      retryAfter = Math.max(retryAfter, Math.ceil((1 - bucket.tokens) / limits.refillPerSecond));
+    }
+  }
+  if (retryAfter > 0) {
     throw proxyError('Too many searches. Please try again shortly.', 429, {
       'Retry-After': String(retryAfter),
     });
   }
-  admissionTokens -= 1;
+  for (const [bucket] of limited) bucket.tokens -= 1;
+}
+
+function getClientKey(request) {
+  const realIp = request.headers.get('x-real-ip')?.trim();
+  const forwardedIp = request.headers.get('x-forwarded-for')?.split(',')[0].trim();
+  return realIp || forwardedIp || 'unknown';
 }
 
 async function runSearch(input, handle, appPassword, signal) {
@@ -552,7 +588,7 @@ export async function GET(request, context) {
     if (!operation) {
       const blockedMs = searchBlockedUntil - Date.now();
       if (blockedMs > 0) throw searchRateLimitError(blockedMs);
-      admitSearch();
+      admitSearch(getClientKey(request));
       operation = createSharedOperation(
         async (signal) => {
           const payload = await runSearch(input, handle, appPassword, signal);
@@ -602,6 +638,8 @@ export const testUtils =
         SESSION_TTL_MS,
         AUTH_RETRY_DEFAULT_MS,
         AUTH_RETRY_MAX_MS,
+        MAX_ADMISSION_CLIENTS,
+        clientAdmissions,
         resetModuleStateForTests,
       }
     : undefined;

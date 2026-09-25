@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { GET, SEARCH_ADMISSION_LIMITS, testUtils } from '../api/search.mjs';
+import { GET, SEARCH_ADMISSION_LIMITS, SEARCH_CLIENT_ADMISSION_LIMITS, testUtils } from '../api/search.mjs';
 
 const context = { env: { BSKY_HANDLE: 'test-handle', BSKY_APP_PASSWORD: 'test-password' } };
 const {
@@ -8,6 +8,8 @@ const {
   SESSION_TTL_MS,
   AUTH_RETRY_DEFAULT_MS,
   AUTH_RETRY_MAX_MS,
+  MAX_ADMISSION_CLIENTS,
+  clientAdmissions,
   searchResultsCache,
 } = testUtils;
 const originalFetch = globalThis.fetch;
@@ -704,14 +706,15 @@ describe('bounded search admission', () => {
     expect((await GET(request('overflow'), context)).status).toBe(200);
   });
 
-  it('limits new work across changing IP headers, preserves cache hits, and refills', async () => {
+  it('keeps the instance cap when every search claims a new client address, serves cache hits, and refills', async () => {
     vi.useFakeTimers();
     const handlers = upstream();
     for (let index = 0; index < SEARCH_ADMISSION_LIMITS.burst; index += 1) {
-      const response = await GET(request(`topic-${index}`, { headers: { 'X-Forwarded-For': `192.0.2.${index}` } }), context);
+      const header = index % 2 ? 'X-Forwarded-For' : 'X-Real-IP';
+      const response = await GET(request(`topic-${index}`, { headers: { [header]: `192.0.2.${index}` } }), context);
       expect(response.status).toBe(200);
     }
-    const denied = await GET(request('overflow', { headers: { 'X-Forwarded-For': '198.51.100.1' } }), context);
+    const denied = await GET(request('overflow', { headers: { 'X-Real-IP': '198.51.100.1' } }), context);
     expect(denied.status).toBe(429);
     expect(denied.headers.get('Retry-After')).toBe('1');
     expect((await GET(request('topic-0'), context)).status).toBe(200);
@@ -719,6 +722,67 @@ describe('bounded search admission', () => {
     vi.setSystemTime(Date.now() + 1000 / SEARCH_ADMISSION_LIMITS.refillPerSecond);
     expect((await GET(request('overflow'), context)).status).toBe(200);
     expect(handlers.search).toHaveBeenCalledTimes(SEARCH_ADMISSION_LIMITS.burst + 1);
+  });
+
+  it('gives each client its own share, so one client cannot lock out the rest', async () => {
+    vi.useFakeTimers();
+    const handlers = upstream();
+    const greedy = { headers: { 'X-Real-IP': '203.0.113.7' } };
+    for (let index = 0; index < SEARCH_CLIENT_ADMISSION_LIMITS.burst; index += 1) {
+      expect((await GET(request(`greedy-${index}`, greedy), context)).status).toBe(200);
+    }
+    const limited = await GET(request('greedy-more', greedy), context);
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get('Retry-After')).toBe(String(Math.ceil(1 / SEARCH_CLIENT_ADMISSION_LIMITS.refillPerSecond)));
+    expect((await GET(request('greedy-0', greedy), context)).status).toBe(200);
+    expect((await GET(request('other', { headers: { 'X-Real-IP': '198.51.100.4' } }), context)).status).toBe(200);
+    expect(handlers.search).toHaveBeenCalledTimes(SEARCH_CLIENT_ADMISSION_LIMITS.burst + 1);
+    vi.setSystemTime(Date.now() + 1000 / SEARCH_CLIENT_ADMISSION_LIMITS.refillPerSecond);
+    expect((await GET(request('greedy-more', greedy), context)).status).toBe(200);
+  });
+
+  it('lets a client whose share is used up join a pending identical search', async () => {
+    vi.useFakeTimers();
+    const body = deferred();
+    const handlers = upstream({
+      search: (url) => url.searchParams.get('q') === 'shared' ? body.promise.then(() => Response.json(posts)) : Response.json(posts),
+    });
+    const client = { headers: { 'X-Real-IP': '203.0.113.8' } };
+    const started = GET(request('shared', client), context);
+    for (let index = 1; index < SEARCH_CLIENT_ADMISSION_LIMITS.burst; index += 1) {
+      expect((await GET(request(`used-${index}`, client), context)).status).toBe(200);
+    }
+    expect((await GET(request('fresh', client), context)).status).toBe(429);
+    const joined = GET(request('shared', client), context);
+    body.resolve();
+    expect((await Promise.all([started, joined])).map((response) => response.status)).toEqual([200, 200]);
+    expect(handlers.search).toHaveBeenCalledTimes(SEARCH_CLIENT_ADMISSION_LIMITS.burst);
+  });
+
+  it('identifies a client by X-Real-IP, then by the first X-Forwarded-For address', async () => {
+    vi.useFakeTimers();
+    upstream();
+    const forwarded = { headers: { 'X-Forwarded-For': '203.0.113.9, 10.0.0.1' } };
+    for (let index = 0; index < SEARCH_CLIENT_ADMISSION_LIMITS.burst; index += 1) {
+      expect((await GET(request(`forwarded-${index}`, forwarded), context)).status).toBe(200);
+    }
+    expect((await GET(request('next', { headers: { 'X-Real-IP': '203.0.113.9' } }), context)).status).toBe(429);
+    const realIpFirst = { headers: { 'X-Real-IP': '198.51.100.9', 'X-Forwarded-For': '203.0.113.9' } };
+    expect((await GET(request('next', realIpFirst), context)).status).toBe(200);
+    expect((await GET(request('after', { headers: { 'X-Forwarded-For': '10.0.0.1, 203.0.113.9' } }), context)).status).toBe(200);
+  });
+
+  it('remembers a bounded number of clients', async () => {
+    vi.useFakeTimers();
+    upstream();
+    for (let index = 0; index <= MAX_ADMISSION_CLIENTS; index += 1) {
+      vi.setSystemTime(Date.now() + 1000 / SEARCH_ADMISSION_LIMITS.refillPerSecond);
+      const response = await GET(request(`visitor-${index}`, { headers: { 'X-Real-IP': `client-${index}` } }), context);
+      expect(response.status).toBe(200);
+    }
+    expect(clientAdmissions.size).toBe(MAX_ADMISSION_CLIENTS);
+    expect(clientAdmissions.has('client-0')).toBe(false);
+    expect(clientAdmissions.has(`client-${MAX_ADMISSION_CLIENTS}`)).toBe(true);
   });
 });
 
