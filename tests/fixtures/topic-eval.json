@@ -3,12 +3,14 @@
     "id": "artwork-source-credit",
     "keyword": "Instagram",
     "keep": false,
+    "mention": false,
     "context": { "post_text": "Artwork by contemporary UK abstract artist Tricia Crowther (via Instagram) #WomensArt" }
   },
   {
     "id": "stream-promotion-hashtag",
     "keyword": "Instagram",
     "keep": false,
+    "mention": false,
     "context": { "post_text": "I'm live right now! Come watch my stream. #instagram #livestream #nsfw" }
   },
   {
@@ -33,6 +35,7 @@
     "id": "unsupported-complaint",
     "keyword": "Instagram",
     "keep": false,
+    "mention": true,
     "context": { "post_text": "Instagram sucks. I hate it." }
   },
   {
@@ -108,6 +111,7 @@
     "id": "ordinary-word-sense",
     "keyword": "Meta",
     "keep": false,
+    "mention": false,
     "context": { "post_text": "The new patch changed the competitive meta: cheaper spells now counter the strongest deck." }
   },
   {
@@ -151,5 +155,51 @@
     "keyword": "Netflix",
     "keep": true,
     "context": { "post_text": "Netflix is raising subscription prices again. The increase improves revenue per subscriber but could push price-sensitive households toward the cheaper advertising tier." }
+  },
+  {
+    "id": "boycott-several-services-over-prices",
+    "keyword": "Netflix",
+    "keep": true,
+    "context": { "post_text": "Time for a mass cancellation of Disney+, Netflix, Peacock, Max, and Prime Video. Every one of them raised prices while people are struggling with rent and groceries. A coordinated boycott is the only message they'll hear." }
+  },
+  {
+    "id": "boycott-single-service-over-prices",
+    "keyword": "Netflix",
+    "keep": true,
+    "context": { "post_text": "Cancelling Netflix today. Another price increase while households are cutting back on groceries, and they expect us to keep paying." }
+  },
+  {
+    "id": "services-listed-casually",
+    "keyword": "Netflix",
+    "keep": false,
+    "context": { "post_text": "I've got Netflix, Hulu, and Max and still can't find anything to watch tonight. Recommendations?" }
+  },
+  {
+    "id": "netflix-and-chill-idiom",
+    "keyword": "Netflix",
+    "keep": false,
+    "mention": false,
+    "context": { "post_text": "Friday night plans: Netflix and chill, if you know what I mean." }
+  },
+  {
+    "id": "google-it-generic-verb",
+    "keyword": "Google",
+    "keep": false,
+    "mention": false,
+    "context": { "post_text": "Just google it before you ask me, please." }
+  },
+  {
+    "id": "bare-cancel-call",
+    "keyword": "Netflix",
+    "keep": false,
+    "mention": true,
+    "context": { "post_text": "Cancel Netflix lol" }
+  },
+  {
+    "id": "product-remark-without-company-name",
+    "keyword": "Meta",
+    "keep": false,
+    "mention": true,
+    "context": { "post_text": "Threads is a ghost town these days." }
   }
 ]

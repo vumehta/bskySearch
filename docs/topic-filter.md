@@ -2,7 +2,9 @@
 
 The filter keeps analysis and substantive news about a searched company,
 platform, or its products and services. Concrete developments, reasoned
-criticism, useful comparisons, and specific product experiences qualify.
+criticism, useful comparisons, and specific product experiences qualify. So do
+opinions and calls to action that give a business reason, such as a boycott over
+price increases, including when the same criticism names several companies.
 The evidence can come from the post, a link preview, a quote, or image alt text.
 
 All keywords share one business/product intent, regardless of capitalization:
@@ -20,8 +22,18 @@ follow-me requests, casual photo sharing, and unrelated commentary are excluded.
 The searched subject does not have to be the only subject, but the useful
 information must be about it. An official author does not qualify automatically.
 
-`buildTopicQuestion` in `api/classify.mjs` defines the rubric. It asks one Noul
-per original search term, sharing the evidence in one request per post.
+Posts with reach get a lower bar. A post with at least 50 likes, or from a
+verified account, stays when it says anything about the company: a joke, an
+unsupported complaint, or a bare call to cancel counts. Credits, hashtags, and
+other word senses still do not, including idioms such as "Netflix and chill".
+Posts labelled porn, sexual, or nudity never get the lower bar, because likes
+say little about importance there. The card labels these posts "High reach" or
+"Verified author" next to their match percentage.
+
+`buildTopicQuestion` in `api/classify.mjs` defines the rubric, and
+`buildMentionQuestion` defines the lower bar. Each original search term gets
+both Nouls, sharing the evidence in one request per post, so a post that later
+reaches 50 likes needs no second check. The browser applies the reach rule.
 The server hashes the entire question with its evidence, so rubric changes
 invalidate earlier scores. Unchecked posts remain visible and hidden posts can
 be revealed using **Show them**. While the filter is enabled, match percentages
@@ -35,6 +47,9 @@ inputs, not verified news reports. Explicit details and account identities from
 the reported posts are omitted when they are not relevant to classification.
 The set also covers Intel versus intelligence (including both senses in one
 post), Apple versus fruit, Meta versus gaming, and product or service news.
+
+Every case has a `keep` label for the main rubric. Cases with a `mention` label
+also check the lower bar used for high-reach posts.
 
 Set `TYPESAFE_API_KEY` in the terminal environment, then run `npm.cmd run eval:topic`
 (or `npm run eval:topic`). This makes live, billable requests through the same
