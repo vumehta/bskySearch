@@ -129,7 +129,9 @@ test('keyboard focus and card state survive Load More, image previews and card u
   await expect(loadMore).toBeHidden();
   await expect(page.locator('#results .post').last()).toBeFocused();
   const updated = page.locator('#results .post').first();
-  await expect(updated.locator('.stat.likes')).toHaveText('♥ 60');
+  await expect(updated.locator('.stat.likes')).toHaveText('♥ 60 likes');
+  const hiddenNoun = await updated.locator('.stat.likes .visually-hidden').boundingBox();
+  expect(hiddenNoun.width * hiddenNoun.height).toBeLessThanOrEqual(1);
   await expect(updated.getByRole('button', { name: 'Hide Thread', exact: true })).toHaveAttribute('aria-expanded', 'true');
   await expect(updated.locator('.thread-parent-text')).toHaveText('The parent post');
   await expect(updated.getByRole('button', { name: 'Hide 1 image', exact: true })).toBeVisible();

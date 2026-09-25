@@ -121,7 +121,41 @@ describe('quote search and pagination', () => {
     await quotes.performQuoteSearch();
     quotes.handleQuoteTabClick({ target: elements.quoteTabs.children.find((node) => node.dataset.sort === 'bookmarks') });
     expect(elements.quoteResults.querySelectorAll('.quote-text').map((node) => node.textContent)).toEqual(['both', 'saved', 'liked']);
-    expect(elements.quoteResults.querySelector('.quote-stats').children.at(-1).getAttribute('aria-label')).toBe('3 saves');
+    const saves = elements.quoteResults.querySelector('.quote-stats').children.at(-1);
+    expect(saves.textContent).toBe('🔖 3 saves');
+    expect(saves.querySelector('.visually-hidden').textContent).toBe(' saves');
+    expect(saves.getAttribute('aria-label')).toBe(null);
+  });
+
+  it('clears LIVE badge timers when quote cards are re-sorted or replaced by a new search', async () => {
+    vi.useFakeTimers();
+    const author = {
+      did: 'did:plc:test',
+      handle: 'alice.bsky.social',
+      status: { status: 'app.bsky.actor.status#live', expiresAt: new Date(Date.now() + 3600000).toISOString() },
+    };
+    vi.stubGlobal('fetch', vi.fn(async (url) => url.includes('getPosts')
+      ? response({ posts: [{ ...post('original'), author }] })
+      : response({ posts: [{ ...post('q1'), author }, { ...post('q2'), author }] })));
+    await quotes.performQuoteSearch();
+    expect(elements.quoteResults.querySelectorAll('.badge')).toHaveLength(2);
+    expect(vi.getTimerCount()).toBe(3);
+
+    quotes.handleQuoteTabClick({ target: elements.quoteTabs.children.find((node) => node.dataset.sort === 'recent') });
+    expect(elements.quoteResults.querySelectorAll('.badge')).toHaveLength(2);
+    expect(vi.getTimerCount()).toBe(3);
+
+    mockInitial({ posts: [post('plain')] });
+    await quotes.performQuoteSearch();
+    expect(elements.quoteResults.querySelectorAll('.quote-post')).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('dates a quote with a future creation time by when it was indexed', async () => {
+    const indexedAt = '2026-09-04T12:00:00Z';
+    mockInitial({ posts: [{ ...post('future'), indexedAt, record: { text: 'future', createdAt: '2099-01-01T00:00:00Z' } }] });
+    await quotes.performQuoteSearch();
+    expect(elements.quoteResults.querySelector('.quote-meta').textContent).toBe(new Date(indexedAt).toLocaleString());
   });
 
   it('shows author badges on quote cards', async () => {

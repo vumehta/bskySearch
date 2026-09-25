@@ -23,8 +23,21 @@ function createBadge({ className, text, title }) {
 }
 
 const MAX_TIMEOUT_MS = 2 ** 31 - 1;
+const expiryTimers = new Map();
+
 function removeAtExpiry(badge, expiresAt) {
-  setTimeout(() => badge.remove(), Math.min(Date.parse(expiresAt) - Date.now(), MAX_TIMEOUT_MS));
+  expiryTimers.set(badge, setTimeout(() => {
+    expiryTimers.delete(badge);
+    badge.remove();
+  }, Math.min(Date.parse(expiresAt) - Date.now(), MAX_TIMEOUT_MS)));
+}
+
+export function clearBadgeTimers(element) {
+  for (const [badge, timer] of expiryTimers) {
+    if (!element.contains(badge)) continue;
+    clearTimeout(timer);
+    expiryTimers.delete(badge);
+  }
 }
 
 export function appendAuthorBadges(container, author) {

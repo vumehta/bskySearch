@@ -23,6 +23,16 @@ function contrast(foreground, background) {
   return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
 }
 
+describe('visually hidden text', () => {
+  it('stays readable to screen readers without taking space on screen', () => {
+    const rule = css.match(/\.visually-hidden\s*\{([^}]+)\}/)?.[1] ?? '';
+    for (const declaration of ['position: absolute', 'width: 1px', 'height: 1px', 'overflow: hidden', 'clip: rect(0, 0, 0, 0)', 'white-space: nowrap']) {
+      expect(rule).toContain(`${declaration};`);
+    }
+    expect(rule).not.toMatch(/display:\s*none|visibility:\s*hidden/);
+  });
+});
+
 describe('text contrast', () => {
   for (const [name, theme] of [['light', light], ['dark', dark]]) {
     it(`keeps regular button, metadata, link, and stat text readable in the ${name} theme`, () => {

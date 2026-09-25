@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestDocument, TestNode } from './helpers/dom.mjs';
-import { appendAuthorBadges } from '../src/author-badges.mjs';
+import { appendAuthorBadges, clearBadgeTimers } from '../src/author-badges.mjs';
 
 const live = (overrides = {}) => ({ status: 'app.bsky.actor.status#live', expiresAt: '2026-09-13T13:00:00Z', ...overrides });
 
@@ -45,6 +45,23 @@ describe('author badges', () => {
     expect(container.children).toHaveLength(1);
     vi.advanceTimersByTime(1);
     expect(container.children).toHaveLength(0);
+  });
+
+  it('cancels the expiry timers of LIVE badges inside a removed card only', () => {
+    const removed = new TestNode();
+    const kept = new TestNode();
+    const nested = new TestNode();
+    removed.appendChild(nested);
+    appendAuthorBadges(nested, { status: live() });
+    appendAuthorBadges(kept, { status: live() });
+    expect(vi.getTimerCount()).toBe(2);
+    clearBadgeTimers(removed);
+    expect(vi.getTimerCount()).toBe(1);
+    clearBadgeTimers(removed);
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(60 * 60 * 1000);
+    expect(kept.children).toHaveLength(0);
+    expect(nested.children).toHaveLength(1);
   });
 
   it.each([

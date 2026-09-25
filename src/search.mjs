@@ -1,6 +1,7 @@
 import {
   INITIAL_MAX_PAGES,
   INITIAL_RENDER_LIMIT,
+  MAX_SEARCH_TERMS,
   MIN_LIKES_DEBOUNCE_MS,
   RENDER_STEP,
   SEARCH_API,
@@ -25,20 +26,22 @@ import {
   filterByDate,
   filterByLikes,
   formatRelativeTime,
+  getPostSortAt,
   getPostUrl,
   getProfileUrl,
   getSearchCacheKey,
   getSearchSince,
   isValidBskyUrl,
+  limitSearchTerms,
   normalizeSortValue,
   normalizeTerm,
   sortPosts,
 } from './utils.mjs';
-import { appendAuthorBadges } from './author-badges.mjs';
+import { appendAuthorBadges, clearBadgeTimers } from './author-badges.mjs';
 import { appendPostEmbeds } from './post-embeds.mjs';
 import { appendEngagementStats, SEARCH_STAT_CLASSES } from './post-stats.mjs';
 import { enforceSearchCacheLimit, getCachedSearch } from './cache.mjs';
-import { fetchJson } from './http.mjs';
+import { fetchJson, isRetryableError, throwIfAborted } from './http.mjs';
 import { getEmbedPreviews } from './post-data.mjs';
 import { createHighlightMatcher, getMatchedTermsForPost, getPostRenderFingerprint, ingestSearchPosts, nextSearchCursor, settleWithConcurrency, validateSearchPage } from './search-model.mjs';
 import { setQueryParam, updateURLWithParams } from './url.mjs';
@@ -54,6 +57,8 @@ const SORT_LABELS = {
 
 const ingestedPostsByUri = new Map();
 let activeSearchController = null;
+let searchApiSort = 'top';
+let skippedTermsNotice = '';
 const searchSeenCursors = new Map();
 let deriveTimerId = null;
 let minLikesTimerId = null;
@@ -127,7 +132,7 @@ export function updateExpansionSummary() {
 }
 
 async function searchTerm(term, cursor, { sort, since, signal }) {
-  signal.throwIfAborted();
+  throwIfAborted(signal);
   const cacheKey = getSearchCacheKey(term, cursor, sort, since);
   const cached = getCachedSearch(cacheKey);
   if (cached) return cached;
@@ -140,9 +145,11 @@ async function searchTerm(term, cursor, { sort, since, signal }) {
     data = validateSearchPage(await fetchJson(`${SEARCH_API}?${params}`, { signal, timeoutMs: SEARCH_REQUEST_TIMEOUT_MS }));
   } catch (error) {
     if (error.name === 'AbortError') throw error;
-    throw new Error(`Search failed for "${term}": ${error.message}`, { cause: error });
+    const failure = new Error(`Search failed for "${term}": ${error.message}`, { cause: error });
+    failure.retryable = isRetryableError(error);
+    throw failure;
   }
-  signal.throwIfAborted();
+  throwIfAborted(signal);
   searchCache.set(cacheKey, { data, timestamp: Date.now() });
   enforceSearchCacheLimit();
   return data;
@@ -185,9 +192,19 @@ function createSearchContext() {
   return {
     generation: state.searchGeneration,
     signal: activeSearchController.signal,
-    sort: state.searchSort === 'latest' ? 'latest' : 'top',
+    sort: searchApiSort,
     since: state.searchSince,
   };
+}
+
+function getApiSort(sort) {
+  return sort === 'latest' ? 'latest' : 'top';
+}
+
+function describeFailures(failures, termCount) {
+  const message = failures[0].reason.message.replace(/[\s.!?…]+$/, '');
+  const retry = failures.some((failure) => failure.reason.retryable) ? ' Load more to retry.' : '';
+  return `${failures.length}/${termCount} terms could not finish. ${message}.${retry}`;
 }
 
 async function runSearchPages(terms, maxPages, context, { loadingMore = false } = {}) {
@@ -209,8 +226,9 @@ async function runSearchPages(terms, maxPages, context, { loadingMore = false } 
     }, context.signal);
     if (!isActiveSearch(context)) return;
     const failures = results.filter((result) => result.status === 'rejected');
-    if (failures.length) {
-      showStatus(`${failures.length}/${terms.length} terms could not finish. ${failures[0].reason.message}. Load more to retry.`, 'error');
+    const notices = [failures.length ? describeFailures(failures, terms.length) : '', skippedTermsNotice].filter(Boolean);
+    if (notices.length) {
+      showStatus(notices.join(' '), failures.length ? 'error' : 'loading');
     } else {
       hideStatus();
     }
@@ -232,7 +250,7 @@ async function runSearchPages(terms, maxPages, context, { loadingMore = false } 
 }
 
 function increaseRenderLimit() {
-  state.renderLimit = Math.min(state.allPosts.length, state.renderLimit + RENDER_STEP);
+  state.renderLimit = Math.max(state.renderLimit, Math.min(state.allPosts.length, state.renderLimit + RENDER_STEP));
 }
 
 function cancelScheduledRender() {
@@ -445,7 +463,7 @@ function createPostElement(post, { imagesShown = false } = {}) {
 
   const timeSpan = document.createElement('span');
   timeSpan.className = 'post-time';
-  timeSpan.textContent = formatRelativeTime(post.record?.createdAt || post.indexedAt);
+  timeSpan.textContent = formatRelativeTime(getPostSortAt(post));
   header.appendChild(timeSpan);
 
   postDiv.appendChild(header);
@@ -553,6 +571,7 @@ function resetResultsRenderCache() {
   showMoreBtnEl = null;
   loadMoreBtnEl = null;
   renderedPosts.clear();
+  clearBadgeTimers(resultsDiv);
   resultsDiv.textContent = '';
 }
 
@@ -652,6 +671,7 @@ function syncVisibleResultPosts(visiblePosts) {
         resultsListEl.replaceChild(nextElement, postElement);
         if (focusKey) findByFocusKey(nextElement, focusKey)?.focus();
       }
+      if (postElement) clearBadgeTimers(postElement);
 
       postElement = nextElement;
       renderedPosts.set(uri, { element: postElement, fingerprint: nextFingerprint });
@@ -673,6 +693,7 @@ function syncVisibleResultPosts(visiblePosts) {
       cancelThreadRequest(element);
       element.remove();
     }
+    clearBadgeTimers(element);
     renderedPosts.delete(uri);
   }
 
@@ -780,11 +801,17 @@ export async function performSearch() {
   cancelDebouncedMinLikesFilter();
   cancelActiveSearch();
   const termsValue = termsInput.value.trim();
-  state.rawSearchTerms = termsValue.split(',').map(normalizeTerm).filter(Boolean);
-  state.searchTerms = expandSearchTerms(state.rawSearchTerms, expandTermsToggle.checked);
+  const typedTerms = termsValue.split(',').map(normalizeTerm).filter(Boolean);
+  const { rawTerms, terms, total } = limitSearchTerms(typedTerms, expandTermsToggle.checked, MAX_SEARCH_TERMS);
+  state.rawSearchTerms = rawTerms;
+  state.searchTerms = terms;
+  skippedTermsNotice = total > terms.length
+    ? `Only the first ${terms.length} of ${total} terms are searched (${total - terms.length} skipped).`
+    : '';
   state.minLikes = Math.max(0, parseInt(minLikesInput.value, 10) || 0);
   state.timeFilterHours = parseInt(timeFilterSelect.value, 10) || 24;
   state.searchSort = normalizeSortValue(sortSelect.value);
+  searchApiSort = getApiSort(state.searchSort);
   state.searchSince = state.searchTerms.length ? getSearchSince(state.timeFilterHours) : null;
   state.allPosts = [];
   state.currentCursors = Object.create(null);
@@ -802,14 +829,14 @@ export async function performSearch() {
     showStatus('Please enter at least one search term.', 'error');
     return;
   }
-  showStatus(`Searching for: ${state.rawSearchTerms.join(', ')}…`, 'loading');
+  showStatus([`Searching for: ${state.rawSearchTerms.join(', ')}…`, skippedTermsNotice].filter(Boolean).join(' '), 'loading');
   await runSearchPages([...state.searchTerms], INITIAL_MAX_PAGES, createSearchContext());
 }
 
 export async function loadMore() {
   if (state.isLoading || state.searchDebounceTimer !== null) return;
   const terms = state.searchTerms.filter((term) =>
-    Object.hasOwn(state.currentCursors, term) && state.currentCursors[term] !== null);
+    Object.prototype.hasOwnProperty.call(state.currentCursors, term) && state.currentCursors[term] !== null);
   if (!terms.length) return;
   showStatus('Loading more results…', 'loading');
   await runSearchPages(terms, 1, createSearchContext(), { loadingMore: true });
@@ -891,6 +918,7 @@ export function clearSearchResults() {
   state.rawSearchTerms = [];
   state.searchTerms = [];
   state.searchSince = null;
+  skippedTermsNotice = '';
   ingestedPostsByUri.clear();
   resetTopicScoring();
   state.showOffTopic = false;
@@ -912,6 +940,12 @@ export function focusSearchInput() {
 }
 
 export function applySearchSortChange() {
+  if (state.searchDebounceTimer === null && state.searchTerms.length && getApiSort(state.searchSort) === searchApiSort) {
+    updateSearchURL();
+    flushDerivedPostsRebuild();
+    renderResults();
+    return;
+  }
   cancelDebouncedSearch();
   if (termsInput.value.trim()) return performSearch();
   updateSearchURL();

@@ -20,7 +20,6 @@ export const QUOTE_STAT_CLASSES = {
 function createStatElement(className, icon, count, noun) {
   const stat = document.createElement('span');
   stat.className = className;
-  stat.setAttribute('aria-label', `${count} ${noun}`);
 
   const iconEl = document.createElement('span');
   iconEl.setAttribute('aria-hidden', 'true');
@@ -28,6 +27,11 @@ function createStatElement(className, icon, count, noun) {
   stat.appendChild(iconEl);
 
   stat.appendChild(document.createTextNode(count));
+
+  const nounEl = document.createElement('span');
+  nounEl.className = 'visually-hidden';
+  nounEl.textContent = ` ${noun}`;
+  stat.appendChild(nounEl);
   return stat;
 }
 
