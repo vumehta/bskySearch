@@ -656,6 +656,7 @@ function syncTopicSummary() {
   const count = (value) => `${value} ${value === 1 ? 'post' : 'posts'}`;
   const parts = [];
   if (summary.pending > 0) parts.push(`Checking ${count(summary.pending)} for topic…`);
+  if (summary.paused) parts.push('Pausing briefly to stay within the topic check rate limit.');
   if (summary.hidden > 0) {
     parts.push(`${summary.hidden} off-topic ${summary.hidden === 1 ? 'post' : 'posts'} ${state.showOffTopic ? 'shown dimmed' : 'hidden'}.`);
   }

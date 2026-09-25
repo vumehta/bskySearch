@@ -24,15 +24,24 @@ The limit counts HTTP batches, including cache hits. A full batch contains 25
 posts and can make up to 50 TypeSafe calls when every post needs a retry. Three
 queries returning 200 distinct posts each normally need at least 24 batches;
 expansion, incremental results, and more than six original terms can need more.
-Users sharing a public IP share the allowance. When limited, the app stops
-queued classification for that search and keeps unchecked posts visible.
-Ordinary keyword search does not match this rule.
+Users sharing a public IP share the allowance. When limited, the app pauses its
+queued checks, waits out the `Retry-After` (a minute when there is none), and
+resumes. Unchecked posts stay visible meanwhile. After five limits in a row on
+the same batch it stops checking for that search. Ordinary keyword search does
+not match this rule.
 
 This is abuse throttling, not a global call or spending cap: Vercel counters are
-per region, and different IPs have separate allowances. The handler's existing
-600-call burst / five-call-per-second refill remains per instance and also
-charges retries. Keep TypeSafe automatic recharge off when using a prepaid
-credit budget; throttling cannot guarantee that existing credits will last.
+per region, and different IPs have separate allowances. The handler also limits
+TypeSafe calls itself, per instance: a 600-call burst refilling at five calls per
+second, of which each client IP may use at most half (a 300-call burst refilling
+at 2.5 per second). One visitor therefore cannot use up an instance's allowance;
+a very large search from one visitor slows down instead. Both limits charge
+retries. The handler accepts only same-origin browser requests: `Sec-Fetch-Site:
+same-origin`, or a matching `Origin` from browsers that do not send
+`Sec-Fetch-Site`. That stops cross-site pages and casual scripts, not a caller
+who forges the headers. Keep TypeSafe automatic recharge off when using a
+prepaid credit budget; throttling cannot guarantee that existing credits will
+last.
 
 Validate enforcement with a bounded burst of invalid `POST` bodies (`{}`),
 which cannot invoke TypeSafe, then confirm excess requests get 429 while the

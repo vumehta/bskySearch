@@ -6,7 +6,7 @@ import { TOPIC_LIMITS } from '../src/topic-context.mjs';
 async function classifyBatch(batch) {
   const response = await POST(new Request('http://localhost/api/classify', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'same-origin' },
     body: JSON.stringify({
       items: batch.map(({ id, keyword, context }) => ({ id, keywords: [keyword], context })),
     }),

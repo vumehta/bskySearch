@@ -24,9 +24,16 @@ export const CLASSIFY_ADMISSION_LIMITS = Object.freeze({
   refillPerSecond: 5,
 });
 
+export const CLASSIFY_CLIENT_ADMISSION_LIMITS = Object.freeze({
+  burst: 300,
+  refillPerSecond: 2.5,
+});
+
+const MAX_ADMISSION_CLIENTS = 1000;
+
 const scoreCache = new Map();
-let admissionTokens = CLASSIFY_ADMISSION_LIMITS.burst;
-let admissionUpdatedAt = null;
+const instanceAdmission = { tokens: CLASSIFY_ADMISSION_LIMITS.burst, updatedAt: null };
+const clientAdmissions = new Map();
 
 function httpError(message, status, headers = {}) {
   const error = new Error(message);
@@ -177,23 +184,63 @@ function cacheScore(cacheKey, score) {
   }
 }
 
-function admitUpstreamCalls(calls) {
-  const now = Date.now();
-  if (admissionUpdatedAt !== null) {
-    admissionTokens = Math.min(
-      CLASSIFY_ADMISSION_LIMITS.burst,
-      admissionTokens +
-        (Math.max(0, now - admissionUpdatedAt) / 1000) * CLASSIFY_ADMISSION_LIMITS.refillPerSecond,
+function refillAdmission(bucket, limits, now) {
+  if (bucket.updatedAt !== null) {
+    bucket.tokens = Math.min(
+      limits.burst,
+      bucket.tokens + (Math.max(0, now - bucket.updatedAt) / 1000) * limits.refillPerSecond,
     );
   }
-  admissionUpdatedAt = Math.max(admissionUpdatedAt ?? now, now);
-  if (admissionTokens < calls) {
-    const retryAfter = Math.ceil((calls - admissionTokens) / CLASSIFY_ADMISSION_LIMITS.refillPerSecond);
+  bucket.updatedAt = Math.max(bucket.updatedAt ?? now, now);
+}
+
+function getClientAdmission(client) {
+  const bucket = clientAdmissions.get(client) || { tokens: CLASSIFY_CLIENT_ADMISSION_LIMITS.burst, updatedAt: null };
+  clientAdmissions.delete(client);
+  clientAdmissions.set(client, bucket);
+  while (clientAdmissions.size > MAX_ADMISSION_CLIENTS) {
+    clientAdmissions.delete(clientAdmissions.keys().next().value);
+  }
+  return bucket;
+}
+
+function admitUpstreamCalls(calls, client) {
+  const now = Date.now();
+  const limited = [
+    [instanceAdmission, CLASSIFY_ADMISSION_LIMITS],
+    [getClientAdmission(client), CLASSIFY_CLIENT_ADMISSION_LIMITS],
+  ];
+  let retryAfter = 0;
+  for (const [bucket, limits] of limited) {
+    refillAdmission(bucket, limits, now);
+    if (bucket.tokens < calls) {
+      retryAfter = Math.max(retryAfter, Math.ceil((calls - bucket.tokens) / limits.refillPerSecond));
+    }
+  }
+  if (retryAfter > 0) {
     throw httpError('Too many topic checks. Please try again shortly.', 429, {
       'Retry-After': String(retryAfter),
     });
   }
-  admissionTokens -= calls;
+  for (const [bucket] of limited) bucket.tokens -= calls;
+}
+
+function getClientKey(request) {
+  const realIp = request.headers.get('x-real-ip')?.trim();
+  const forwardedIp = request.headers.get('x-forwarded-for')?.split(',')[0].trim();
+  return realIp || forwardedIp || 'unknown';
+}
+
+function isSameOriginRequest(request) {
+  const fetchSite = request.headers.get('sec-fetch-site');
+  if (fetchSite) return fetchSite === 'same-origin';
+  const origin = request.headers.get('origin');
+  if (!origin) return false;
+  try {
+    return new URL(origin).host === new URL(request.url).host;
+  } catch {
+    return false;
+  }
 }
 
 function upstreamTimeoutError() {
@@ -283,7 +330,7 @@ function describeUpstreamFailure(payload) {
   return (text || 'no error body').slice(0, 300);
 }
 
-async function scoreItem(keywords, context, { apiKey, model, signal, deadlineAt }) {
+async function scoreItem(keywords, context, { apiKey, model, signal, deadlineAt, client }) {
   const questions = Object.fromEntries(keywords.map((keyword, index) => [`k${index}`, buildTopicQuestion(keyword)]));
   const body = { model, state: context, questions };
   const unscored = keywords.map(() => null);
@@ -295,7 +342,7 @@ async function scoreItem(keywords, context, { apiKey, model, signal, deadlineAt 
       await abortableDelay(retryDelayMs, signal);
     }
     throwIfAborted(signal);
-    if (attempt > 0) admitUpstreamCalls(1);
+    if (attempt > 0) admitUpstreamCalls(1, client);
     let result;
     try {
       result = await postToTypeSafe(body, apiKey, signal);
@@ -367,7 +414,7 @@ async function classifyItems(items, results, options) {
   }
   if (tasks.length > 0) {
     throwIfAborted(options.signal);
-    admitUpstreamCalls(tasks.length);
+    admitUpstreamCalls(tasks.length, options.client);
     await runWithConcurrency(tasks, UPSTREAM_CONCURRENCY);
   }
 }
@@ -405,8 +452,7 @@ export async function POST(request, context) {
     return jsonNoStore({ error: 'The topic filter is not configured on this server.' }, 503);
   }
 
-  const fetchSite = request.headers.get('sec-fetch-site');
-  if (fetchSite && fetchSite !== 'same-origin') {
+  if (!isSameOriginRequest(request)) {
     return jsonNoStore({ error: 'Cross-site requests are not allowed.' }, 403);
   }
   if (!/^application\/json\b/i.test(request.headers.get('content-type') || '')) {
@@ -418,7 +464,13 @@ export async function POST(request, context) {
     throwIfAborted(request.signal);
     const results = items.map(({ id, keywords }) => ({ id, scores: keywords.map(() => null) }));
     const outcome = await withDeadline(
-      (signal, deadlineAt) => classifyItems(items, results, { apiKey, model: configuredModel || DEFAULT_MODEL, signal, deadlineAt }),
+      (signal, deadlineAt) => classifyItems(items, results, {
+        apiKey,
+        model: configuredModel || DEFAULT_MODEL,
+        signal,
+        deadlineAt,
+        client: getClientKey(request),
+      }),
       request.signal,
       TOPIC_JOB_TIMEOUT_MS,
     );
@@ -442,8 +494,9 @@ export async function POST(request, context) {
 
 function resetModuleStateForTests() {
   scoreCache.clear();
-  admissionTokens = CLASSIFY_ADMISSION_LIMITS.burst;
-  admissionUpdatedAt = null;
+  instanceAdmission.tokens = CLASSIFY_ADMISSION_LIMITS.burst;
+  instanceAdmission.updatedAt = null;
+  clientAdmissions.clear();
 }
 
 export const testUtils =
@@ -456,6 +509,8 @@ export const testUtils =
         UPSTREAM_CONCURRENCY,
         UPSTREAM_RETRY_DELAY_MS,
         TYPESAFE_ENDPOINT,
+        MAX_ADMISSION_CLIENTS,
+        clientAdmissions,
         resetModuleStateForTests,
       }
     : undefined;
