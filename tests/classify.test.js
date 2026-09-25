@@ -139,6 +139,7 @@ describe('request validation', () => {
     ['a non-string keyword', { items: [item('a', [7])] }],
     ['no context', { items: [{ id: 'a', keywords: ['Meta'] }] }],
     ['an author-only context', { items: [{ id: 'a', keywords: ['Meta'], context: { author: 'Alice' } }] }],
+    ['a context of author names only', { items: [{ id: 'a', keywords: ['Meta'], context: { author: 'Alice', quoted_post: { author: 'Bob' } } }] }],
   ])('rejects %s', async (_label, body) => {
     globalThis.fetch = vi.fn();
     const response = await POST(request(body), context);

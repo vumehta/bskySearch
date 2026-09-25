@@ -230,6 +230,15 @@ describe('hasTopicEvidence', () => {
     expect(hasTopicEvidence(null)).toBe(false);
     expect(hasTopicEvidence({ author: 'A', image_descriptions: ['a chart'] })).toBe(true);
   });
+
+  it('does not count a quoted author as evidence either', () => {
+    expect(hasTopicEvidence({ author: 'A', quoted_post: { author: 'B' } })).toBe(false);
+    expect(hasTopicEvidence({ quoted_post: { author: 'B', text: 'Prices are going up.' } })).toBe(true);
+    const emptyQuote = { $type: 'app.bsky.embed.record#view', record: { ...quotedView, value: { text: '' }, embeds: [] } };
+    const context = buildTopicContext(post({ record: { text: '' }, embed: emptyQuote }));
+    expect(context).toEqual({ author: 'Tech Reporter (@reporter.example)', quoted_post: { author: 'Netflix (@netflix.com)' } });
+    expect(hasTopicEvidence(context)).toBe(false);
+  });
 });
 
 describe('normalizeKeyword', () => {
