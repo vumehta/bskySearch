@@ -459,12 +459,34 @@ describe('authentication lifecycle', () => {
     expect(handlers.create).toHaveBeenCalledTimes(1);
   });
 
-  it.each([[400, 'ExpiredToken'], [401, 'Unauthorized']])('retries a search rejected with %i %s only once', async (status, error) => {
+  it.each([[400, 'ExpiredToken'], [400, 'InvalidToken'], [401, 'Unauthorized']])('retries a search rejected with %i %s only once', async (status, error) => {
     const handlers = upstream({ search: () => Response.json({ error }, { status }) });
     expect((await GET(request(), context)).status).toBe(status);
     expect(handlers.search).toHaveBeenCalledTimes(2);
     expect(handlers.refresh).toHaveBeenCalledTimes(1);
     expect(handlers.create).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['refreshes', () => Response.json(session('b')), 1],
+    ['logs in again', () => Response.json({ error: 'InvalidToken', message: 'Token could not be verified' }, { status: 400 }), 2],
+  ])('%s when Bluesky cannot verify the access token, then keeps the new session', async (_action, refresh, logins) => {
+    const handlers = upstream({
+      refresh,
+      search: (_url, options) => options.headers.Authorization === 'Bearer access-a'
+        ? Response.json({ error: 'InvalidToken', message: 'Token could not be verified' }, { status: 400 })
+        : Response.json(posts),
+    });
+    handlers.create.mockImplementationOnce(() => Response.json(session('a')))
+      .mockImplementation(() => Response.json(session('c')));
+    const response = await GET(request(), context);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(posts);
+    expect((await GET(request('next'), context)).status).toBe(200);
+    expect(handlers.refresh).toHaveBeenCalledTimes(1);
+    expect(handlers.create).toHaveBeenCalledTimes(logins);
+    expect(handlers.search).toHaveBeenCalledTimes(3);
+    expect(handlers.search.mock.calls.at(-1)[1].headers.Authorization).not.toBe('Bearer access-a');
   });
 
   it('does not refresh a session for an ordinary bad search request', async () => {

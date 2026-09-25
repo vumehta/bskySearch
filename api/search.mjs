@@ -469,7 +469,7 @@ async function runSearch(input, handle, appPassword, signal) {
   let result = await searchPosts(input, session.accessJwt, signal);
   if (
     result.response.status === 401 ||
-    (result.response.status === 400 && result.payload?.error === 'ExpiredToken')
+    (result.response.status === 400 && ['ExpiredToken', 'InvalidToken'].includes(result.payload?.error))
   ) {
     session = await ensureSession(handle, appPassword, signal, session.accessJwt);
     result = await searchPosts(input, session.accessJwt, signal);
