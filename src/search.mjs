@@ -43,7 +43,7 @@ import { getEmbedPreviews } from './post-data.mjs';
 import { createHighlightMatcher, getMatchedTermsForPost, getPostRenderFingerprint, ingestSearchPosts, nextSearchCursor, settleWithConcurrency, validateSearchPage } from './search-model.mjs';
 import { setQueryParam, updateURLWithParams } from './url.mjs';
 import { cancelThreadRequest, cancelThreadRequests, initializeThreadToggle, isReplyPost, moveThreadContext, toggleThread } from './thread.mjs';
-import { cancelTopicScoring, dropQueuedTopicScores, getTopicProgress, getTopicVerdict, requestTopicScores, resetTopicScoring } from './topic-filter.mjs';
+import { cancelTopicScoring, dropQueuedTopicScores, getTopicProgress, getTopicVerdict, requestTopicScores, resetTopicScoring, restartTopicScoring } from './topic-filter.mjs';
 
 const DERIVE_THROTTLE_MS = 120;
 const SORT_LABELS = {
@@ -76,6 +76,7 @@ const renderedPosts = new Map();
 let nextImagesId = 0;
 
 let topicSummary = null;
+let topicRenderLimit = 0;
 
 let highlightMatcherCache = { key: '', regex: null, termSet: null };
 
@@ -262,19 +263,25 @@ function applyTopicFilter(posts) {
     return posts;
   }
   const kept = [];
+  const windowSize = state.renderLimit + RENDER_STEP;
   let hidden = 0;
+  let unhidden = 0;
+  let windowEnd = 0;
   for (const post of posts) {
     const { verdict, score, keptFor } = getTopicVerdict(post);
-    if (verdict !== 'off') {
-      kept.push(score !== null ? { ...post, topicMatch: { offTopic: false, score, keptFor } } : post);
-      continue;
+    if (verdict === 'off') {
+      hidden += 1;
+      if (state.showOffTopic) kept.push({ ...post, topicMatch: { offTopic: true, score } });
+    } else {
+      unhidden += 1;
+      kept.push(verdict === 'on' ? { ...post, topicMatch: { offTopic: false, score, keptFor } } : post);
     }
-    hidden += 1;
-    if (state.showOffTopic) kept.push({ ...post, topicMatch: { offTopic: true, score } });
+    if (unhidden <= windowSize) windowEnd += 1;
   }
+  topicRenderLimit = state.renderLimit;
   const generation = state.searchGeneration;
   if (!minLikesTimerId) {
-    requestTopicScores(posts, () => {
+    requestTopicScores(posts.slice(0, windowEnd), () => {
       if (isCurrentSearchGeneration(generation)) scheduleDerivedPostsRebuild();
     });
   }
@@ -355,7 +362,7 @@ function syncTopicMatch(postElement, topicMatch) {
     termsDiv.appendChild(tag);
   }
   tag.className = offTopic ? 'term-tag off-topic-tag' : 'term-tag topic-score-tag';
-  const match = `${Math.round(topicMatch.score * 100)}% match`;
+  const match = `${Math.floor(topicMatch.score * 100 + 1e-9)}% match`;
   const label = offTopic ? 'Off-topic' : topicMatch.keptFor;
   tag.textContent = label ? `${label} \xB7 ${match}` : match;
 }
@@ -579,6 +586,9 @@ function ensureResultsShell() {
   resultsTopicEl = document.createElement('div');
   resultsTopicEl.className = 'topic-summary';
   resultsTopicTextEl = document.createElement('span');
+  resultsTopicTextEl.setAttribute('role', 'status');
+  resultsTopicTextEl.setAttribute('aria-live', 'polite');
+  resultsTopicTextEl.setAttribute('aria-atomic', 'true');
   resultsTopicEl.appendChild(resultsTopicTextEl);
   resultsTopicBtnEl = document.createElement('button');
   resultsTopicBtnEl.className = 'topic-reveal';
@@ -692,6 +702,7 @@ function syncLoadMoreButton() {
 }
 
 function syncTopicSummary() {
+  if (state.hideOffTopic && state.renderLimit > topicRenderLimit) scheduleDerivedPostsRebuild();
   const summary = topicSummary;
   if (!summary || (summary.checked === 0 && !summary.unavailableReason)) {
     resultsTopicEl.style.display = 'none';
@@ -710,11 +721,11 @@ function syncTopicSummary() {
     parts.push(`${count(summary.failed)} could not be checked and ${summary.failed === 1 ? 'stays' : 'stay'} visible.`);
   }
   if (parts.length === 0) parts.push('No off-topic posts found.');
+  const text = parts.join(' ');
   resultsTopicEl.style.display = '';
-  resultsTopicTextEl.textContent = parts.join(' ');
+  if (resultsTopicTextEl.textContent !== text) resultsTopicTextEl.textContent = text;
   resultsTopicBtnEl.style.display = summary.hidden > 0 ? '' : 'none';
   resultsTopicBtnEl.textContent = state.showOffTopic ? 'Hide them again' : 'Show them';
-  resultsTopicBtnEl.setAttribute('aria-pressed', String(state.showOffTopic));
 }
 
 function renderResults() {
@@ -841,7 +852,7 @@ export function applyTopicFilterChange(enabled) {
   syncMinLikes();
   state.hideOffTopic = Boolean(enabled);
   state.showOffTopic = false;
-  resetTopicScoring();
+  restartTopicScoring();
   updateSearchURL();
   if (!state.searchTerms.length) return;
   flushDerivedPostsRebuild();

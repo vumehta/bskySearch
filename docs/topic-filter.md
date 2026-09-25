@@ -24,21 +24,34 @@ The searched subject does not have to be the only subject, but the useful
 information must be about it. An official author does not qualify automatically.
 
 A post needs a 30% match to stay. Jev's score decides; likes only lower the bar
-for borderline posts. Above 50 likes the cutoff drops by 10 points for every
-tenfold increase in likes (about 20% at 500 likes) down to a floor of 10% at
-5,000 likes, so a clearly off-topic post never stays however popular it is.
-Posts labelled porn, sexual, or nudity keep the 30% cutoff, because likes say
-little about importance there. Posts kept only because of their likes are
-labelled "High reach" next to their match percentage. The browser applies this
-rule when it renders, so a post that gains likes needs no second check. The
-constants live in `src/constants.mjs`.
+for weaker matches. Above 50 likes the cutoff drops by 10 points for every
+tenfold increase in likes (about 20% at 500 likes and 13% at 2,500) down to a
+floor of 10% at 5,000 likes or more. A post below 10% always stays hidden,
+however popular it is, but a weak match above the floor can stay once it has
+enough likes: a 13% match stays from about 2,500 likes. The cutoff stays at 30%
+whatever the likes when a porn, sexual, nudity, or graphic-media label that is
+not negated is on the post, on its author's account, or on the post it quotes,
+because likes say little about importance there. Posts kept only because of
+their likes are labelled "High reach" next to their match percentage. The
+browser applies this rule when it renders, so a post that gains likes needs no
+second check. The constants live in `src/constants.mjs`.
 
 `buildTopicQuestion` in `api/classify.mjs` defines the rubric. It asks one Noul
 per original search term, sharing the evidence in one request per post.
 The server hashes the entire question with its evidence, so rubric changes
 invalidate earlier scores. Unchecked posts remain visible and hidden posts can
-be revealed using **Show them**. While the filter is enabled, match percentages
-appear as scores arrive, whether or not hidden posts are revealed.
+be revealed using **Show them**. While the filter is enabled, a post shows its
+match percentage once its verdict is decided, whether or not hidden posts are
+revealed; a post whose verdict still waits on other terms shows none.
+Percentages are rounded down, so a hidden 29.6% match reads 29%, never the 30%
+cutoff.
+
+Only the posts you can see, plus the next step, are checked. Going down the
+sorted results, the browser checks posts until it has passed the number shown
+(200 at first) plus one **Show more** step of 100, not counting posts hidden as
+off-topic. **Show more** and **Load More** widen this window when they show
+more posts. Posts beyond it stay visible and unchecked, and the summary does
+not count them as being checked or as failed.
 
 A batch of up to 25 posts has 20 seconds on the server. When that runs out, the
 server returns the scores that finished and the remaining posts stay visible as

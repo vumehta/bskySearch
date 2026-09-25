@@ -15,6 +15,8 @@ import { TOPIC_LIMITS, buildTopicContext, hasTopicEvidence, normalizeKeyword } f
 const scores = new Map();
 const pending = new Set();
 const failed = new Set();
+const topicEntries = new WeakMap();
+let keywordCache = { terms: null, keywords: [] };
 let queue = [];
 let activeRequests = 0;
 let owner = null;
@@ -26,12 +28,13 @@ const BATCH_ONLY_STATUSES = new Set([400, 413, 504]);
 const RATE_LIMIT_DEFAULT_WAIT_MS = 60000;
 const RATE_LIMIT_MAX_WAIT_MS = 120000;
 const MAX_RATE_LIMITED_ATTEMPTS = 5;
-const ADULT_LABELS = new Set(['porn', 'sexual', 'nudity']);
+const ADULT_LABELS = new Set(['porn', 'sexual', 'nudity', 'graphic-media']);
 
 const scoreKey = (uri, keyword, context) => JSON.stringify([uri, keyword, context]);
 const isScore = (value) => Number.isFinite(value) && value >= 0 && value <= 1;
 
 function getTopicKeywords() {
+  if (keywordCache.terms === state.rawSearchTerms) return keywordCache.keywords;
   const seen = new Set();
   const keywords = [];
   for (const term of state.rawSearchTerms) {
@@ -41,7 +44,21 @@ function getTopicKeywords() {
     seen.add(folded);
     keywords.push(keyword);
   }
+  keywordCache = { terms: state.rawSearchTerms, keywords };
   return keywords;
+}
+
+function getTopicEntry(post, keywords) {
+  let entry = topicEntries.get(post);
+  if (!entry) {
+    entry = { context: buildTopicContext(post), keywords: null, keys: [] };
+    topicEntries.set(post, entry);
+  }
+  if (entry.keywords !== keywords) {
+    entry.keywords = keywords;
+    entry.keys = keywords.map((keyword) => scoreKey(post.uri, keyword, entry.context));
+  }
+  return entry;
 }
 
 function rememberScore(key, score) {
@@ -49,23 +66,32 @@ function rememberScore(key, score) {
   scores.set(key, score);
 }
 
-const hasAdultLabel = (post) => Array.isArray(post.labels)
-  && post.labels.some((label) => !label?.neg && ADULT_LABELS.has(label?.val));
+const hasAdultLabel = (labels) => Array.isArray(labels)
+  && labels.some((label) => !label?.neg && ADULT_LABELS.has(label?.val));
+
+function getQuotedLabels(embed) {
+  const quoted = embed?.$type === 'app.bsky.embed.recordWithMedia#view' ? embed.record?.record
+    : embed?.$type === 'app.bsky.embed.record#view' ? embed.record
+      : null;
+  return quoted?.labels;
+}
+
+const isAdultPost = (post) => [post.labels, post.author?.labels, getQuotedLabels(post.embed)].some(hasAdultLabel);
 
 export function getReachThreshold(post) {
   const likes = post.likeCount || 0;
-  if (likes <= TOPIC_REACH_MIN_LIKES || hasAdultLabel(post)) return TOPIC_SCORE_THRESHOLD;
+  if (likes <= TOPIC_REACH_MIN_LIKES || isAdultPost(post)) return TOPIC_SCORE_THRESHOLD;
   const lowered = TOPIC_SCORE_THRESHOLD - TOPIC_REACH_STEP_PER_TENFOLD_LIKES * Math.log10(likes / TOPIC_REACH_MIN_LIKES);
   return Math.max(TOPIC_REACH_MIN_THRESHOLD, lowered);
 }
 
 export function getTopicVerdict(post) {
-  const context = buildTopicContext(post);
   const keywords = getTopicKeywords();
+  const { keys } = getTopicEntry(post, keywords);
   let best = null;
   let complete = keywords.length > 0;
-  for (const keyword of keywords) {
-    const score = scores.get(scoreKey(post.uri, keyword, context));
+  for (const key of keys) {
+    const score = scores.get(key);
     if (score === undefined) complete = false;
     else if (best === null || score > best) best = score;
   }
@@ -80,8 +106,7 @@ export function getTopicProgress(posts) {
   let failedPosts = 0;
   const keywords = getTopicKeywords();
   for (const post of posts) {
-    const context = buildTopicContext(post);
-    const keys = keywords.map((keyword) => scoreKey(post.uri, keyword, context));
+    const { keys } = getTopicEntry(post, keywords);
     if (keys.some((key) => pending.has(key))) pendingPosts += 1;
     else if (keys.some((key) => failed.has(key)) && getTopicVerdict(post).verdict === 'unknown') failedPosts += 1;
   }
@@ -172,19 +197,18 @@ export function requestTopicScores(posts, onUpdate) {
   if (unavailableReason) return;
   const rounds = [];
   const topicKeywords = getTopicKeywords();
+  const isUnchecked = (key) => !scores.has(key) && !pending.has(key) && !failed.has(key);
   for (const post of posts) {
     if (typeof post?.uri !== 'string' || !post.uri || post.uri.length > TOPIC_LIMITS.id) continue;
-    const context = buildTopicContext(post);
-    const keywords = topicKeywords.filter((keyword) => {
-      const key = scoreKey(post.uri, keyword, context);
-      return !scores.has(key) && !pending.has(key) && !failed.has(key);
-    });
+    const { context, keys } = getTopicEntry(post, topicKeywords);
+    const keywords = topicKeywords.filter((_keyword, index) => isUnchecked(keys[index]));
     if (keywords.length === 0) continue;
+    const uncheckedKeys = keys.filter(isUnchecked);
     if (!hasTopicEvidence(context)) {
-      keywords.forEach((keyword) => failed.add(scoreKey(post.uri, keyword, context)));
+      uncheckedKeys.forEach((key) => failed.add(key));
       continue;
     }
-    keywords.forEach((keyword) => pending.add(scoreKey(post.uri, keyword, context)));
+    uncheckedKeys.forEach((key) => pending.add(key));
     for (let start = 0; start < keywords.length; start += TOPIC_LIMITS.maxKeywords) {
       const round = start / TOPIC_LIMITS.maxKeywords;
       rounds[round] ??= [];
@@ -219,10 +243,14 @@ export function cancelTopicScoring() {
   pending.clear();
 }
 
-export function resetTopicScoring() {
+export function restartTopicScoring() {
   cancelTopicScoring();
   failed.clear();
   unavailableReason = '';
+}
+
+export function resetTopicScoring() {
+  restartTopicScoring();
   while (scores.size > MAX_TOPIC_SCORE_CACHE_SIZE) {
     scores.delete(scores.keys().next().value);
   }
