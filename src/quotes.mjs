@@ -161,19 +161,30 @@ function createQuoteCard(post, { className, label = '', includeQuoteCount = fals
 }
 
 function renderQuoteLoadMore() {
-  quoteLoadMoreDiv.textContent = '';
+  let button = quoteLoadMoreDiv.firstElementChild;
   if (!state.quoteCursor) {
+    if (button && document.activeElement === button) {
+      const lastQuote = quoteResultsDiv.lastElementChild;
+      if (lastQuote) {
+        lastQuote.tabIndex = -1;
+        lastQuote.focus();
+      }
+    }
+    quoteLoadMoreDiv.textContent = '';
     return;
   }
 
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = 'load-more';
-  button.id = 'quoteLoadMoreBtn';
-  button.textContent = 'Load More Quotes';
-  button.disabled = state.isQuoteLoading;
-  button.addEventListener('click', loadMoreQuotes);
-  quoteLoadMoreDiv.appendChild(button);
+  if (!button) {
+    button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'load-more';
+    button.id = 'quoteLoadMoreBtn';
+    button.addEventListener('click', loadMoreQuotes);
+    quoteLoadMoreDiv.appendChild(button);
+  }
+  button.textContent = state.isQuoteLoading ? 'Loading…' : 'Load More Quotes';
+  if (state.isQuoteLoading) button.setAttribute('aria-disabled', 'true');
+  else button.removeAttribute('aria-disabled');
 }
 
 function renderQuoteResults({ allowAppend = false } = {}) {
@@ -273,11 +284,7 @@ export async function loadMoreQuotes() {
   const generation = quoteGeneration;
   const controller = quoteController;
   state.isQuoteLoading = true;
-  const loadMoreBtn = document.getElementById('quoteLoadMoreBtn');
-  if (loadMoreBtn) {
-    loadMoreBtn.disabled = true;
-    loadMoreBtn.textContent = 'Loading…';
-  }
+  renderQuoteLoadMore();
 
   try {
     const page = await fetchQuotesPage(state.activeQuoteUri, state.quoteCursor, controller?.signal);

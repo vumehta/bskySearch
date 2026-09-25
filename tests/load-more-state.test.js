@@ -90,7 +90,8 @@ describe('search pagination and lifecycle', () => {
     const loadMorePromise = search.loadMore();
     await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1));
 
-    expect(button.disabled).toBe(true);
+    expect(button.disabled).toBe(false);
+    expect(button.getAttribute('aria-disabled')).toBe('true');
     expect(button.textContent).toBe('Loading…');
 
     pending.resolve({
@@ -101,7 +102,7 @@ describe('search pagination and lifecycle', () => {
 
     expect(state.currentCursors.apple).toBe('cursor-3');
     expect(button.style.display).toBe('');
-    expect(button.disabled).toBe(false);
+    expect(button.getAttribute('aria-disabled')).toBe(null);
     expect(button.textContent).toBe('Load More Results');
 
     globalThis.fetch = vi.fn(async () => ({
@@ -417,11 +418,106 @@ describe('search pagination and lifecycle', () => {
     globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ posts: [{ ...makePost('media', 20), embed }] }) }));
     await search.performSearch();
     const card = elements.results.querySelector('.post');
-    const button = card.querySelector('.image-placeholder').firstElementChild;
+    const button = card.querySelector('.image-toggle');
     expect(button.textContent).toBe(buttonText);
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    expect(card.querySelector('.post-images')).toBe(null);
+
     button.listeners.get('click')();
-    expect(card.querySelector('.image-placeholder')).toBe(null);
+    const images = card.querySelector('.post-images');
+    expect(card.querySelector('.image-toggle')).toBe(button);
+    expect(button.textContent).toBe(buttonText.replace('Show', 'Hide'));
+    expect(button.getAttribute('aria-expanded')).toBe('true');
+    expect(button.getAttribute('aria-controls')).toBe(images.id);
     expect(card.querySelectorAll('.post-image').map((image) => image.src)).toEqual(sources);
+
+    button.listeners.get('click')();
+    expect(button.textContent).toBe(buttonText);
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    expect(images.style.display).toBe('none');
+  });
+
+  it('keeps an open thread, shown images and focus when a card is updated', async () => {
+    const post = {
+      ...makePost('kept', 20),
+      record: { ...makePost('kept', 20).record, reply: { parent: { uri: 'at://did:plc:test/app.bsky.feed.post/parent' } } },
+      embed: { $type: 'app.bsky.embed.images#view', images: [{ thumb: 'https://cdn.bsky.app/kept.jpg', alt: 'Kept' }] },
+    };
+    let searches = 0;
+    let page = () => ({ cursor: `c${searches}`, posts: [post] });
+    globalThis.fetch = vi.fn(async (url) => {
+      const isThread = String(url).includes('getPostThread');
+      if (!isThread) searches += 1;
+      const body = isThread ? { thread: { parent: { post: makePost('parent', 5) } } } : page();
+      return { ok: true, json: async () => body };
+    });
+    await search.performSearch();
+    const card = elements.results.querySelector('.post');
+    card.querySelector('.image-toggle').listeners.get('click')();
+    await card.querySelector('button.thread-link').listeners.get('click')();
+    expect(card.querySelector('.thread-context')).not.toBe(null);
+    card.querySelectorAll('a.thread-link')[0].focus();
+
+    page = () => ({ posts: [{ ...post, likeCount: 30 }] });
+    await search.loadMore();
+    const updated = elements.results.querySelector('.post');
+    expect(updated).not.toBe(card);
+    expect(updated.querySelector('.stat.likes').textContent).toBe('♥ 30');
+    const context = updated.querySelector('.thread-context');
+    const threadButton = updated.querySelector('button.thread-link');
+    expect(context.textContent).toContain('post parent about apple');
+    expect(threadButton.textContent).toBe('Hide Thread');
+    expect(threadButton.getAttribute('aria-expanded')).toBe('true');
+    expect(threadButton.getAttribute('aria-controls')).toBe(context.id);
+    expect(updated.querySelector('.image-toggle').getAttribute('aria-expanded')).toBe('true');
+    expect(updated.querySelector('.post-images-container').children.map((child) => child.className))
+      .toEqual(['image-placeholder revealed', 'post-images single']);
+    expect(updated.querySelectorAll('.post-image').map((image) => image.src)).toEqual(['https://cdn.bsky.app/kept.jpg']);
+    expect(testDocument.activeElement).toBe(updated.querySelectorAll('a.thread-link')[0]);
+
+    await threadButton.listeners.get('click')();
+    expect(updated.querySelector('.thread-context')).toBe(null);
+    expect(threadButton.textContent).toBe('View Thread');
+  });
+
+  it('moves focus to the last result when Load More runs out while focused', async () => {
+    globalThis.fetch = makePagedFetch();
+    await search.performSearch();
+    getLoadMoreButton().focus();
+    globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ posts: [makePost('last', 5)] }) }));
+    await search.loadMore();
+    const cards = elements.results.querySelectorAll('.post');
+    expect(getLoadMoreButton().style.display).toBe('none');
+    expect(testDocument.activeElement).toBe(cards.at(-1));
+    expect(cards.at(-1).tabIndex).toBe(-1);
+  });
+
+  it('moves focus to the empty-results message when Load More runs out with nothing to show', async () => {
+    globalThis.fetch = makePagedFetch();
+    elements.minLikes.value = '60';
+    await search.performSearch();
+    expect(elements.results.querySelectorAll('.post')).toHaveLength(0);
+    getLoadMoreButton().focus();
+    globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ posts: [makePost('last', 5)] }) }));
+    await search.loadMore();
+    const empty = elements.results.querySelector('.no-results');
+    expect(getLoadMoreButton().style.display).toBe('none');
+    expect(empty.style.display).toBe('block');
+    expect(testDocument.activeElement).toBe(empty);
+  });
+
+  it('moves focus to the first newly shown result when the last Show more is used', async () => {
+    const posts = Array.from({ length: 250 }, (_, index) => makePost(`many${index}`, 300 - index));
+    globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ posts }) }));
+    await search.performSearch();
+    const showMore = elements.results.querySelectorAll('button.load-more')[0];
+    expect(showMore.textContent).toBe('Show 50 more loaded results');
+    showMore.focus();
+    showMore.listeners.get('click')();
+    const cards = elements.results.querySelectorAll('.post');
+    expect(cards).toHaveLength(250);
+    expect(showMore.style.display).toBe('none');
+    expect(testDocument.activeElement).toBe(cards[200]);
   });
 
   it.each([

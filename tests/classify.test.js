@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CLASSIFY_ADMISSION_LIMITS, POST, buildTopicQuestion, testUtils } from '../api/classify.mjs';
+import {
+  CLASSIFY_ADMISSION_LIMITS,
+  CLASSIFY_CLIENT_ADMISSION_LIMITS,
+  POST,
+  buildTopicQuestion,
+  testUtils,
+} from '../api/classify.mjs';
 import { TOPIC_JOB_TIMEOUT_MS } from '../src/constants.mjs';
 import { TOPIC_LIMITS } from '../src/topic-context.mjs';
 
@@ -11,6 +17,8 @@ const {
   UPSTREAM_CONCURRENCY,
   UPSTREAM_RETRY_DELAY_MS,
   TYPESAFE_ENDPOINT,
+  MAX_ADMISSION_CLIENTS,
+  clientAdmissions,
   resetModuleStateForTests,
 } = testUtils;
 const originalFetch = globalThis.fetch;
@@ -19,10 +27,15 @@ function item(id, keywords = ['Meta'], text = `post ${id}`) {
   return { id, keywords, context: { post_text: text, author: 'Alice (@alice.example)' } };
 }
 
-function request(body, { headers = {}, method = 'POST', signal } = {}) {
+function request(body, { headers = {}, method = 'POST', signal, client } = {}) {
   return new Request('https://example.com/api/classify', {
     method,
-    headers: { 'Content-Type': 'application/json', ...headers },
+    headers: {
+      'Content-Type': 'application/json',
+      'Sec-Fetch-Site': 'same-origin',
+      ...(client ? { 'X-Real-IP': client } : {}),
+      ...headers,
+    },
     body: method === 'POST' ? (typeof body === 'string' ? body : JSON.stringify(body)) : undefined,
     signal,
   });
@@ -91,15 +104,26 @@ describe('request validation', () => {
     for (const site of ['cross-site', 'same-site', 'none']) {
       expect((await POST(request({ items: [item('a')] }, { headers: { 'Sec-Fetch-Site': site } }), context)).status).toBe(403);
     }
+    const withoutFetchSite = (headers) => {
+      const built = request({ items: [item('a')] }, { headers });
+      built.headers.delete('Sec-Fetch-Site');
+      return built;
+    };
+    expect((await POST(withoutFetchSite({}), context)).status).toBe(403);
+    expect((await POST(withoutFetchSite({ Origin: 'https://attacker.example' }), context)).status).toBe(403);
+    expect((await POST(withoutFetchSite({ Origin: 'null' }), context)).status).toBe(403);
     expect((await POST(request({ items: [item('a')] }, { headers: { 'Content-Type': 'text/plain' } }), context)).status).toBe(415);
     expect((await POST(request('{nope'), context)).status).toBe(400);
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
-  it('accepts this site\'s own pages', async () => {
+  it('accepts this site\'s own pages, including browsers that only send Origin', async () => {
     upstream();
     const response = await POST(request({ items: [item('a')] }, { headers: { 'Sec-Fetch-Site': 'same-origin' } }), context);
     expect(response.status).toBe(200);
+    const originOnly = request({ items: [item('b')] }, { headers: { Origin: 'https://example.com' } });
+    originOnly.headers.delete('Sec-Fetch-Site');
+    expect((await POST(originOnly, context)).status).toBe(200);
   });
 
   it.each([
@@ -470,16 +494,20 @@ describe('upstream failures', () => {
   });
 });
 
+async function fillAdmission(calls, prefix = 'fill') {
+  for (let start = 0; start < calls; start += TOPIC_LIMITS.maxItems) {
+    const client = `filler-${Math.floor(start / CLASSIFY_CLIENT_ADMISSION_LIMITS.burst)}`;
+    const items = Array.from({ length: Math.min(TOPIC_LIMITS.maxItems, calls - start) }, (_, index) => item(prefix + (start + index)));
+    expect((await POST(request({ items }, { client }), context)).status).toBe(200);
+  }
+}
+
 describe('admission', () => {
   it('charges nothing when the caller goes away before any call is made', async () => {
     useFakeClock();
     vi.spyOn(Date, 'now').mockReturnValue(Date.now());
     upstream();
-    const fillCalls = CLASSIFY_ADMISSION_LIMITS.burst - TOPIC_LIMITS.maxItems;
-    for (let start = 0; start < fillCalls; start += TOPIC_LIMITS.maxItems) {
-      const items = Array.from({ length: TOPIC_LIMITS.maxItems }, (_, index) => item('fill' + (start + index)));
-      expect((await POST(request({ items }), context)).status).toBe(200);
-    }
+    await fillAdmission(CLASSIFY_ADMISSION_LIMITS.burst - TOPIC_LIMITS.maxItems);
     globalThis.fetch.mockClear();
     const controller = new AbortController();
     const digest = crypto.subtle.digest.bind(crypto.subtle);
@@ -500,11 +528,7 @@ describe('admission', () => {
     vi.spyOn(Date, 'now').mockReturnValue(Date.now());
     upstream();
     const retryingPosts = 4;
-    const initialCalls = CLASSIFY_ADMISSION_LIMITS.burst - retryingPosts;
-    for (let start = 0; start < initialCalls; start += TOPIC_LIMITS.maxItems) {
-      const items = Array.from({ length: Math.min(TOPIC_LIMITS.maxItems, initialCalls - start) }, (_, index) => item('fill' + (start + index)));
-      expect((await POST(request({ items }), context)).status).toBe(200);
-    }
+    await fillAdmission(CLASSIFY_ADMISSION_LIMITS.burst - retryingPosts);
     globalThis.fetch.mockImplementation(async () => Response.json({ error: 'overloaded' }, { status: 529 }));
     const response = await advanceUntilSettled(POST(request({
       items: Array.from({ length: retryingPosts }, (_, index) => item('retry' + index)),
@@ -522,10 +546,7 @@ describe('admission', () => {
     vi.spyOn(Date, 'now').mockReturnValue(Date.now());
     upstream();
     const initialCalls = CLASSIFY_ADMISSION_LIMITS.burst - 2;
-    for (let start = 0; start < initialCalls; start += TOPIC_LIMITS.maxItems) {
-      const items = Array.from({ length: Math.min(TOPIC_LIMITS.maxItems, initialCalls - start) }, (_, index) => item('fill' + (start + index)));
-      expect((await POST(request({ items }), context)).status).toBe(200);
-    }
+    await fillAdmission(initialCalls);
     let upstreamSignal;
     globalThis.fetch.mockClear().mockImplementation((_url, options) => {
       if (JSON.parse(options.body).state.post_text === 'post retry') {
@@ -545,17 +566,13 @@ describe('admission', () => {
   it('limits upstream calls, not cache hits, and refills over time', async () => {
     useFakeClock();
     upstream();
-    const batches = Math.ceil(CLASSIFY_ADMISSION_LIMITS.burst / TOPIC_LIMITS.maxItems);
-    for (let batch = 0; batch < batches; batch += 1) {
-      const items = Array.from({ length: TOPIC_LIMITS.maxItems }, (_, index) => item(`b${batch}p${index}`));
-      expect((await POST(request({ items }), context)).status).toBe(200);
-    }
+    await fillAdmission(CLASSIFY_ADMISSION_LIMITS.burst);
 
     const limited = await POST(request({ items: [item('fresh-1'), item('fresh-2')] }), context);
     expect(limited.status).toBe(429);
     expect(Number(limited.headers.get('Retry-After'))).toBeGreaterThan(0);
 
-    const cached = await POST(request({ items: [item('b0p0')] }), context);
+    const cached = await POST(request({ items: [item('fill0')] }), context);
     expect(cached.status).toBe(200);
 
     vi.setSystemTime(Date.now() + 1000);
@@ -570,5 +587,69 @@ describe('admission', () => {
     expect(retryAfter).toBeGreaterThan(1);
     vi.setSystemTime(Date.now() + retryAfter * 1000);
     expect((await POST(request({ items: freshBatch }), context)).status).toBe(200);
+  });
+
+  it('gives each client its own share, so one client cannot lock out the rest', async () => {
+    useFakeClock();
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+    upstream();
+    const batches = CLASSIFY_CLIENT_ADMISSION_LIMITS.burst / TOPIC_LIMITS.maxItems;
+    for (let batch = 0; batch < batches; batch += 1) {
+      const items = Array.from({ length: TOPIC_LIMITS.maxItems }, (_, index) => item(`greedy${batch}-${index}`));
+      expect((await POST(request({ items }, { client: '203.0.113.7' }), context)).status).toBe(200);
+    }
+    const greedy = Array.from({ length: TOPIC_LIMITS.maxItems }, (_, index) => item(`greedy-more${index}`));
+    const limited = await POST(request({ items: greedy }, { client: '203.0.113.7' }), context);
+    expect(limited.status).toBe(429);
+    expect(Number(limited.headers.get('Retry-After'))).toBe(
+      Math.ceil(TOPIC_LIMITS.maxItems / CLASSIFY_CLIENT_ADMISSION_LIMITS.refillPerSecond),
+    );
+    const other = Array.from({ length: TOPIC_LIMITS.maxItems }, (_, index) => item(`other${index}`));
+    expect((await POST(request({ items: other }, { client: '198.51.100.4' }), context)).status).toBe(200);
+  });
+
+  it('charges retries against the client share as well as the instance', async () => {
+    useFakeClock();
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+    upstream();
+    const retryingPosts = 4;
+    const fill = CLASSIFY_CLIENT_ADMISSION_LIMITS.burst - retryingPosts;
+    for (let start = 0; start < fill; start += TOPIC_LIMITS.maxItems) {
+      const items = Array.from({ length: Math.min(TOPIC_LIMITS.maxItems, fill - start) }, (_, index) => item(`share${start + index}`));
+      expect((await POST(request({ items }, { client: '203.0.113.20' }), context)).status).toBe(200);
+    }
+    globalThis.fetch.mockImplementation(async () => Response.json({ error: 'overloaded' }, { status: 529 }));
+    const response = await advanceUntilSettled(POST(request({
+      items: Array.from({ length: retryingPosts }, (_, index) => item(`share-retry${index}`)),
+    }, { client: '203.0.113.20' }), context));
+    expect(response.status).toBe(429);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('identifies a client by X-Real-IP, then by the first X-Forwarded-For address', async () => {
+    useFakeClock();
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+    upstream();
+    const batches = CLASSIFY_CLIENT_ADMISSION_LIMITS.burst / TOPIC_LIMITS.maxItems;
+    for (let batch = 0; batch < batches; batch += 1) {
+      const items = Array.from({ length: TOPIC_LIMITS.maxItems }, (_, index) => item(`fwd${batch}-${index}`));
+      const headers = { 'X-Forwarded-For': '203.0.113.9, 10.0.0.1' };
+      expect((await POST(request({ items }, { headers }), context)).status).toBe(200);
+    }
+    const next = [item('fwd-next')];
+    expect((await POST(request({ items: next }, { client: '203.0.113.9' }), context)).status).toBe(429);
+    expect((await POST(request({ items: next }, { headers: { 'X-Forwarded-For': '10.0.0.1, 203.0.113.9' } }), context)).status).toBe(200);
+  });
+
+  it('remembers a bounded number of clients', async () => {
+    useFakeClock();
+    upstream();
+    for (let index = 0; index <= MAX_ADMISSION_CLIENTS; index += 1) {
+      vi.setSystemTime(Date.now() + 1000 / CLASSIFY_ADMISSION_LIMITS.refillPerSecond);
+      expect((await POST(request({ items: [item(`visitor${index}`)] }, { client: `client-${index}` }), context)).status).toBe(200);
+    }
+    expect(clientAdmissions.size).toBe(MAX_ADMISSION_CLIENTS);
+    expect(clientAdmissions.has('client-0')).toBe(false);
+    expect(clientAdmissions.has(`client-${MAX_ADMISSION_CLIENTS}`)).toBe(true);
   });
 });

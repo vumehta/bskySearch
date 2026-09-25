@@ -113,6 +113,16 @@ function removeThreadContexts(postElement) {
   return removed;
 }
 
+export function moveThreadContext(fromElement, toElement) {
+  const context = Array.from(fromElement.children).find((child) => child.classList.contains('thread-context'));
+  const link = toElement.querySelector('button.thread-link');
+  if (!context || !link) return;
+  link.setAttribute('aria-controls', context.id);
+  link.setAttribute('aria-expanded', 'true');
+  link.textContent = 'Hide Thread';
+  toElement.insertBefore(context, toElement.firstElementChild || null);
+}
+
 export function initializeThreadToggle(link) {
   if (!link.getAttribute('aria-controls')) {
     link.setAttribute('aria-controls', `thread-context-${++nextContextId}`);

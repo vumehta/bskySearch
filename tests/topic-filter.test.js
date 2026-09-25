@@ -80,6 +80,7 @@ describe('topic filter', () => {
 
   afterEach(() => {
     search.clearSearchResults();
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -362,19 +363,16 @@ describe('topic filter', () => {
     ]);
   });
 
-  it.each([
-    [503, { error: 'The topic filter is not configured on this server.' }, 'The topic filter is not configured on this server.'],
-    [429, { error: { code: '429', message: 'Too Many Requests' } }, 'Too many topic checks. Try again in a minute.'],
-  ])('keeps everything visible when the classifier returns %i', async (status, payload, message) => {
+  it('keeps everything visible when the classifier is not configured', async () => {
     const calls = installFetch({
       posts: [makePost('a', 'apple pie recipe'), makePost('b', 'Apple event recap')],
-      classify: () => failure(status, payload),
+      classify: () => failure(503, { error: 'The topic filter is not configured on this server.' }),
     });
     state.hideOffTopic = true;
     await search.performSearch();
     await vi.waitFor(() => expect(summaryText()).toContain('unavailable'));
     expect(summaryText()).toBe(
-      `Topic filter unavailable: ${message} Unchecked posts stay visible.`,
+      'Topic filter unavailable: The topic filter is not configured on this server. Unchecked posts stay visible.',
     );
     expect(visibleUris()).toHaveLength(2);
 
@@ -382,6 +380,142 @@ describe('topic filter', () => {
     search.applyMinLikesFilter();
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(calls.classify).toHaveLength(1);
+  });
+
+  const rateLimited = (retryAfter) => ({
+    ok: false,
+    status: 429,
+    headers: new Headers(retryAfter ? { 'Retry-After': retryAfter } : {}),
+    json: async () => ({ error: 'Too many topic checks. Please try again shortly.' }),
+  });
+
+  it('waits out a rate limit and then sends the checks it held back', async () => {
+    vi.useFakeTimers();
+    let limited = true;
+    const calls = installFetch({
+      posts: [makePost('company', 'Apple announces a new iPhone', 90), makePost('fruit', 'apple pie recipe', 80)],
+      classify: (body) => (limited
+        ? rateLimited('3')
+        : scoredBy((item) => (item.id === uri('company') ? 0.96 : 0.04))(body)),
+    });
+    state.hideOffTopic = true;
+    await search.performSearch();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(calls.classify).toHaveLength(1);
+    expect(summaryText()).toBe('Checking 2 posts for topic… Pausing briefly to stay within the topic check rate limit.');
+    expect(visibleUris()).toHaveLength(2);
+
+    limited = false;
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(calls.classify).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(calls.classify).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(visibleUris()).toEqual([uri('company')]);
+    expect(summaryText()).toBe('1 off-topic post hidden.');
+  });
+
+  it('waits for the longest Retry-After when concurrent batches are rate limited', async () => {
+    vi.useFakeTimers();
+    const posts = Array.from({ length: 50 }, (_, index) => makePost(`p${index}`, 'Apple news', 100 - index));
+    let round = 0;
+    const calls = installFetch({
+      posts,
+      classify: (body) => {
+        round += 1;
+        if (round === 1) return rateLimited('2');
+        if (round === 2) return new Promise((resolve) => setTimeout(() => resolve(rateLimited('10')), 500));
+        return scoredBy(() => 0.9)(body);
+      },
+    });
+    state.hideOffTopic = true;
+    await search.performSearch();
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(calls.classify).toHaveLength(2);
+    expect(summaryText()).toContain('Pausing briefly');
+
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(calls.classify).toHaveLength(4);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(summaryText()).toBe('No off-topic posts found.');
+  });
+
+  it('starts a new search without waiting out the last search\'s rate limit', async () => {
+    vi.useFakeTimers();
+    let limited = true;
+    const calls = installFetch({
+      posts: [makePost('company', 'Apple announces a new iPhone', 90)],
+      classify: (body) => (limited ? rateLimited('60') : scoredBy(() => 0.96)(body)),
+    });
+    state.hideOffTopic = true;
+    await search.performSearch();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(summaryText()).toContain('Pausing briefly');
+
+    limited = false;
+    await search.performSearch();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(calls.classify).toHaveLength(2);
+    expect(summaryText()).toBe('No off-topic posts found.');
+  });
+
+  it('stops a batch still in flight from retrying once repeated rate limits have turned the filter off', async () => {
+    vi.useFakeTimers();
+    const pages = {
+      '': { posts: Array.from({ length: 25 }, (_, index) => makePost(`first${index}`, 'Apple news', 90)), cursor: 'c1' },
+      c1: { posts: [], cursor: 'c2' },
+      c2: { posts: Array.from({ length: 25 }, (_, index) => makePost(`late${index}`, 'Apple news', 80)) },
+    };
+    const late = deferred();
+    const classified = [];
+    globalThis.fetch = vi.fn(async (url, options = {}) => {
+      if (String(url).startsWith('/api/classify')) {
+        const [{ id }] = JSON.parse(options.body).items;
+        classified.push(id);
+        return id === uri('first0') ? rateLimited() : late.promise;
+      }
+      return ok(pages[new URL(url, 'https://example.test').searchParams.get('cursor') || '']);
+    });
+    state.hideOffTopic = true;
+    await search.performSearch();
+    await vi.advanceTimersByTimeAsync(4 * 60000 + 500);
+    expect(classified).toEqual(Array(5).fill(uri('first0')));
+
+    await search.loadMore();
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(classified.slice(5)).toEqual([uri('first0'), uri('late0')]);
+    expect(summaryText()).toContain('Topic filter unavailable');
+
+    late.resolve(rateLimited());
+    await vi.advanceTimersByTimeAsync(3 * 60000);
+    expect(classified).toHaveLength(7);
+    expect(summaryText()).toBe(
+      'Topic filter unavailable: Too many topic checks. Try again in a minute. Unchecked posts stay visible.',
+    );
+  });
+
+  it('turns the filter off after repeated rate limits and keeps unchecked posts visible', async () => {
+    vi.useFakeTimers();
+    const calls = installFetch({
+      posts: [makePost('a', 'apple pie recipe'), makePost('b', 'Apple event recap')],
+      classify: () => rateLimited(),
+    });
+    state.hideOffTopic = true;
+    await search.performSearch();
+    await vi.advanceTimersByTimeAsync(4 * 60000);
+    expect(calls.classify).toHaveLength(5);
+    expect(summaryText()).toContain('Pausing briefly');
+    await vi.advanceTimersByTimeAsync(60000 + 500);
+    expect(calls.classify).toHaveLength(6);
+    expect(summaryText()).toBe(
+      'Topic filter unavailable: Too many topic checks. Try again in a minute. Unchecked posts stay visible.',
+    );
+    expect(visibleUris()).toHaveLength(2);
+
+    elements.minLikes.value = '40';
+    search.applyMinLikesFilter();
+    await vi.advanceTimersByTimeAsync(120000);
+    expect(calls.classify).toHaveLength(6);
   });
 
   it('keeps a post the classifier could not score, and retries it on the next search', async () => {

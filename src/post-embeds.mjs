@@ -19,7 +19,7 @@ function createExternalLink(className, href, content) {
   return link;
 }
 
-function createLinkCard(linkCard, renderText, { compact = false } = {}) {
+function createLinkCard(linkCard, renderText, { compact = false, focusKey = 'link-card' } = {}) {
   const href = getHttpUrl(linkCard.uri);
   const title = cleanText(linkCard.title, TOPIC_LIMITS.title);
   const description = compact ? '' : cleanText(linkCard.description, TOPIC_LIMITS.description);
@@ -30,9 +30,11 @@ function createLinkCard(linkCard, renderText, { compact = false } = {}) {
   const card = createElement('div', 'embed-link');
   if (heading) {
     const className = title ? 'embed-link-title' : 'embed-link-title embed-link-hostname';
-    card.appendChild(href
+    const headingElement = href
       ? createExternalLink(className, href, renderText(heading))
-      : createElement('span', className, renderText(heading)));
+      : createElement('span', className, renderText(heading));
+    if (href) headingElement.dataset.focusKey = focusKey;
+    card.appendChild(headingElement);
   }
   if (title && site) card.appendChild(createElement('div', 'embed-link-site', plainText(site)));
   if (description) card.appendChild(createElement('div', 'embed-link-description', renderText(description)));
@@ -43,7 +45,7 @@ function createQuotedPost(quoted, renderText) {
   const handle = cleanText(quoted.author?.handle, Infinity);
   const name = cleanText(quoted.author?.displayName, TOPIC_LIMITS.author) || handle;
   const text = cleanText(quoted.text, TOPIC_LIMITS.postText);
-  const linkCard = quoted.linkCard && createLinkCard(quoted.linkCard, renderText, { compact: true });
+  const linkCard = quoted.linkCard && createLinkCard(quoted.linkCard, renderText, { compact: true, focusKey: 'quote-link-card' });
   if (!name && !text && !linkCard) return null;
 
   const quote = createElement('blockquote', 'embed-quote');
@@ -51,7 +53,11 @@ function createQuotedPost(quoted, renderText) {
   if (name) header.appendChild(createElement('span', 'embed-quote-name', plainText(name)));
   if (handle) header.appendChild(createElement('span', 'embed-quote-handle', plainText(`@${handle}`)));
   const postUrl = getPostUrlFromAtUri(quoted.uri);
-  if (postUrl) header.appendChild(createExternalLink('thread-link embed-quote-link', postUrl, plainText('View quote \u2192')));
+  if (postUrl) {
+    const quoteLink = createExternalLink('thread-link embed-quote-link', postUrl, plainText('View quote \u2192'));
+    quoteLink.dataset.focusKey = 'quote';
+    header.appendChild(quoteLink);
+  }
   if (header.children.length > 0) quote.appendChild(header);
   if (text) quote.appendChild(createElement('div', 'embed-quote-text', renderText(text)));
   if (linkCard) quote.appendChild(linkCard);

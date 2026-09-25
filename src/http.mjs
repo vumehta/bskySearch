@@ -1,9 +1,10 @@
 export class HttpError extends Error {
-  constructor(status, payload) {
+  constructor(status, payload, retryAfter = null) {
     super(payload?.message || payload?.error || `Request failed: ${status}`);
     this.name = 'HttpError';
     this.status = status;
     this.payload = payload;
+    this.retryAfter = retryAfter;
   }
 }
 
@@ -35,15 +36,16 @@ export async function fetchJson(url, { signal, timeoutMs = 10000, ...options } =
     if (controller.signal.aborted) return await aborted;
     const operation = (async () => {
       const response = await fetch(url, { ...options, signal: controller.signal });
+      const retryAfter = response.headers?.get?.('Retry-After') ?? null;
       let payload;
       try {
         payload = await response.json();
       } catch {
         if (controller.signal.aborted) throw controller.signal.reason;
-        if (!response.ok) throw new HttpError(response.status, null);
+        if (!response.ok) throw new HttpError(response.status, null, retryAfter);
         throw new HttpError(502, { error: 'The server returned an invalid response.' });
       }
-      if (!response.ok) throw new HttpError(response.status, payload);
+      if (!response.ok) throw new HttpError(response.status, payload, retryAfter);
       return payload;
     })();
     return await Promise.race([operation, aborted]);

@@ -19,8 +19,13 @@ let queue = [];
 let activeRequests = 0;
 let owner = null;
 let unavailableReason = '';
+let resumeTimer = null;
+let resumeAt = 0;
 
 const BATCH_ONLY_STATUSES = new Set([400, 413, 504]);
+const RATE_LIMIT_DEFAULT_WAIT_MS = 60000;
+const RATE_LIMIT_MAX_WAIT_MS = 120000;
+const MAX_RATE_LIMITED_ATTEMPTS = 5;
 const ADULT_LABELS = new Set(['porn', 'sexual', 'nudity']);
 
 const scoreKey = (uri, keyword, context) => JSON.stringify([uri, keyword, context]);
@@ -80,7 +85,7 @@ export function getTopicProgress(posts) {
     if (keys.some((key) => pending.has(key))) pendingPosts += 1;
     else if (keys.some((key) => failed.has(key)) && getTopicVerdict(post).verdict === 'unknown') failedPosts += 1;
   }
-  return { pending: pendingPosts, failed: failedPosts, unavailableReason };
+  return { pending: pendingPosts, failed: failedPosts, paused: resumeTimer !== null, unavailableReason };
 }
 
 function settleBatch(items, results) {
@@ -97,7 +102,27 @@ function settleBatch(items, results) {
   }
 }
 
-async function runBatch({ items, onUpdate, batchOwner }) {
+function getRateLimitWaitMs(retryAfter) {
+  const value = typeof retryAfter === 'string' ? retryAfter.trim() : '';
+  const waitMs = /^\d+$/.test(value) ? Number(value) * 1000 : Date.parse(value) - Date.now();
+  if (!Number.isFinite(waitMs)) return RATE_LIMIT_DEFAULT_WAIT_MS;
+  return Math.min(RATE_LIMIT_MAX_WAIT_MS, Math.max(1000, waitMs));
+}
+
+function pauseForRateLimit(waitMs, onUpdate) {
+  const until = Date.now() + waitMs;
+  if (resumeTimer !== null && until <= resumeAt) return;
+  clearTimeout(resumeTimer);
+  resumeAt = until;
+  resumeTimer = setTimeout(() => {
+    resumeTimer = null;
+    pump();
+    onUpdate();
+  }, waitMs);
+}
+
+async function runBatch(batch) {
+  const { items, onUpdate, batchOwner } = batch;
   let results = null;
   let error = null;
   try {
@@ -113,6 +138,14 @@ async function runBatch({ items, onUpdate, batchOwner }) {
     error = caught;
   }
   if (batchOwner !== owner) return;
+  const canRetry = !unavailableReason && (batch.rateLimited ?? 0) < MAX_RATE_LIMITED_ATTEMPTS;
+  if (error instanceof HttpError && error.status === 429 && canRetry) {
+    batch.rateLimited = (batch.rateLimited ?? 0) + 1;
+    queue.unshift(batch);
+    pauseForRateLimit(getRateLimitWaitMs(error.retryAfter), onUpdate);
+    onUpdate();
+    return;
+  }
   settleBatch(items, results);
   if (error instanceof HttpError && !BATCH_ONLY_STATUSES.has(error.status)) {
     unavailableReason = error.status === 429
@@ -125,7 +158,7 @@ async function runBatch({ items, onUpdate, batchOwner }) {
 }
 
 function pump() {
-  while (activeRequests < TOPIC_REQUEST_CONCURRENCY && queue.length > 0) {
+  while (resumeTimer === null && activeRequests < TOPIC_REQUEST_CONCURRENCY && queue.length > 0) {
     const batch = queue.shift();
     activeRequests += 1;
     runBatch(batch).finally(() => {
@@ -180,6 +213,8 @@ export function dropQueuedTopicScores() {
 export function cancelTopicScoring() {
   owner?.abort();
   owner = null;
+  clearTimeout(resumeTimer);
+  resumeTimer = null;
   queue = [];
   pending.clear();
 }
