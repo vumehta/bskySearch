@@ -81,6 +81,7 @@ describe('upstream bodies and response validation', () => {
     const response = await pending;
     expect(response.status).toBe(504);
     expect(response.headers.get('Cache-Control')).toBe('no-store');
+    await expect(response.json()).resolves.toEqual({ error: 'Upstream request timed out.' });
     expect(signal.aborted).toBe(true);
     expect(searchResultsCache.size).toBe(0);
     expect(vi.getTimerCount()).toBe(0);
@@ -130,6 +131,7 @@ describe('upstream bodies and response validation', () => {
     const response = await GET(request(), context);
     expect(response.status).toBe(502);
     expect(response.headers.get('Cache-Control')).toBe('no-store');
+    await expect(response.json()).resolves.toEqual({ error: 'Invalid response from Bluesky.' });
     expect(searchResultsCache.size).toBe(0);
     handlers.search.mockImplementation(() => Response.json(posts));
     expect((await GET(request(), context)).status).toBe(200);
@@ -150,6 +152,7 @@ describe('upstream bodies and response validation', () => {
     upstream({ search: () => Response.json(payload) });
     const response = await GET(request(), context);
     expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({ error: 'Invalid search response from Bluesky.' });
     expect(searchResultsCache.size).toBe(0);
   });
 
@@ -171,7 +174,9 @@ describe('upstream bodies and response validation', () => {
     { accessJwt: 1, refreshJwt: 'refresh' },
   ])('rejects invalid successful session data: %j', async (payload) => {
     const handlers = upstream({ create: () => Response.json(payload) });
-    expect((await GET(request(), context)).status).toBe(502);
+    const response = await GET(request(), context);
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({ error: 'Invalid authentication response from Bluesky.' });
     expect((await GET(request(), context)).status).toBe(502);
     expect(handlers.create).toHaveBeenCalledTimes(2);
     expect(handlers.search).not.toHaveBeenCalled();
@@ -185,6 +190,7 @@ describe('upstream bodies and response validation', () => {
     expect(response.status).toBe(429);
     expect(response.headers.get('Retry-After')).toBe('30');
     expect(response.headers.get('Cache-Control')).toBe('no-store');
+    await expect(response.json()).resolves.toEqual({ error: 'Bluesky search is rate limited. Please try again later.' });
     expect(handlers.refresh).not.toHaveBeenCalled();
     expect(searchResultsCache.size).toBe(0);
   });
@@ -198,7 +204,9 @@ describe('upstream bodies and response validation', () => {
 
   it('returns 502 for a network failure without caching it', async () => {
     upstream({ search: () => Promise.reject(new TypeError('fetch failed')) });
-    expect((await GET(request(), context)).status).toBe(502);
+    const response = await GET(request(), context);
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({ error: 'Could not reach Bluesky.' });
     expect(searchResultsCache.size).toBe(0);
   });
 });
@@ -231,7 +239,10 @@ describe('authentication lifecycle', () => {
     expect(handlers.refresh).toHaveBeenCalledTimes(1);
   });
 
-  it.each([429, 503])('does not turn refresh status %i into another login', async (status) => {
+  it.each([
+    [429, 429, 'Bluesky login is rate limited. Please try again later.'],
+    [503, 502, 'Bluesky authentication failed.'],
+  ])('does not turn refresh status %i into another login', async (status, proxied, error) => {
     vi.useFakeTimers();
     const handlers = upstream({
       refresh: () => Response.json({ error: 'Unavailable' }, { status, headers: { 'Retry-After': '20' } }),
@@ -239,8 +250,9 @@ describe('authentication lifecycle', () => {
     await GET(request('first'), context);
     vi.setSystemTime(Date.now() + SESSION_TTL_MS + 1);
     const response = await GET(request('second'), context);
-    expect(response.status).toBe(status === 429 ? 429 : 502);
+    expect(response.status).toBe(proxied);
     expect(response.headers.get('Retry-After')).toBe('20');
+    await expect(response.json()).resolves.toEqual({ error });
     expect(handlers.create).toHaveBeenCalledTimes(1);
     expect(handlers.refresh).toHaveBeenCalledTimes(1);
   });
@@ -270,6 +282,9 @@ describe('authentication lifecycle', () => {
     vi.setSystemTime(limitedAt + seconds * 1000 - 1);
     const blocked = await GET(request('two'), context);
     expect(blocked.status).toBe(429);
+    await expect(blocked.json()).resolves.toEqual({
+      error: 'Bluesky login is rate limited. Please try again later.',
+    });
     expect(handlers.create).toHaveBeenCalledTimes(1);
     expect(handlers.search).not.toHaveBeenCalled();
     handlers.create.mockImplementation(() => Response.json(session()));
@@ -593,6 +608,7 @@ describe('coalescing and cancellation', () => {
     const response = await GET(request('topic', { signal: controller.signal }), context);
     expect(response.status).toBe(499);
     expect(response.headers.get('Cache-Control')).toBe('no-store');
+    await expect(response.json()).resolves.toEqual({ error: 'Request cancelled.' });
     expect(handlers.create).not.toHaveBeenCalled();
     expect(handlers.search).not.toHaveBeenCalled();
   });
@@ -700,6 +716,7 @@ describe('bounded search admission', () => {
     expect(rejected.status).toBe(429);
     expect(rejected.headers.get('Retry-After')).toBe('1');
     expect(rejected.headers.get('Cache-Control')).toBe('no-store');
+    await expect(rejected.json()).resolves.toEqual({ error: 'Search is busy. Please try again shortly.' });
     await vi.waitFor(() => expect(handlers.search).toHaveBeenCalledTimes(SEARCH_ADMISSION_LIMITS.maxConcurrent));
     body.resolve();
     expect((await Promise.all([...pending, joined])).every((response) => response.status === 200)).toBe(true);
@@ -717,6 +734,7 @@ describe('bounded search admission', () => {
     const denied = await GET(request('overflow', { headers: { 'X-Real-IP': '198.51.100.1' } }), context);
     expect(denied.status).toBe(429);
     expect(denied.headers.get('Retry-After')).toBe('1');
+    await expect(denied.json()).resolves.toEqual({ error: 'Too many searches. Please try again shortly.' });
     expect((await GET(request('topic-0'), context)).status).toBe(200);
     expect(handlers.search).toHaveBeenCalledTimes(SEARCH_ADMISSION_LIMITS.burst);
     vi.setSystemTime(Date.now() + 1000 / SEARCH_ADMISSION_LIMITS.refillPerSecond);
@@ -734,6 +752,7 @@ describe('bounded search admission', () => {
     const limited = await GET(request('greedy-more', greedy), context);
     expect(limited.status).toBe(429);
     expect(limited.headers.get('Retry-After')).toBe(String(Math.ceil(1 / SEARCH_CLIENT_ADMISSION_LIMITS.refillPerSecond)));
+    await expect(limited.json()).resolves.toEqual({ error: 'Too many searches. Please try again shortly.' });
     expect((await GET(request('greedy-0', greedy), context)).status).toBe(200);
     expect((await GET(request('other', { headers: { 'X-Real-IP': '198.51.100.4' } }), context)).status).toBe(200);
     expect(handlers.search).toHaveBeenCalledTimes(SEARCH_CLIENT_ADMISSION_LIMITS.burst + 1);
@@ -792,6 +811,7 @@ describe('handler input boundaries', () => {
     const response = await GET(new Request('https://example.com/api/search'), context);
     expect(response.status).toBe(400);
     expect(response.headers.get('Cache-Control')).toBe('no-store');
+    await expect(response.json()).resolves.toEqual({ error: 'Missing term parameter.' });
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
@@ -801,20 +821,22 @@ describe('handler input boundaries', () => {
     expect(response.status).toBe(405);
     expect(response.headers.get('Allow')).toBe('GET');
     expect(response.headers.get('Cache-Control')).toBe('no-store');
+    await expect(response.json()).resolves.toEqual({ error: 'Method not allowed.' });
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
   it.each([
-    ['term', 'a'.repeat(501)],
-    ['cursor', 'a'.repeat(1001)],
-    ['sort', 'popular'],
-    ['since', '2026-02-30'],
-  ])('rejects an invalid %s without contacting upstream', async (key, value) => {
+    ['term', 'a'.repeat(501), 'Search term is too long.'],
+    ['cursor', 'a'.repeat(1001), 'Cursor is too long.'],
+    ['sort', 'popular', 'Invalid sort parameter.'],
+    ['since', '2026-02-30', 'Invalid since parameter.'],
+  ])('rejects an invalid %s without contacting upstream', async (key, value, error) => {
     upstream();
     const url = new URL('https://example.com/api/search?term=topic');
     url.searchParams.set(key, value);
     const response = await GET(new Request(url), context);
     expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error });
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
@@ -877,6 +899,7 @@ describe('handler input boundaries', () => {
     upstream();
     const response = await GET(request(), { env: {} });
     expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({ error: 'Server missing BSKY_HANDLE or BSKY_APP_PASSWORD.' });
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 });
