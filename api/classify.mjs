@@ -14,7 +14,7 @@ const UPSTREAM_CONCURRENCY = 8;
 const UPSTREAM_RETRY_DELAY_MS = 300;
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504, 529]);
 
-const MAX_BODY_CHARS = 256 * 1024;
+const MAX_BODY_BYTES = 1024 * 1024;
 
 const SCORE_CACHE_TTL_MS = 60 * 60 * 1000;
 const MAX_SCORE_CACHE_SIZE = 5000;
@@ -146,13 +146,13 @@ function parseItems(payload) {
 
 async function readJsonBody(request) {
   const declaredLength = Number(request.headers.get('content-length'));
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_CHARS) {
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) {
     throw httpError('Request body is too large.', 413);
   }
-  const text = await request.text();
-  if (text.length > MAX_BODY_CHARS) throw httpError('Request body is too large.', 413);
+  const body = await request.arrayBuffer();
+  if (body.byteLength > MAX_BODY_BYTES) throw httpError('Request body is too large.', 413);
   try {
-    return JSON.parse(text);
+    return JSON.parse(new TextDecoder().decode(body));
   } catch {
     throw httpError('Request body is not valid JSON.', 400);
   }
@@ -507,6 +507,7 @@ export const testUtils =
         scoreCache,
         SCORE_CACHE_TTL_MS,
         MAX_SCORE_CACHE_SIZE,
+        MAX_BODY_BYTES,
         UPSTREAM_TIMEOUT_MS,
         UPSTREAM_CONCURRENCY,
         UPSTREAM_RETRY_DELAY_MS,

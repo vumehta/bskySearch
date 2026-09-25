@@ -7,12 +7,13 @@ import {
   testUtils,
 } from '../api/classify.mjs';
 import { TOPIC_JOB_TIMEOUT_MS } from '../src/constants.mjs';
-import { TOPIC_LIMITS } from '../src/topic-context.mjs';
+import { TOPIC_LIMITS, sanitizeTopicContext } from '../src/topic-context.mjs';
 
 const context = { env: { TYPESAFE_API_KEY: 'test-key' } };
 const {
   scoreCache,
   SCORE_CACHE_TTL_MS,
+  MAX_BODY_BYTES,
   UPSTREAM_TIMEOUT_MS,
   UPSTREAM_CONCURRENCY,
   UPSTREAM_RETRY_DELAY_MS,
@@ -25,6 +26,32 @@ const originalFetch = globalThis.fetch;
 
 function item(id, keywords = ['Meta'], text = `post ${id}`) {
   return { id, keywords, context: { post_text: text, author: 'Alice (@alice.example)' } };
+}
+
+const wide = (length, offset = 0) => String.fromCharCode(0x4E00 + offset).repeat(length);
+
+function maximalItem(index) {
+  const link = { title: wide(TOPIC_LIMITS.title), description: wide(TOPIC_LIMITS.description), site: wide(TOPIC_LIMITS.site), path: wide(TOPIC_LIMITS.path) };
+  const alts = Array.from({ length: TOPIC_LIMITS.maxImageDescriptions }, () => wide(TOPIC_LIMITS.imageDescription));
+  return {
+    id: wide(TOPIC_LIMITS.id, index),
+    keywords: Array.from({ length: TOPIC_LIMITS.maxKeywords }, (_, keyword) => wide(TOPIC_LIMITS.keyword, 100 + keyword)),
+    context: {
+      post_text: wide(TOPIC_LIMITS.postText, index),
+      author: wide(TOPIC_LIMITS.author),
+      link_card: link,
+      image_descriptions: alts,
+      quoted_post: {
+        text: wide(TOPIC_LIMITS.postText),
+        author: wide(TOPIC_LIMITS.author),
+        link_title: link.title,
+        link_description: link.description,
+        link_site: link.site,
+        link_path: link.path,
+        image_descriptions: alts,
+      },
+    },
+  };
 }
 
 function request(body, { headers = {}, method = 'POST', signal, client } = {}) {
@@ -147,11 +174,27 @@ describe('request validation', () => {
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
-  it('rejects oversized bodies', async () => {
+  it('rejects bodies over the byte limit, whether declared or counted', async () => {
     globalThis.fetch = vi.fn();
-    const response = await POST(request(JSON.stringify({ items: [item('a', ['Meta'], 'x'.repeat(300 * 1024))] })), context);
-    expect(response.status).toBe(413);
+    const oversized = JSON.stringify({ items: [item('a', ['Meta'], wide(Math.ceil(MAX_BODY_BYTES / 3)))] });
+    expect(oversized.length).toBeLessThan(MAX_BODY_BYTES);
+    expect((await POST(request(oversized), context)).status).toBe(413);
+    const declared = request({ items: [item('a')] }, { headers: { 'Content-Length': String(MAX_BODY_BYTES + 1) } });
+    expect((await POST(declared, context)).status).toBe(413);
     expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('accepts the largest batch the client can build, even in three-byte text', async () => {
+    const calls = upstream();
+    const items = Array.from({ length: TOPIC_LIMITS.maxItems }, (_, index) => maximalItem(index));
+    expect(sanitizeTopicContext(items[0].context)).toEqual(items[0].context);
+    const body = JSON.stringify({ items });
+    const bytes = new TextEncoder().encode(body).length;
+    const response = await POST(request(body, { headers: { 'Content-Length': String(bytes) } }), context);
+    expect(response.status).toBe(200);
+    const { results } = await response.json();
+    expect(results.map(({ scores }) => scores)).toEqual(items.map(() => Array(TOPIC_LIMITS.maxKeywords).fill(0.9)));
+    expect(calls).toHaveLength(TOPIC_LIMITS.maxItems);
   });
 });
 
