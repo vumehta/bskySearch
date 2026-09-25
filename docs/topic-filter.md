@@ -40,6 +40,13 @@ invalidate earlier scores. Unchecked posts remain visible and hidden posts can
 be revealed using **Show them**. While the filter is enabled, match percentages
 appear as scores arrive, whether or not hidden posts are revealed.
 
+A batch of up to 25 posts has 20 seconds on the server. When that runs out, the
+server returns the scores that finished and the remaining posts stay visible as
+unchecked. Changes to **Min. Likes** apply once typing pauses (or on Enter), and
+raising it lets checks already in flight finish while dropping queued checks for
+posts that no longer qualify. `vercel.json` enables request cancellation, so a
+batch the browser abandons stops calling TypeSafe.
+
 ## Evaluate a rubric change
 
 `tests/fixtures/topic-eval.json` contains hand-labeled examples, including
