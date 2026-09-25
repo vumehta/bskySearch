@@ -194,5 +194,12 @@
     "keep": false,
     "mention": true,
     "context": { "post_text": "Cancel Netflix lol" }
+  },
+  {
+    "id": "product-remark-without-company-name",
+    "keyword": "Meta",
+    "keep": false,
+    "mention": true,
+    "context": { "post_text": "Threads is a ghost town these days." }
   }
 ]

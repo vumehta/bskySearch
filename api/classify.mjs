@@ -86,12 +86,14 @@ export function buildMentionQuestion(keyword) {
         'The post says something about the intended company, brand, or platform, or about one of its products, ' +
         'services, shows, apps, devices, or executives: news, an opinion, praise, a complaint, a joke, or a call ' +
         'to action. Brief, low-effort, and unsupported remarks count, and so does a remark aimed at several ' +
-        'companies at once.',
+        'companies at once. Naming one of its products, services, or platforms is enough; the company name ' +
+        'need not appear.',
       false:
-        'Nothing in the supplied evidence says anything about the intended business. The search term is absent, ' +
-        'used with a different meaning (an ordinary word, slang, a game term, intelligence reports, or a different ' +
-        'thing with the same name), used inside an idiom or catchphrase such as "Netflix and chill", or appears ' +
-        'only as a source or photo credit, a hashtag, a follow-me request, or the place where something was posted. ' +
+        'Nothing in the supplied evidence says anything about the intended business or its products, services, ' +
+        'or platforms. Neither the name nor any of those products appears, or the name is only used with a different ' +
+        'meaning (an ordinary word, slang, a game term, intelligence reports, or a different thing with the same name), ' +
+        'used inside an idiom or catchphrase such as "Netflix and chill", or appears only as a source or photo credit, ' +
+        'a hashtag, a follow-me request, or the place where something was posted. ' +
         'Sexual or promotional content that uses the name only as a hook does not count.',
     },
   };
