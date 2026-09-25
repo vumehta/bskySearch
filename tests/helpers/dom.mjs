@@ -68,6 +68,13 @@ export class TestNode {
     ]);
   }
   querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
+  contains(node) {
+    for (let current = node; current; current = current.parentNode) {
+      if (current === this) return true;
+    }
+    return false;
+  }
+  focus() { if (this.ownerDocument) this.ownerDocument.activeElement = this; }
 }
 
 export function createTestDocument(ids) {
@@ -78,9 +85,10 @@ export function createTestDocument(ids) {
   }));
   const find = (node, id) => node.id === id ? node : node.children.map((child) => find(child, id)).find(Boolean);
   const document = {
+    activeElement: null,
     documentElement: new TestNode('html'),
     getElementById: (id) => elements[id] || Object.values(elements).map((node) => find(node, id)).find(Boolean) || null,
-    createElement: (tag) => new TestNode(tag),
+    createElement: (tag) => Object.assign(new TestNode(tag), { ownerDocument: document }),
     createDocumentFragment: () => new TestNode('#fragment'),
     createTextNode: (text) => {
       const node = new TestNode('#text');
@@ -88,6 +96,7 @@ export function createTestDocument(ids) {
       return node;
     },
   };
+  Object.values(elements).forEach((node) => { node.ownerDocument = document; });
   return { document, elements };
 }
 

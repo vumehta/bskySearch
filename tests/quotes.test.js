@@ -218,6 +218,31 @@ describe('quote search and pagination', () => {
     expect(elements.quoteStatus.textContent).toContain('Please retry');
   });
 
+  it('keeps the Load More Quotes button in place while it loads, then hands focus to the last quote', async () => {
+    mockInitial();
+    await quotes.performQuoteSearch();
+    const button = document.getElementById('quoteLoadMoreBtn');
+    button.focus();
+    const next = deferred();
+    fetch.mockReturnValueOnce(next.promise);
+    const loading = quotes.loadMoreQuotes();
+    expect(document.getElementById('quoteLoadMoreBtn')).toBe(button);
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    expect(button.textContent).toBe('Loading…');
+
+    next.resolve(response({ posts: [post('q2')], cursor: 'c2' }));
+    await loading;
+    expect(document.getElementById('quoteLoadMoreBtn')).toBe(button);
+    expect(button.getAttribute('aria-disabled')).toBe(null);
+    expect(document.activeElement).toBe(button);
+
+    fetch.mockResolvedValueOnce(response({ posts: [post('q3')] }));
+    await quotes.loadMoreQuotes();
+    expect(document.getElementById('quoteLoadMoreBtn')).toBeNull();
+    expect(document.activeElement).toBe(elements.quoteResults.lastElementChild);
+    expect(document.activeElement.tabIndex).toBe(-1);
+  });
+
   it('recovers from a body timeout and can search again', async () => {
     vi.useFakeTimers();
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: () => new Promise(() => {}) })));

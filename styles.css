@@ -281,7 +281,9 @@ button:focus-visible {
     box-shadow: 0 0 0 2px var(--focus-ring), 0 0 0 4px var(--accent);
 }
 
-button:disabled {
+button:disabled,
+button[aria-disabled="true"],
+button[aria-disabled="true"]:hover {
     background: var(--button-disabled);
     color: var(--button-disabled-text);
     cursor: not-allowed;
@@ -330,6 +332,13 @@ button:disabled {
 
 .post:hover {
     box-shadow: 0 2px 8px var(--shadow);
+}
+
+.post:focus-visible,
+.quote-post:focus-visible,
+.no-results:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--focus-ring), 0 0 0 4px var(--accent);
 }
 
 .post-header {
@@ -472,6 +481,13 @@ button:disabled {
 .image-placeholder button:hover {
     text-decoration: underline;
     background: none;
+}
+
+.image-placeholder.revealed {
+    justify-content: flex-start;
+    padding: 0 0 8px;
+    background: none;
+    border: none;
 }
 
 .post-stats {

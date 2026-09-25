@@ -77,6 +77,65 @@ test('built page loads and minimum likes preserves loaded pages and pagination',
   await page.screenshot({ path: testInfo.outputPath('search.png'), fullPage: true });
 });
 
+test('keyboard focus and card state survive Load More, image previews and card updates', async ({ page }) => {
+  const reply = { parent: { uri: `at://${did}/app.bsky.feed.post/parent` }, root: { uri: `at://${did}/app.bsky.feed.post/parent` } };
+  const withMedia = (likes) => ({
+    ...post('media', 'apple with a picture', likes),
+    record: { ...post('media', 'apple with a picture', likes).record, reply },
+    embed: { $type: 'app.bsky.embed.images#view', images: [{ thumb: 'https://cdn.bsky.app/img/thumb.png', alt: 'A picture' }] },
+  });
+  const pages = {
+    first: { posts: [withMedia(50)], cursor: 'second' },
+    second: { posts: [post('middle', 'apple middle', 20)], cursor: 'third' },
+    third: { posts: [withMedia(60), post('last', 'apple last', 10)] },
+  };
+  const pixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
+  let releaseThird;
+  const thirdReleased = new Promise((resolve) => { releaseThird = resolve; });
+  await page.route('https://cdn.bsky.app/**', (route) => route.fulfill({ body: pixel, contentType: 'image/png' }));
+  await page.route('https://public.api.bsky.app/xrpc/app.bsky.feed.getPostThread**', (route) => route.fulfill({
+    json: { thread: { post: withMedia(50), parent: { post: post('parent', 'The parent post', 3) } } },
+    headers: { 'Access-Control-Allow-Origin': '*' },
+  }));
+  await page.route('**/api/search?**', async (route) => {
+    const cursor = new URL(route.request().url()).searchParams.get('cursor') || 'first';
+    if (cursor === 'third') await thirdReleased;
+    await route.fulfill({ json: pages[cursor] });
+  });
+
+  await page.goto('/');
+  await page.getByLabel('Search Terms (comma-separated)', { exact: true }).fill('apple');
+  await page.getByRole('button', { name: 'Search', exact: true }).click();
+  await expect(page.locator('#results .post')).toHaveCount(2);
+
+  await page.getByRole('button', { name: 'Show 1 image', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  const hideImage = page.getByRole('button', { name: 'Hide 1 image', exact: true });
+  await expect(hideImage).toBeFocused();
+  await expect(hideImage).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('#results .post-image')).toBeVisible();
+  await page.getByRole('button', { name: 'View Thread', exact: true }).click();
+  await expect(page.locator('#results .thread-parent-text')).toHaveText('The parent post');
+
+  const loadMore = page.getByRole('button', { name: /Load More Results|Loading/ });
+  await loadMore.focus();
+  await page.keyboard.press('Enter');
+  await expect(loadMore).toHaveText('Loading…');
+  await expect(loadMore).toHaveAttribute('aria-disabled', 'true');
+  await expect(loadMore).toBeFocused();
+  releaseThird();
+
+  await expect(page.locator('#results .post')).toHaveCount(3);
+  await expect(loadMore).toBeHidden();
+  await expect(page.locator('#results .post').last()).toBeFocused();
+  const updated = page.locator('#results .post').first();
+  await expect(updated.locator('.stat.likes')).toHaveText('♥ 60');
+  await expect(updated.getByRole('button', { name: 'Hide Thread', exact: true })).toHaveAttribute('aria-expanded', 'true');
+  await expect(updated.locator('.thread-parent-text')).toHaveText('The parent post');
+  await expect(updated.getByRole('button', { name: 'Hide 1 image', exact: true })).toBeVisible();
+  await expect(updated.locator('.post-image')).toBeVisible();
+});
+
 test('normal handle URL submits the quote form and all sort controls reorder real cards', async ({ page }, testInfo) => {
   const calls = [];
   const quotes = [

@@ -42,7 +42,7 @@ import { fetchJson } from './http.mjs';
 import { getEmbedPreviews } from './post-data.mjs';
 import { createHighlightMatcher, getMatchedTermsForPost, getPostRenderFingerprint, ingestSearchPosts, nextSearchCursor, settleWithConcurrency, validateSearchPage } from './search-model.mjs';
 import { setQueryParam, updateURLWithParams } from './url.mjs';
-import { cancelThreadRequest, cancelThreadRequests, initializeThreadToggle, isReplyPost, toggleThread } from './thread.mjs';
+import { cancelThreadRequest, cancelThreadRequests, initializeThreadToggle, isReplyPost, moveThreadContext, toggleThread } from './thread.mjs';
 import { cancelTopicScoring, dropQueuedTopicScores, getTopicProgress, getTopicVerdict, requestTopicScores, resetTopicScoring } from './topic-filter.mjs';
 
 const DERIVE_THROTTLE_MS = 120;
@@ -73,6 +73,7 @@ let resultsListEl = null;
 let showMoreBtnEl = null;
 let loadMoreBtnEl = null;
 const renderedPosts = new Map();
+let nextImagesId = 0;
 
 let topicSummary = null;
 
@@ -359,7 +360,27 @@ function syncTopicMatch(postElement, topicMatch) {
   tag.textContent = label ? `${label} \xB7 ${match}` : match;
 }
 
-function createPostElement(post) {
+function findByFocusKey(element, key) {
+  if (element.dataset?.focusKey === key) return element;
+  for (const child of Array.from(element.children || [])) {
+    const found = findByFocusKey(child, key);
+    if (found) return found;
+  }
+  return null;
+}
+
+function focusWithin(element) {
+  const active = document.activeElement;
+  return active && element.contains?.(active) ? active : null;
+}
+
+function focusCard(card) {
+  if (!card) return;
+  card.tabIndex = -1;
+  card.focus();
+}
+
+function createPostElement(post, { imagesShown = false } = {}) {
   const postUrl = getPostUrl(post);
   const handle = post.author.handle;
   const displayName = post.author.displayName || handle;
@@ -400,6 +421,7 @@ function createPostElement(post) {
 
   const nameLink = document.createElement('a');
   nameLink.className = 'display-name';
+  nameLink.dataset.focusKey = 'profile';
   nameLink.href = getProfileUrl(post.author);
   nameLink.target = '_blank';
   nameLink.rel = 'noopener noreferrer';
@@ -436,29 +458,38 @@ function createPostElement(post) {
     const placeholder = document.createElement('div');
     placeholder.className = 'image-placeholder';
 
-    const showBtn = document.createElement('button');
-    showBtn.type = 'button';
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'image-toggle';
+    toggle.dataset.focusKey = 'images';
     const count = validImages.length;
-    showBtn.textContent = previews.kind === 'video'
-      ? 'Show video preview'
-      : `Show ${count} image${count !== 1 ? 's' : ''}`;
-    showBtn.addEventListener('click', () => {
-      const imagesDiv = document.createElement('div');
-      imagesDiv.className = `post-images ${count === 1 ? 'single' : 'multiple'}`;
+    const noun = previews.kind === 'video' ? 'video preview' : `${count} image${count !== 1 ? 's' : ''}`;
+    let imagesDiv = null;
+    const showImages = (shown) => {
+      if (shown && !imagesDiv) {
+        imagesDiv = document.createElement('div');
+        imagesDiv.id = `post-images-${++nextImagesId}`;
+        imagesDiv.className = `post-images ${count === 1 ? 'single' : 'multiple'}`;
+        validImages.forEach((img) => {
+          const imgEl = document.createElement('img');
+          imgEl.className = 'post-image';
+          imgEl.src = img.thumb;
+          imgEl.alt = img.alt || '';
+          imgEl.loading = 'lazy';
+          imagesDiv.appendChild(imgEl);
+        });
+        imagesContainer.appendChild(imagesDiv);
+        toggle.setAttribute('aria-controls', imagesDiv.id);
+      }
+      if (imagesDiv) imagesDiv.style.display = shown ? '' : 'none';
+      placeholder.classList.toggle('revealed', shown);
+      toggle.setAttribute('aria-expanded', String(shown));
+      toggle.textContent = `${shown ? 'Hide' : 'Show'} ${noun}`;
+    };
+    toggle.addEventListener('click', () => showImages(toggle.getAttribute('aria-expanded') !== 'true'));
+    showImages(imagesShown);
 
-      validImages.forEach((img) => {
-        const imgEl = document.createElement('img');
-        imgEl.className = 'post-image';
-        imgEl.src = img.thumb;
-        imgEl.alt = img.alt || '';
-        imgEl.loading = 'lazy';
-        imagesDiv.appendChild(imgEl);
-      });
-
-      imagesContainer.replaceChild(imagesDiv, placeholder);
-    });
-
-    placeholder.appendChild(showBtn);
+    placeholder.appendChild(toggle);
     imagesContainer.appendChild(placeholder);
     postDiv.appendChild(imagesContainer);
   }
@@ -478,6 +509,7 @@ function createPostElement(post) {
     if (isReply) {
       const threadLink = document.createElement('button');
       threadLink.className = 'thread-link';
+      threadLink.dataset.focusKey = 'thread';
       threadLink.textContent = 'View Thread';
       initializeThreadToggle(threadLink);
       threadLink.addEventListener('click', () => toggleThread(post, postDiv));
@@ -485,6 +517,7 @@ function createPostElement(post) {
     }
     const blueskyLink = document.createElement('a');
     blueskyLink.className = 'thread-link';
+    blueskyLink.dataset.focusKey = 'bluesky';
     blueskyLink.href = postUrl;
     blueskyLink.target = '_blank';
     blueskyLink.rel = 'noopener noreferrer';
@@ -563,8 +596,11 @@ function ensureResultsShell() {
   showMoreBtnEl.className = 'load-more';
   showMoreBtnEl.type = 'button';
   showMoreBtnEl.addEventListener('click', () => {
+    const shownBefore = resultsListEl.children.length;
+    const hadFocus = document.activeElement === showMoreBtnEl;
     increaseRenderLimit();
     renderResults();
+    if (hadFocus && showMoreBtnEl.style.display === 'none') focusCard(resultsListEl.children[shownBefore]);
   });
 
   loadMoreBtnEl = document.createElement('button');
@@ -596,11 +632,15 @@ function syncVisibleResultPosts(visiblePosts) {
     let postElement = previous?.element;
 
     if (!postElement || previous.fingerprint !== nextFingerprint) {
-      const nextElement = createPostElement(post);
+      const imagesShown = postElement?.querySelector('.image-toggle')?.getAttribute('aria-expanded') === 'true';
+      const nextElement = createPostElement(post, { imagesShown });
 
       if (postElement?.parentNode === resultsListEl) {
+        const focusKey = focusWithin(postElement)?.dataset?.focusKey;
         cancelThreadRequest(postElement);
+        moveThreadContext(postElement, nextElement);
         resultsListEl.replaceChild(nextElement, postElement);
+        if (focusKey) findByFocusKey(nextElement, focusKey)?.focus();
       }
 
       postElement = nextElement;
@@ -636,14 +676,18 @@ function syncLoadMoreButton() {
 
   const hasMoreResults = Object.values(state.currentCursors).some((cursor) => cursor !== null);
   if (!hasMoreResults) {
+    if (document.activeElement === loadMoreBtnEl && loadMoreBtnEl.style.display !== 'none') {
+      focusCard(state.allPosts.length > 0 ? resultsListEl.lastElementChild : resultsEmptyEl);
+    }
     loadMoreBtnEl.style.display = 'none';
-    loadMoreBtnEl.disabled = false;
+    loadMoreBtnEl.removeAttribute('aria-disabled');
     loadMoreBtnEl.textContent = 'Load More Results';
     return;
   }
 
   loadMoreBtnEl.style.display = '';
-  loadMoreBtnEl.disabled = state.isLoading || state.searchDebounceTimer !== null;
+  if (state.isLoading || state.searchDebounceTimer !== null) loadMoreBtnEl.setAttribute('aria-disabled', 'true');
+  else loadMoreBtnEl.removeAttribute('aria-disabled');
   loadMoreBtnEl.textContent = state.isLoading ? 'Loading…' : 'Load More Results';
 }
 
@@ -684,12 +728,12 @@ function renderResults() {
     resultsHeaderEl.style.display = 'none';
     resultsListEl.style.display = 'none';
     showMoreBtnEl.style.display = 'none';
-    syncLoadMoreButton();
     resultsEmptyEl.style.display = 'block';
     resultsEmptyPrimaryEl.textContent = 'No loaded posts match your criteria.';
     resultsEmptySecondaryEl.textContent = Object.values(state.currentCursors).some((cursor) => cursor !== null)
       ? 'Load more results to continue searching, or lower the minimum likes.'
       : 'Try different search terms or lower the minimum likes.';
+    syncLoadMoreButton();
     syncVisibleResultPosts([]);
     return;
   }
