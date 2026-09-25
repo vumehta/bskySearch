@@ -54,6 +54,11 @@ function maximalItem(index) {
   };
 }
 
+async function scoreCacheKey(question, state) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify([question, state])));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 function request(body, { headers = {}, method = 'POST', signal, client } = {}) {
   return new Request('https://example.com/api/classify', {
     method,
@@ -295,6 +300,20 @@ describe('scoring', () => {
     const response = await POST(request({ items: [item('at://real', ['Meta'], 'Meta ships a new headset')] }), context);
     expect(calls).toHaveLength(2);
     await expect(response.json()).resolves.toEqual({ results: [{ id: 'at://real', scores: [0.99] }] });
+  });
+
+  it('never serves a score that was given to a differently worded question', async () => {
+    const calls = upstream();
+    const state = { post_text: 'post a', author: 'Alice (@alice.example)' };
+    const question = buildTopicQuestion('Meta');
+    const reworded = { ...question, criteria: { ...question.criteria, true: 'Any mention of `subject` counts.' } };
+    for (const staleQuestion of ['Meta', reworded]) {
+      scoreCache.set(await scoreCacheKey(staleQuestion, state), { score: 0.01, timestamp: Date.now() });
+    }
+    const response = await POST(request({ items: [item('a')] }), context);
+    await expect(response.json()).resolves.toEqual({ results: [{ id: 'a', scores: [0.9] }] });
+    expect(calls).toHaveLength(1);
+    expect(scoreCache.get(await scoreCacheKey(question, state))?.score).toBe(0.9);
   });
 
   it('expires cached scores', async () => {
