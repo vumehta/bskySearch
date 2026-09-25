@@ -710,6 +710,54 @@ describe('search pagination and lifecycle', () => {
     expect(new URL(url, 'https://example.test').searchParams.get('terms')).toBe(typed);
   });
 
+  it('keeps only the searching status when the sort changes to saves before the first page arrives', async () => {
+    const pending = deferred();
+    globalThis.fetch = vi.fn(() => pending.promise);
+    const searching = search.performSearch();
+    await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1));
+    elements.sortSelect.value = 'bookmarks';
+    state.searchSort = 'bookmarks';
+    search.applySearchSortChange();
+    expect(elements.results.querySelector('.no-results')).toBe(null);
+    expect(elements.status.textContent).toBe('Searching for: apple…');
+
+    pending.resolve({ ok: true, json: async () => ({ posts: [
+      { ...makePost('liked', 50), bookmarkCount: 1 },
+      { ...makePost('saved', 20), bookmarkCount: 9 },
+    ] }) });
+    await searching;
+    const cards = elements.results.querySelectorAll('.post');
+    expect(cards.map((card) => card.querySelector('.post-text').textContent)).toEqual(['post saved about apple', 'post liked about apple']);
+    expect(elements.results.querySelector('.results-header').textContent).toContain('Sorted by saves');
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows loaded posts in saves order at once when the sort changes before they are first shown', async () => {
+    vi.useFakeTimers();
+    const secondPage = deferred();
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ cursor: 'c1', posts: [
+        { ...makePost('liked', 50), bookmarkCount: 1 },
+        { ...makePost('saved', 20), bookmarkCount: 9 },
+      ] }) })
+      .mockReturnValueOnce(secondPage.promise);
+    const searching = search.performSearch();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    expect(elements.results.querySelectorAll('.post')).toHaveLength(0);
+
+    elements.sortSelect.value = 'bookmarks';
+    state.searchSort = 'bookmarks';
+    search.applySearchSortChange();
+    const texts = () => elements.results.querySelectorAll('.post').map((card) => card.querySelector('.post-text').textContent);
+    expect(texts()).toEqual(['post saved about apple', 'post liked about apple']);
+
+    secondPage.resolve({ ok: true, json: async () => ({ posts: [] }) });
+    await searching;
+    expect(texts()).toEqual(['post saved about apple', 'post liked about apple']);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+  });
+
   it('keeps an empty cursor while a first page is still needed and null once a term is exhausted', async () => {
     elements.terms.value = 'apple,banana';
     let bananaCalls = 0;

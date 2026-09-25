@@ -943,7 +943,7 @@ export function applySearchSortChange() {
   if (state.searchDebounceTimer === null && state.searchTerms.length && getApiSort(state.searchSort) === searchApiSort) {
     updateSearchURL();
     flushDerivedPostsRebuild();
-    renderResults();
+    if (resultsHeaderEl || state.allPosts.length) renderResults();
     return;
   }
   cancelDebouncedSearch();
