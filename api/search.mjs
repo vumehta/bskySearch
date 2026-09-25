@@ -254,6 +254,11 @@ function searchRateLimitError(delayMs) {
   });
 }
 
+function throwIfSearchBlocked() {
+  const blockedMs = searchBlockedUntil - Date.now();
+  if (blockedMs > 0) throw searchRateLimitError(blockedMs);
+}
+
 function checkAuthRateLimit(response) {
   if (response.status === 429) {
     const delay = getRetryDelayMs(response);
@@ -407,6 +412,7 @@ function resetModuleStateForTests() {
 }
 
 async function searchPosts({ term, cursor, sort, since }, accessJwt, signal) {
+  throwIfSearchBlocked();
   const params = new URLSearchParams({
     q: term,
     sort,
@@ -586,8 +592,7 @@ export async function GET(request, context) {
       operation = null;
     }
     if (!operation) {
-      const blockedMs = searchBlockedUntil - Date.now();
-      if (blockedMs > 0) throw searchRateLimitError(blockedMs);
+      throwIfSearchBlocked();
       admitSearch(getClientKey(request));
       operation = createSharedOperation(
         async (signal) => {

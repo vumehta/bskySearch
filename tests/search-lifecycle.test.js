@@ -517,6 +517,8 @@ describe('authentication lifecycle', () => {
 });
 
 describe('Bluesky search rate limits', () => {
+  const rateLimited = { error: 'Bluesky search is rate limited. Please try again later.' };
+
   it.each([
     ['Retry-After seconds', { 'Retry-After': '30' }, 30],
     ['a RateLimit-Reset timestamp', { 'RateLimit-Reset': String(limitedAt / 1000 + 90) }, 90],
@@ -530,7 +532,6 @@ describe('Bluesky search rate limits', () => {
         ? Response.json(posts)
         : Response.json({ error: 'RateLimitExceeded', message: 'Rate Limit Exceeded' }, { status: 429, headers }),
     });
-    const rateLimited = { error: 'Bluesky search is rate limited. Please try again later.' };
     expect((await GET(request('warm'), context)).status).toBe(200);
     const limited = await GET(request('limited'), context);
     expect(limited.status).toBe(429);
@@ -572,6 +573,52 @@ describe('Bluesky search rate limits', () => {
     expect(blocked.status).toBe(429);
     expect(blocked.headers.get('Retry-After')).toBe('30');
     expect(handlers.search).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([[400, 'ExpiredToken'], [400, 'InvalidToken'], [401, 'Unauthorized']])('does not retry a search rejected with %i %s once another search is rate limited', async (status, error) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(limitedAt);
+    const replies = { limited: deferred(), rejected: deferred() };
+    const handlers = upstream({
+      search: (url, options) => options.headers.Authorization === 'Bearer access-b'
+        ? Response.json(posts)
+        : replies[url.searchParams.get('q')].promise,
+    });
+    const pending = [GET(request('limited'), context), GET(request('rejected'), context)];
+    await vi.waitFor(() => expect(handlers.search).toHaveBeenCalledTimes(2));
+    replies.limited.resolve(Response.json({ error: 'RateLimitExceeded' }, { status: 429, headers: { 'Retry-After': '60' } }));
+    expect((await pending[0]).status).toBe(429);
+    replies.rejected.resolve(Response.json({ error }, { status }));
+    const blocked = await pending[1];
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get('Retry-After')).toBe('60');
+    await expect(blocked.json()).resolves.toEqual(rateLimited);
+    expect(handlers.search).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not search after a session refresh that finishes during a search rate limit', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(limitedAt);
+    const first = deferred();
+    const refresh = deferred();
+    const handlers = upstream({
+      refresh: () => refresh.promise,
+      search: (url) => url.searchParams.get('q') === 'first' ? first.promise : Response.json(posts),
+    });
+    const pending = GET(request('first'), context);
+    await vi.waitFor(() => expect(handlers.search).toHaveBeenCalledTimes(1));
+    vi.setSystemTime(limitedAt + SESSION_TTL_MS + 1);
+    const waiting = GET(request('waiting'), context);
+    await vi.waitFor(() => expect(handlers.refresh).toHaveBeenCalledTimes(1));
+    const reset = String(Math.floor(Date.now() / 1000) + 300);
+    first.resolve(Response.json({ error: 'RateLimitExceeded' }, { status: 429, headers: { 'RateLimit-Reset': reset } }));
+    expect((await pending).status).toBe(429);
+    refresh.resolve(Response.json(session('b')));
+    const blocked = await waiting;
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get('Retry-After')).toBe('300');
+    await expect(blocked.json()).resolves.toEqual(rateLimited);
+    expect(handlers.search).toHaveBeenCalledTimes(1);
   });
 });
 
