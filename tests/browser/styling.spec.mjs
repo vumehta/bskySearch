@@ -22,6 +22,27 @@ async function searchFor(page, term) {
   await terms.press('Enter');
 }
 
+function palette(page) {
+  return page.evaluate(() => {
+    const root = getComputedStyle(document.documentElement);
+    const names = [...document.styleSheets].flatMap((sheet) => [...sheet.cssRules])
+      .filter((rule) => rule.selectorText === ':root')
+      .flatMap((rule) => [...rule.style].filter((name) => name.startsWith('--')));
+    return {
+      colorScheme: root.colorScheme,
+      background: getComputedStyle(document.body).backgroundColor,
+      variables: Object.fromEntries(names.map((name) => [name, root.getPropertyValue(name)])),
+    };
+  });
+}
+
+function setTheme(page, theme) {
+  return page.evaluate((value) => {
+    if (value) document.documentElement.dataset.theme = value;
+    else delete document.documentElement.dataset.theme;
+  }, theme);
+}
+
 test.beforeEach(async ({ page }) => {
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
@@ -77,4 +98,44 @@ test('focused controls, cards and links keep a visible outline in forced colors 
       clip: { x: box.x - 8, y: box.y - 8, width: box.width + 16, height: box.height + 16 },
     });
   }
+});
+
+test('a dark system preference gets the dark palette before the app script runs', async ({ page }) => {
+  await page.route('**/app.min.js', (route) => route.fulfill({ body: '', contentType: 'text/javascript' }));
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.goto('/');
+  expect(await page.evaluate(() => document.documentElement.hasAttribute('data-theme'))).toBe(false);
+  const systemDark = await palette(page);
+  expect(systemDark.background).toBe('rgb(10, 10, 10)');
+  expect(systemDark.colorScheme).toBe('dark');
+
+  await page.emulateMedia({ colorScheme: 'light' });
+  const systemLight = await palette(page);
+  expect(systemLight.background).toBe('rgb(255, 255, 255)');
+  expect(systemLight.colorScheme).toBe('light');
+
+  await setTheme(page, 'dark');
+  expect(await palette(page), 'Dark under a light system must match the system dark palette').toEqual(systemDark);
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await setTheme(page, 'light');
+  expect(await palette(page), 'Light under a dark system must match the system light palette').toEqual(systemLight);
+});
+
+test('choosing Light or Dark overrides the system preference', async ({ page }) => {
+  const body = page.locator('body');
+  const theme = page.getByLabel('Theme', { exact: true });
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.goto('/');
+  await expect(body).toHaveCSS('background-color', 'rgb(10, 10, 10)');
+  await theme.selectOption('light');
+  await expect(body).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+  await page.reload();
+  await expect(theme).toHaveValue('light');
+  await expect(body).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+
+  await page.emulateMedia({ colorScheme: 'light' });
+  await theme.selectOption('dark');
+  await expect(body).toHaveCSS('background-color', 'rgb(10, 10, 10)');
+  await theme.selectOption('system');
+  await expect(body).toHaveCSS('background-color', 'rgb(255, 255, 255)');
 });
