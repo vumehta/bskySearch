@@ -15,25 +15,26 @@ rule covers Instagram, WhatsApp, Netflix, and other company or platform names;
 there are no separate keyword-specific questions or product lists to tune.
 Clearly identifiable products can establish relevance without repeating the
 company name. When both meanings appear, only the information about the
-intended business and its products counts.
+intended business and its products counts. Idioms and generic verbs built on a
+brand name, such as "Netflix and chill" or "google it", are another word sense.
 
 A mention alone does not qualify: source credits, promotional hashtags,
 follow-me requests, casual photo sharing, and unrelated commentary are excluded.
 The searched subject does not have to be the only subject, but the useful
 information must be about it. An official author does not qualify automatically.
 
-Posts with reach get a lower bar. A post with at least 50 likes, or from a
-verified account, stays when it says anything about the company: a joke, an
-unsupported complaint, or a bare call to cancel counts. Credits, hashtags, and
-other word senses still do not, including idioms such as "Netflix and chill".
-Posts labelled porn, sexual, or nudity never get the lower bar, because likes
-say little about importance there. The card labels these posts "High reach" or
-"Verified author" next to their match percentage.
+A post needs a 30% match to stay. Jev's score decides; likes only lower the bar
+for borderline posts. Above 50 likes the cutoff drops by 10 points for every
+tenfold increase in likes (about 20% at 500 likes) down to a floor of 10% at
+5,000 likes, so a clearly off-topic post never stays however popular it is.
+Posts labelled porn, sexual, or nudity keep the 30% cutoff, because likes say
+little about importance there. Posts kept only because of their likes are
+labelled "High reach" next to their match percentage. The browser applies this
+rule when it renders, so a post that gains likes needs no second check. The
+constants live in `src/constants.mjs`.
 
-`buildTopicQuestion` in `api/classify.mjs` defines the rubric, and
-`buildMentionQuestion` defines the lower bar. Each original search term gets
-both Nouls, sharing the evidence in one request per post, so a post that later
-reaches 50 likes needs no second check. The browser applies the reach rule.
+`buildTopicQuestion` in `api/classify.mjs` defines the rubric. It asks one Noul
+per original search term, sharing the evidence in one request per post.
 The server hashes the entire question with its evidence, so rubric changes
 invalidate earlier scores. Unchecked posts remain visible and hidden posts can
 be revealed using **Show them**. While the filter is enabled, match percentages
@@ -47,9 +48,6 @@ inputs, not verified news reports. Explicit details and account identities from
 the reported posts are omitted when they are not relevant to classification.
 The set also covers Intel versus intelligence (including both senses in one
 post), Apple versus fruit, Meta versus gaming, and product or service news.
-
-Every case has a `keep` label for the main rubric. Cases with a `mention` label
-also check the lower bar used for high-reach posts.
 
 Set `TYPESAFE_API_KEY` in the terminal environment, then run `npm.cmd run eval:topic`
 (or `npm run eval:topic`). This makes live, billable requests through the same

@@ -3,14 +3,12 @@
     "id": "artwork-source-credit",
     "keyword": "Instagram",
     "keep": false,
-    "mention": false,
     "context": { "post_text": "Artwork by contemporary UK abstract artist Tricia Crowther (via Instagram) #WomensArt" }
   },
   {
     "id": "stream-promotion-hashtag",
     "keyword": "Instagram",
     "keep": false,
-    "mention": false,
     "context": { "post_text": "I'm live right now! Come watch my stream. #instagram #livestream #nsfw" }
   },
   {
@@ -35,7 +33,6 @@
     "id": "unsupported-complaint",
     "keyword": "Instagram",
     "keep": false,
-    "mention": true,
     "context": { "post_text": "Instagram sucks. I hate it." }
   },
   {
@@ -111,7 +108,6 @@
     "id": "ordinary-word-sense",
     "keyword": "Meta",
     "keep": false,
-    "mention": false,
     "context": { "post_text": "The new patch changed the competitive meta: cheaper spells now counter the strongest deck." }
   },
   {
@@ -178,28 +174,24 @@
     "id": "netflix-and-chill-idiom",
     "keyword": "Netflix",
     "keep": false,
-    "mention": false,
     "context": { "post_text": "Friday night plans: Netflix and chill, if you know what I mean." }
   },
   {
     "id": "google-it-generic-verb",
     "keyword": "Google",
     "keep": false,
-    "mention": false,
     "context": { "post_text": "Just google it before you ask me, please." }
   },
   {
     "id": "bare-cancel-call",
     "keyword": "Netflix",
     "keep": false,
-    "mention": true,
     "context": { "post_text": "Cancel Netflix lol" }
   },
   {
     "id": "product-remark-without-company-name",
     "keyword": "Meta",
     "keep": false,
-    "mention": true,
     "context": { "post_text": "Threads is a ghost town these days." }
   }
 ]

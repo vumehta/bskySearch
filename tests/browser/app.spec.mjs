@@ -137,9 +137,9 @@ test('topic filter hides off-topic posts, reveals them on request, and survives 
         external: { uri: 'https://news.example/instagram', title: 'Instagram expands teen account protections', description: 'Messages from strangers will be blocked by default.' },
       },
     },
-    post('boycott', 'Delete Instagram. It only cares about money.', 60),
+    post('boycott', 'Delete Instagram. It only cares about money.', 5000),
   ];
-  const keptTags = ['95% match', '95% match', 'High reach \xB7 20% match'];
+  const keptTags = ['High reach \xB7 20% match', '95% match', '95% match'];
   const classified = [];
   await page.route('**/api/search?**', (route) => route.fulfill({ json: { posts } }));
   await page.route('**/api/classify', async (route) => {
@@ -153,7 +153,6 @@ test('topic filter hides off-topic posts, reveals them on request, and survives 
         results: items.map((item) => ({
           id: item.id,
           scores: item.keywords.map(() => (/\/(company|reaction)$/.test(item.id) ? 0.95 : /\/boycott$/.test(item.id) ? 0.2 : 0.03)),
-          mentionScores: item.keywords.map(() => (/\/(company|reaction|boycott)$/.test(item.id) ? 0.9 : 0.03)),
         })),
       },
     });
@@ -199,7 +198,7 @@ test('topic filter hides off-topic posts, reveals them on request, and survives 
   await page.reload();
   await expect(page.getByLabel('Topic Filter', { exact: true })).toBeChecked();
   await expect(page.locator('#results .post')).toHaveCount(3);
-  await expect(page.locator('#results .post-text')).toHaveText([posts[0].record.text, 'wow', posts[5].record.text]);
+  await expect(page.locator('#results .post-text')).toHaveText([posts[5].record.text, posts[0].record.text, 'wow']);
   await expect(page.locator('#results .topic-score-tag')).toHaveText(keptTags);
 });
 
