@@ -25,7 +25,9 @@ information must be about it. An official author does not qualify automatically.
 Posts with reach get a lower bar. A post with at least 50 likes, or from a
 verified account, stays when it says anything about the company: a joke, an
 unsupported complaint, or a bare call to cancel counts. Credits, hashtags, and
-other word senses still do not. The card labels these posts "High reach" or
+other word senses still do not, including idioms such as "Netflix and chill".
+Posts labelled porn, sexual, or nudity never get the lower bar, because likes
+say little about importance there. The card labels these posts "High reach" or
 "Verified author" next to their match percentage.
 
 `buildTopicQuestion` in `api/classify.mjs` defines the rubric, and
@@ -45,6 +47,9 @@ inputs, not verified news reports. Explicit details and account identities from
 the reported posts are omitted when they are not relevant to classification.
 The set also covers Intel versus intelligence (including both senses in one
 post), Apple versus fruit, Meta versus gaming, and product or service news.
+
+Every case has a `keep` label for the main rubric. Cases with a `mention` label
+also check the lower bar used for high-reach posts.
 
 Set `TYPESAFE_API_KEY` in the terminal environment, then run `npm.cmd run eval:topic`
 (or `npm run eval:topic`). This makes live, billable requests through the same

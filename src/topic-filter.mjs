@@ -21,6 +21,7 @@ let owner = null;
 let unavailableReason = '';
 
 const BATCH_ONLY_STATUSES = new Set([400, 413, 504]);
+const ADULT_LABELS = new Set(['porn', 'sexual', 'nudity']);
 
 const scoreKey = (uri, keyword, context) => JSON.stringify([uri, keyword, context]);
 const isScore = (value) => Number.isFinite(value) && value >= 0 && value <= 1;
@@ -48,7 +49,11 @@ function isFullyScored(key) {
   return entry?.topic !== undefined && entry?.mention !== undefined;
 }
 
+const hasAdultLabel = (post) => Array.isArray(post.labels)
+  && post.labels.some((label) => !label?.neg && ADULT_LABELS.has(label?.val));
+
 function getReachReason(post) {
+  if (hasAdultLabel(post)) return null;
   if ((post.likeCount || 0) >= TOPIC_REACH_MIN_LIKES) return 'High reach';
   if (isVerifiedAuthor(post.author)) return 'Verified author';
   return null;

@@ -65,6 +65,8 @@ const SEARCH_INTENT = 'The user is tracking companies, brands, and platforms and
   'not as an ordinary word, acronym, or unrelated entity. For example, Intel means the chip company, ' +
   'not intelligence reports or military intel; Apple means the technology company, not fruit; ' +
   'Meta means the technology company, not gaming strategy or self-referential commentary. ' +
+  'Idioms, catchphrases, and generic verbs built on a brand name are a different meaning too: ' +
+  '"Netflix and chill" is slang for a hookup, not a statement about Netflix, and "google it" just means search online. ' +
   'Apply this same business/product interpretation to every search term, including Instagram, WhatsApp, and Netflix.';
 
 const EVIDENCE = 'Consider `post_text`, `link_card`, `image_descriptions`, and `quoted_post` together. ' +
@@ -88,8 +90,9 @@ export function buildMentionQuestion(keyword) {
       false:
         'Nothing in the supplied evidence says anything about the intended business. The search term is absent, ' +
         'used with a different meaning (an ordinary word, slang, a game term, intelligence reports, or a different ' +
-        'thing with the same name), or appears only as a source or photo credit, a hashtag, a follow-me request, ' +
-        'or the place where something was posted.',
+        'thing with the same name), used inside an idiom or catchphrase such as "Netflix and chill", or appears ' +
+        'only as a source or photo credit, a hashtag, a follow-me request, or the place where something was posted. ' +
+        'Sexual or promotional content that uses the name only as a hook does not count.',
     },
   };
 }

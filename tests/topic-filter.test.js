@@ -417,6 +417,19 @@ describe('topic filter', () => {
     expect(calls.classify).toHaveLength(1);
   });
 
+  it('does not apply the reach rule to posts labelled as adult content', async () => {
+    const { getTopicVerdict, requestTopicScores } = await import('../src/topic-filter.mjs');
+    const labelled = makePost('adult', '5 minutes into Apple and chill', 900, {
+      matchedTerms: ['apple'],
+      labels: [{ src: 'did:plc:labeler', val: 'porn' }],
+    });
+    const negated = { ...labelled, uri: uri('negated'), labels: [{ src: 'did:plc:labeler', val: 'porn', neg: true }] };
+    installFetch({ posts: [], classify: scoredBy((_item, _keyword, kind) => (kind === 'mention' ? 0.9 : 0.03)) });
+    requestTopicScores([labelled, negated], () => {});
+    await vi.waitFor(() => expect(getTopicVerdict(labelled)).toEqual({ verdict: 'off', score: 0.03 }));
+    expect(getTopicVerdict(negated)).toEqual({ verdict: 'on', score: 0.03, keptFor: 'High reach' });
+  });
+
   it('keeps a high-reach post visible when its mention check fails', async () => {
     const { getTopicVerdict, requestTopicScores } = await import('../src/topic-filter.mjs');
     const popular = makePost('popular', 'Apple is so overrated', 500, { matchedTerms: ['apple'] });
