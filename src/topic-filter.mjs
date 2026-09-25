@@ -168,6 +168,15 @@ export function requestTopicScores(posts, onUpdate) {
   pump();
 }
 
+export function dropQueuedTopicScores() {
+  for (const { items } of queue) {
+    for (const item of items) {
+      item.keywords.forEach((keyword) => pending.delete(scoreKey(item.id, keyword, item.context)));
+    }
+  }
+  queue = [];
+}
+
 export function cancelTopicScoring() {
   owner?.abort();
   owner = null;

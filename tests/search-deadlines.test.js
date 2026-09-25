@@ -123,11 +123,11 @@ describe('browser and proxy search deadlines', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('cancels the browser request and its abandoned proxy work immediately', async () => {
-    let upstreamSignal;
-    connectProxy((_url, options) => {
-      upstreamSignal = options.signal;
-      return respondAfter(6000, session('access-a'), options.signal);
+  it('cancels the browser request immediately and lets its login finish for later searches', async () => {
+    const upstreamCalls = [];
+    connectProxy((url, options) => {
+      upstreamCalls.push({ path: url.pathname, signal: options.signal });
+      return respondAfter(6000, url.pathname.endsWith('createSession') ? session('access-a') : results, options.signal);
     });
     const controller = new AbortController();
     const pending = search('cancelled', controller.signal);
@@ -136,8 +136,20 @@ describe('browser and proxy search deadlines', () => {
     controller.abort();
     await vi.advanceTimersByTimeAsync(0);
     await checked;
-    expect(upstreamSignal.aborted).toBe(true);
+    expect(upstreamCalls.map(({ path }) => path)).toEqual(['/xrpc/com.atproto.server.createSession']);
+    expect(upstreamCalls[0].signal.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(upstreamCalls).toHaveLength(1);
     expect(testUtils.searchResultsCache.size).toBe(0);
     expect(vi.getTimerCount()).toBe(0);
+
+    const next = search('next');
+    const nextChecked = expect(next).resolves.toEqual(results);
+    await vi.advanceTimersByTimeAsync(6000);
+    await nextChecked;
+    expect(upstreamCalls.map(({ path }) => path)).toEqual([
+      '/xrpc/com.atproto.server.createSession',
+      '/xrpc/app.bsky.feed.searchPosts',
+    ]);
   });
 });

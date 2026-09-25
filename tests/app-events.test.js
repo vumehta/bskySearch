@@ -148,10 +148,10 @@ describe('app search controls', () => {
     for (const [threshold, count] of [['1', 3], ['60', 0], ['0', 3]]) {
       elements.minLikes.value = threshold;
       dispatch('minLikes', 'input');
+      await vi.advanceTimersByTimeAsync(300);
       expect(elements.results.querySelectorAll('.post')).toHaveLength(count);
       expect(state.currentCursors.apple).toBe('3');
       expect(window.location.searchParams.get('minLikes')).toBe(threshold);
-      await vi.advanceTimersByTimeAsync(300);
       await dispatch('minLikes', 'keypress', { key: 'Enter' });
       expect(fetch).toHaveBeenCalledTimes(3);
     }
@@ -173,6 +173,7 @@ describe('app search controls', () => {
     const signal = fetch.mock.calls.at(-1)[1].signal;
     elements.minLikes.value = '60';
     dispatch('minLikes', 'input');
+    await vi.advanceTimersByTimeAsync(300);
     expect(signal.aborted).toBe(false);
     expect(state.isLoading).toBe(true);
     expect(elements.results.querySelectorAll('.post')).toHaveLength(0);
@@ -182,6 +183,69 @@ describe('app search controls', () => {
     expect(state.allPosts.map((post) => post.uri)).toEqual([makePost('new').uri]);
     expect(state.isLoading).toBe(false);
     expect(state.currentCursors.apple).toBeNull();
+  });
+
+  it('waits for minimum likes to stop changing before filtering, unless Enter is pressed', async () => {
+    await bootApp('?terms=apple');
+    expect(elements.results.querySelectorAll('.post')).toHaveLength(1);
+
+    for (const threshold of ['1', '10', '100']) {
+      elements.minLikes.value = threshold;
+      dispatch('minLikes', 'input');
+      await vi.advanceTimersByTimeAsync(100);
+      expect(elements.results.querySelectorAll('.post')).toHaveLength(1);
+      expect(window.location.searchParams.get('minLikes')).toBe('0');
+    }
+    await vi.advanceTimersByTimeAsync(199);
+    expect(state.minLikes).toBe(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(state.minLikes).toBe(100);
+    expect(elements.results.querySelectorAll('.post')).toHaveLength(0);
+    expect(window.location.searchParams.get('minLikes')).toBe('100');
+
+    elements.minLikes.value = '5';
+    dispatch('minLikes', 'input');
+    await dispatch('minLikes', 'keypress', { key: 'Enter' });
+    expect(state.minLikes).toBe(5);
+    expect(elements.results.querySelectorAll('.post')).toHaveLength(1);
+    elements.minLikes.value = '500';
+    await vi.advanceTimersByTimeAsync(300);
+    expect(state.minLikes).toBe(5);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops a pending minimum likes change when a new search starts', async () => {
+    await bootApp('?terms=apple');
+    const pending = deferred();
+    fetch.mockReturnValueOnce(pending.promise);
+    elements.terms.value = 'banana';
+    elements.minLikes.value = '5';
+    dispatch('minLikes', 'input');
+    dispatch('searchBtn', 'click');
+    await vi.advanceTimersByTimeAsync(0);
+    const loading = elements.results.textContent;
+    await vi.advanceTimersByTimeAsync(300);
+    expect(elements.results.textContent).toBe(loading);
+    expect(state.minLikes).toBe(5);
+    pending.resolve(Response.json({ posts: [makePost('banana')] }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(elements.results.querySelectorAll('.post')).toHaveLength(1);
+  });
+
+  it('keeps a pending term search scheduled when a minimum likes change applies', async () => {
+    await bootApp();
+    elements.minLikes.value = '60';
+    dispatch('minLikes', 'input');
+    await vi.advanceTimersByTimeAsync(100);
+    elements.terms.value = 'apple';
+    dispatch('terms', 'input');
+    await vi.advanceTimersByTimeAsync(200);
+    expect(state.minLikes).toBe(60);
+    expect(state.searchDebounceTimer).not.toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(state.searchDebounceTimer).toBeNull();
   });
 
   it('keeps a pending term search scheduled when minimum likes changes', async () => {
@@ -309,5 +373,103 @@ describe('topic filter control', () => {
     dispatch('topicFilterToggle', 'change');
     expect(elements.results.querySelectorAll('.post')).toHaveLength(1);
     expect(window.location.search).not.toContain('topic=');
+  });
+
+  function serveLikes(pages, classified) {
+    fetch.mockImplementation(async (url, options) => {
+      if (!String(url).startsWith('/api/classify')) {
+        const cursor = new URL(url, window.location).searchParams.get('cursor') || '';
+        const { likes, next } = pages[cursor];
+        return Response.json({ posts: likes.map((likeCount) => ({ ...makePost(`likes${likeCount}`), likeCount })), cursor: next });
+      }
+      const { items } = JSON.parse(options.body);
+      classified.push(...items.map((item) => item.id.split('/').pop()));
+      return Response.json({ results: items.map((item) => ({ id: item.id, scores: item.keywords.map(() => 0.9) })) });
+    });
+  }
+
+  it('applies a pending minimum likes change before turning the topic filter on', async () => {
+    const classified = [];
+    serveLikes({ '': { likes: [10, 60, 120] } }, classified);
+    await bootApp('?terms=apple&minLikes=0');
+    await vi.advanceTimersByTimeAsync(300);
+
+    elements.minLikes.value = '100';
+    dispatch('minLikes', 'input');
+    elements.topicFilterToggle.checked = true;
+    dispatch('topicFilterToggle', 'change');
+    expect(state.minLikes).toBe(100);
+    expect(classified).toEqual(['likes120']);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(classified).toEqual(['likes120']);
+    expect(elements.results.querySelectorAll('.post')).toHaveLength(1);
+  });
+
+  it('starts no topic checks for newly loaded posts while a minimum likes change is pending', async () => {
+    const classified = [];
+    serveLikes({
+      '': { likes: [120], next: 'c1' },
+      c1: { likes: [110], next: 'c2' },
+      c2: { likes: [10, 20] },
+    }, classified);
+    await bootApp('?terms=apple&minLikes=0&topic=1');
+    await vi.advanceTimersByTimeAsync(300);
+    expect(classified.sort()).toEqual(['likes110', 'likes120']);
+
+    elements.minLikes.value = '100';
+    dispatch('minLikes', 'input');
+    await search.loadMore();
+    expect(state.allPosts.map((post) => post.uri.split('/').pop())).toContain('likes10');
+    expect(classified.sort()).toEqual(['likes110', 'likes120']);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(classified.sort()).toEqual(['likes110', 'likes120']);
+    expect(elements.results.querySelectorAll('.post')).toHaveLength(2);
+  });
+
+  it('sends no queued topic checks while a minimum likes change is pending', async () => {
+    const batches = [];
+    fetch.mockImplementation(async (url, options) => {
+      if (!String(url).startsWith('/api/classify')) {
+        return Response.json({ posts: Array.from({ length: 100 }, (_, index) => ({ ...makePost(`p${index}`), likeCount: 100 - index })) });
+      }
+      const response = deferred();
+      batches.push({ items: JSON.parse(options.body).items, response });
+      return response.promise;
+    });
+    await bootApp('?terms=apple&minLikes=0&topic=1');
+    await vi.advanceTimersByTimeAsync(300);
+    expect(batches).toHaveLength(2);
+
+    elements.minLikes.value = '90';
+    dispatch('minLikes', 'input');
+    const [first] = batches;
+    first.response.resolve(Response.json({ results: first.items.map((item) => ({ id: item.id, scores: [0.9] })) }));
+    await vi.advanceTimersByTimeAsync(300);
+    expect(batches).toHaveLength(2);
+    expect(elements.results.querySelectorAll('.post')).toHaveLength(11);
+  });
+
+  it('checks only the posts that meet the minimum likes the user settles on', async () => {
+    const classified = [];
+    fetch.mockImplementation(async (url, options) => {
+      if (!String(url).startsWith('/api/classify')) {
+        return Response.json({ posts: [10, 60, 120].map((likeCount) => ({ ...makePost(`likes${likeCount}`), likeCount })) });
+      }
+      const { items } = JSON.parse(options.body);
+      classified.push(items.map((item) => item.id.split('/').pop()));
+      return Response.json({ results: items.map((item) => ({ id: item.id, scores: item.keywords.map(() => 0.9) })) });
+    });
+    await bootApp('?terms=apple&minLikes=100&topic=1');
+    await vi.advanceTimersByTimeAsync(300);
+    expect(classified).toEqual([['likes120']]);
+
+    for (const threshold of ['', '5', '50']) {
+      elements.minLikes.value = threshold;
+      dispatch('minLikes', 'input');
+      await vi.advanceTimersByTimeAsync(50);
+    }
+    await vi.advanceTimersByTimeAsync(300);
+    expect(classified).toEqual([['likes120'], ['likes60']]);
+    expect(elements.results.querySelectorAll('.post')).toHaveLength(2);
   });
 });

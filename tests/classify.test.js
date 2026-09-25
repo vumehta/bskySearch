@@ -408,12 +408,46 @@ describe('upstream failures', () => {
     const items = Array.from({ length: TOPIC_LIMITS.maxItems }, (_, index) => item(`p${index}`));
     const startedAt = Date.now();
     const response = await advanceUntilSettled(POST(request({ items }), context));
-    expect(response.status).toBe(504);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ results: items.map(({ id }) => ({ id, scores: [null] })) });
     expect(Date.now() - startedAt).toBeLessThan(TOPIC_JOB_TIMEOUT_MS + 1000);
     for (let step = 0; step < 20; step += 1) {
       await vi.advanceTimersByTimeAsync(1000);
       await realPause();
     }
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('returns the scores that finished when the job deadline passes', async () => {
+    useFakeClock();
+    const quick = new Set(Array.from({ length: UPSTREAM_CONCURRENCY }, (_, index) => `post p${index}`));
+    const stalled = [];
+    globalThis.fetch = vi.fn(async (_url, options) => {
+      const body = JSON.parse(options.body);
+      if (quick.has(body.state.post_text)) return Response.json({ answers: { k0: { type: 'noul', noul: 0.8 } } });
+      stalled.push(options.signal);
+      return new Promise((_, reject) => {
+        options.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+      });
+    });
+    const items = Array.from({ length: TOPIC_LIMITS.maxItems }, (_, index) => item(`p${index}`));
+    const startedAt = Date.now();
+    const response = await advanceUntilSettled(POST(request({ items }), context));
+    expect(response.status).toBe(200);
+    const { results } = await response.json();
+    expect(results.map(({ id }) => id)).toEqual(items.map(({ id }) => id));
+    expect(results.map(({ scores }) => scores[0])).toEqual(
+      items.map((_, index) => (index < UPSTREAM_CONCURRENCY ? 0.8 : null)),
+    );
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(TOPIC_JOB_TIMEOUT_MS);
+    expect(Date.now() - startedAt).toBeLessThan(TOPIC_JOB_TIMEOUT_MS + 1000);
+    expect(stalled.length).toBeGreaterThan(0);
+    expect(stalled.every((signal) => signal.aborted)).toBe(true);
+    expect(scoreCache.size).toBe(UPSTREAM_CONCURRENCY);
+    expect(console.warn).toHaveBeenCalledWith(
+      `Topic check reached its deadline with ${UPSTREAM_CONCURRENCY} of ${TOPIC_LIMITS.maxItems} scores.`,
+    );
+    await vi.advanceTimersByTimeAsync(1000);
     expect(vi.getTimerCount()).toBe(0);
   });
 
@@ -437,6 +471,30 @@ describe('upstream failures', () => {
 });
 
 describe('admission', () => {
+  it('charges nothing when the caller goes away before any call is made', async () => {
+    useFakeClock();
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+    upstream();
+    const fillCalls = CLASSIFY_ADMISSION_LIMITS.burst - TOPIC_LIMITS.maxItems;
+    for (let start = 0; start < fillCalls; start += TOPIC_LIMITS.maxItems) {
+      const items = Array.from({ length: TOPIC_LIMITS.maxItems }, (_, index) => item('fill' + (start + index)));
+      expect((await POST(request({ items }), context)).status).toBe(200);
+    }
+    globalThis.fetch.mockClear();
+    const controller = new AbortController();
+    const digest = crypto.subtle.digest.bind(crypto.subtle);
+    const spy = vi.spyOn(crypto.subtle, 'digest').mockImplementation((...args) => {
+      controller.abort();
+      return digest(...args);
+    });
+    const abandoned = Array.from({ length: TOPIC_LIMITS.maxItems }, (_, index) => item('gone' + index));
+    expect((await POST(request({ items: abandoned }, { signal: controller.signal }), context)).status).toBe(499);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    spy.mockRestore();
+    const next = Array.from({ length: TOPIC_LIMITS.maxItems }, (_, index) => item('next' + index));
+    expect((await POST(request({ items: next }), context)).status).toBe(200);
+  });
+
   it('charges every retry against admission, including concurrent retries', async () => {
     useFakeClock();
     vi.spyOn(Date, 'now').mockReturnValue(Date.now());

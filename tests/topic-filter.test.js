@@ -300,7 +300,7 @@ describe('topic filter', () => {
       .toEqual([['General Electric'], ['General Motors']]);
   });
 
-  it('cancels excluded topic batches when minimum likes rises and requeues only eligible posts', async () => {
+  it('lets in-flight topic batches finish when minimum likes rises and drops queued posts that no longer qualify', async () => {
     const posts = Array.from({ length: 100 }, (_, index) => makePost(`p${index}`, 'Apple news', 100 - index));
     const pending = [deferred(), deferred()];
     let attempt = 0;
@@ -311,25 +311,55 @@ describe('topic filter', () => {
     state.hideOffTopic = true;
     await search.performSearch();
     expect(calls.classify).toHaveLength(2);
+    expect(summaryText()).toBe('Checking 100 posts for topic…');
 
     search.applyMinLikesFilter();
+    elements.minLikes.value = '99';
+    search.applyMinLikesFilter();
     expect(calls.classify.every(({ options }) => !options.signal.aborted)).toBe(true);
+    expect(visibleUris()).toEqual([uri('p0'), uri('p1')]);
+    expect(summaryText()).toBe('Checking 2 posts for topic…');
+
+    pending.forEach((response, index) => response.resolve(scoredBy(() => 0.9)(calls.classify[index].body)));
+    await vi.waitFor(() => expect(summaryText()).toBe('No off-topic posts found.'));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(calls.classify).toHaveLength(2);
+    expect(visibleUris()).toEqual([uri('p0'), uri('p1')]);
+
+    elements.minLikes.value = '50';
+    search.applyMinLikesFilter();
+    await vi.waitFor(() => expect(summaryText()).toBe('No off-topic posts found.'));
+    expect(calls.classify).toHaveLength(3);
+    expect(calls.classify[2].body.items.map((item) => item.id)).toEqual([uri('p50')]);
+    expect(visibleUris()).toHaveLength(51);
+  });
+
+  it('asks again for every keyword of a dropped post once it qualifies again', async () => {
+    const posts = Array.from({ length: 100 }, (_, index) => makePost(`p${index}`, 'Apple and Meta news', 100 - index));
+    const pending = [deferred(), deferred()];
+    let attempt = 0;
+    const calls = installFetch({
+      posts,
+      classify: (body) => pending[attempt++]?.promise || scoredBy(() => 0.9)(body),
+    });
+    elements.terms.value = 'apple, meta';
+    state.hideOffTopic = true;
+    await search.performSearch();
+    expect(calls.classify).toHaveLength(2);
+    expect(calls.classify[0].body.items[0].keywords).toEqual(['apple', 'meta']);
 
     elements.minLikes.value = '99';
     search.applyMinLikesFilter();
-    expect(calls.classify.slice(0, 2).every(({ options }) => options.signal.aborted)).toBe(true);
+    pending.forEach((response, index) => response.resolve(scoredBy(() => 0.9)(calls.classify[index].body)));
+    await vi.waitFor(() => expect(summaryText()).toBe('No off-topic posts found.'));
+
+    elements.minLikes.value = '50';
+    search.applyMinLikesFilter();
     await vi.waitFor(() => expect(summaryText()).toBe('No off-topic posts found.'));
     expect(calls.classify).toHaveLength(3);
-    expect(calls.classify[2].body.items.map((item) => item.id)).toEqual([uri('p0'), uri('p1')]);
-    expect(visibleUris()).toEqual([uri('p0'), uri('p1')]);
-
-    pending.forEach((response, index) => response.resolve(scoredBy(() => 0.01)(calls.classify[index].body)));
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    elements.minLikes.value = '100';
-    search.applyMinLikesFilter();
-    expect(visibleUris()).toEqual([uri('p0')]);
-    expect(summaryText()).toBe('No off-topic posts found.');
-    expect(calls.classify).toHaveLength(3);
+    expect(calls.classify[2].body.items).toEqual([
+      expect.objectContaining({ id: uri('p50'), keywords: ['apple', 'meta'] }),
+    ]);
   });
 
   it.each([
