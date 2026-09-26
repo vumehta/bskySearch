@@ -76,7 +76,7 @@ describe('browser and proxy search deadlines', () => {
     expect(error).toBeUndefined();
     await vi.advanceTimersByTimeAsync(1);
     await pending;
-    expect(error).toMatchObject({ name: 'HttpError', status: 504 });
+    expect(error).toMatchObject({ name: 'HttpError', status: 504, message: 'Upstream request timed out.' });
     expect(requests).toHaveLength(4);
     expect(requests.at(-1).signal.aborted).toBe(true);
     expect(testUtils.searchResultsCache.size).toBe(0);
@@ -98,7 +98,7 @@ describe('browser and proxy search deadlines', () => {
         : respondAfter(1000, results, options.signal);
     });
     const older = search('older');
-    const olderChecked = expect(older).rejects.toMatchObject({ status: 504 });
+    const olderChecked = expect(older).rejects.toMatchObject({ status: 504, message: 'Upstream request timed out.' });
     await vi.advanceTimersByTimeAsync(15000);
     const newer = search('newer');
     const newerChecked = expect(newer).resolves.toEqual(results);

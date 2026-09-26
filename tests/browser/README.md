@@ -1,6 +1,6 @@
 # Browser smoke tests
 
-The tests load the real HTML, CSS, and JavaScript from `dist` in Chromium at desktop and mobile viewport sizes. They exercise search pagination, minimum-likes filtering, the topic filter, link cards and quoted posts in result cards (both themes), normal handle-based quote lookup, and quote sorting. API responses are fixtures; these tests do not verify a live Bluesky account or deployment.
+The tests load the real HTML, CSS, and JavaScript from `dist` in Chromium at desktop and mobile viewport sizes. They exercise search pagination, minimum-likes filtering, the topic filter, link cards and quoted posts in result cards (both themes), normal handle-based quote lookup, and quote sorting. `styling.spec.mjs` checks focus outlines in forced colors mode, the system dark palette before the app script runs, Light and Dark overriding the system theme, and the image CDN preconnect without `crossorigin`. API responses are fixtures; these tests do not verify a live Bluesky account or deployment.
 
 Keep browser cases focused on control wiring, DOM safety, and layout. Scoring invalidation, keyword batching, cache limits, and retry/cancellation edge cases are covered in the unit tests; avoid repeating those fixture scenarios here.
 

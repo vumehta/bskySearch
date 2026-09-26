@@ -149,6 +149,7 @@ let sessionOperation = null;
 const AUTH_RETRY_DEFAULT_MS = 60 * 1000;
 const AUTH_RETRY_MAX_MS = 24 * 60 * 60 * 1000;
 let authBlockedUntil = 0;
+let searchBlockedUntil = 0;
 
 const SEARCH_CACHE_TTL_MS = 30000;
 const SEARCH_CACHE_CLEANUP_INTERVAL_MS = 5000;
@@ -238,6 +239,17 @@ function authRateLimitError(delayMs) {
   return proxyError('Bluesky login is rate limited. Please try again later.', 429, {
     'Retry-After': String(Math.ceil(delayMs / 1000)),
   });
+}
+
+function searchRateLimitError(delayMs) {
+  return proxyError('Bluesky search is rate limited. Please try again later.', 429, {
+    'Retry-After': String(Math.ceil(delayMs / 1000)),
+  });
+}
+
+function throwIfSearchBlocked() {
+  const blockedMs = searchBlockedUntil - Date.now();
+  if (blockedMs > 0) throw searchRateLimitError(blockedMs);
 }
 
 function checkAuthRateLimit(response) {
@@ -383,6 +395,7 @@ function resetModuleStateForTests() {
   sessionCreatedAt = null;
   sessionOperation = null;
   authBlockedUntil = 0;
+  searchBlockedUntil = 0;
   searchResultsCache.clear();
   pendingSearches.clear();
   lastSearchCacheCleanupAt = 0;
@@ -391,6 +404,7 @@ function resetModuleStateForTests() {
 }
 
 async function searchPosts({ term, cursor, sort, since }, accessJwt, signal) {
+  throwIfSearchBlocked();
   const params = new URLSearchParams({
     q: term,
     sort,
@@ -461,12 +475,17 @@ async function runSearch(input, handle, appPassword, signal) {
   let result = await searchPosts(input, session.accessJwt, signal);
   if (
     result.response.status === 401 ||
-    (result.response.status === 400 && result.payload?.error === 'ExpiredToken')
+    (result.response.status === 400 && ['ExpiredToken', 'InvalidToken'].includes(result.payload?.error))
   ) {
     session = await ensureSession(handle, appPassword, signal, session.accessJwt);
     result = await searchPosts(input, session.accessJwt, signal);
   }
   const { response, payload } = result;
+  if (response.status === 429) {
+    const now = Date.now();
+    searchBlockedUntil = Math.max(searchBlockedUntil, now + getRetryDelayMs(response));
+    throw searchRateLimitError(searchBlockedUntil - now);
+  }
   if (!response.ok) {
     const message =
       (typeof payload?.message === 'string' && payload.message) ||
@@ -537,6 +556,7 @@ export async function GET(request, context) {
       operation = null;
     }
     if (!operation) {
+      throwIfSearchBlocked();
       admitSearch();
       operation = createSharedOperation(
         async (signal) => {

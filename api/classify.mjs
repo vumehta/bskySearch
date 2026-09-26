@@ -14,7 +14,7 @@ const UPSTREAM_CONCURRENCY = 8;
 const UPSTREAM_RETRY_DELAY_MS = 300;
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504, 529]);
 
-const MAX_BODY_CHARS = 256 * 1024;
+const MAX_BODY_BYTES = 1024 * 1024;
 
 const SCORE_CACHE_TTL_MS = 60 * 60 * 1000;
 const MAX_SCORE_CACHE_SIZE = 5000;
@@ -146,13 +146,13 @@ function parseItems(payload) {
 
 async function readJsonBody(request) {
   const declaredLength = Number(request.headers.get('content-length'));
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_CHARS) {
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) {
     throw httpError('Request body is too large.', 413);
   }
-  const text = await request.text();
-  if (text.length > MAX_BODY_CHARS) throw httpError('Request body is too large.', 413);
+  const body = await request.arrayBuffer();
+  if (body.byteLength > MAX_BODY_BYTES) throw httpError('Request body is too large.', 413);
   try {
-    return JSON.parse(text);
+    return JSON.parse(new TextDecoder().decode(body));
   } catch {
     throw httpError('Request body is not valid JSON.', 400);
   }
@@ -217,12 +217,9 @@ function admitUpstreamCalls(calls, client) {
       retryAfter = Math.max(retryAfter, Math.ceil((calls - bucket.tokens) / limits.refillPerSecond));
     }
   }
-  if (retryAfter > 0) {
-    throw httpError('Too many topic checks. Please try again shortly.', 429, {
-      'Retry-After': String(retryAfter),
-    });
-  }
+  if (retryAfter > 0) return retryAfter;
   for (const [bucket] of limited) bucket.tokens -= calls;
+  return 0;
 }
 
 function getClientKey(request) {
@@ -342,7 +339,10 @@ async function scoreItem(keywords, context, { apiKey, model, signal, deadlineAt,
       await abortableDelay(retryDelayMs, signal);
     }
     throwIfAborted(signal);
-    if (attempt > 0) admitUpstreamCalls(1, client);
+    if (attempt > 0 && admitUpstreamCalls(1, client) > 0) {
+      console.warn('Topic classifier retry was refused by admission.');
+      return unscored;
+    }
     let result;
     try {
       result = await postToTypeSafe(body, apiKey, signal);
@@ -414,7 +414,12 @@ async function classifyItems(items, results, options) {
   }
   if (tasks.length > 0) {
     throwIfAborted(options.signal);
-    admitUpstreamCalls(tasks.length, options.client);
+    const retryAfter = admitUpstreamCalls(tasks.length, options.client);
+    if (retryAfter > 0) {
+      throw httpError('Too many topic checks. Please try again shortly.', 429, {
+        'Retry-After': String(retryAfter),
+      });
+    }
     await runWithConcurrency(tasks, UPSTREAM_CONCURRENCY);
   }
 }
@@ -505,6 +510,7 @@ export const testUtils =
         scoreCache,
         SCORE_CACHE_TTL_MS,
         MAX_SCORE_CACHE_SIZE,
+        MAX_BODY_BYTES,
         UPSTREAM_TIMEOUT_MS,
         UPSTREAM_CONCURRENCY,
         UPSTREAM_RETRY_DELAY_MS,

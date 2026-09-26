@@ -1,8 +1,8 @@
 import { PUBLIC_API } from './constants.mjs';
-import { appendAuthorBadges } from './author-badges.mjs';
+import { appendAuthorBadges, clearBadgeTimers } from './author-badges.mjs';
 import { fetchJson } from './http.mjs';
 import { isRenderablePost } from './post-data.mjs';
-import { formatRelativeTime, isValidBskyUrl } from './utils.mjs';
+import { formatRelativeTime, getPostSortAt, isValidBskyUrl } from './utils.mjs';
 
 const THREAD_CACHE_TTL_MS = 30000;
 const MAX_THREAD_CACHE_SIZE = 100;
@@ -24,6 +24,13 @@ async function fetchPostThread(atUri, signal) {
   return fetchJson(`${PUBLIC_API}/app.bsky.feed.getPostThread?${params}`, { signal });
 }
 
+function getMissingParentNotice(node) {
+  if (!node) return '';
+  if (node.$type === 'app.bsky.feed.defs#blockedPost') return 'Parent post blocked';
+  if (node.$type === 'app.bsky.feed.defs#notFoundPost') return 'Parent post not found';
+  return 'Parent post unavailable';
+}
+
 function extractParentChain(thread) {
   const parents = [];
   let current = thread.thread?.parent;
@@ -32,7 +39,7 @@ function extractParentChain(thread) {
     parents.push(current.post);
     current = current.parent;
   }
-  return parents.reverse();
+  return { parents: parents.reverse(), missing: getMissingParentNotice(current) };
 }
 
 function createThreadParentElement(post) {
@@ -68,7 +75,7 @@ function createThreadParentElement(post) {
 
   const timeSpan = document.createElement('span');
   timeSpan.className = 'thread-parent-time';
-  timeSpan.textContent = formatRelativeTime(post.record?.createdAt || post.indexedAt);
+  timeSpan.textContent = formatRelativeTime(getPostSortAt(post));
   header.appendChild(timeSpan);
 
   wrapper.appendChild(header);
@@ -81,7 +88,7 @@ function createThreadParentElement(post) {
   return wrapper;
 }
 
-function createThreadContextElement(parents, contextId) {
+function createThreadContextElement({ parents, missing }, contextId) {
   const container = document.createElement('div');
   container.className = 'thread-context';
   container.id = contextId;
@@ -90,6 +97,16 @@ function createThreadContextElement(parents, contextId) {
   label.className = 'thread-label';
   label.textContent = 'Thread context';
   container.appendChild(label);
+
+  if (missing) {
+    const notice = document.createElement('div');
+    notice.className = 'thread-parent thread-parent-missing';
+    const text = document.createElement('div');
+    text.className = 'thread-parent-text';
+    text.textContent = missing;
+    notice.appendChild(text);
+    container.appendChild(notice);
+  }
 
   parents.forEach((parent) => {
     container.appendChild(createThreadParentElement(parent));
@@ -106,6 +123,7 @@ function removeThreadContexts(postElement) {
     if (!child.classList.contains('thread-context')) {
       continue;
     }
+    clearBadgeTimers(child);
     child.remove();
     removed = true;
   }
@@ -165,19 +183,19 @@ function showTemporaryStatus(toggleState, message) {
   }, 2000);
 }
 
-function getCachedParents(uri) {
+function getCachedChain(uri) {
   const cached = threadCache.get(uri);
   if (!cached) return null;
   if (Date.now() - cached.timestamp >= THREAD_CACHE_TTL_MS) {
     threadCache.delete(uri);
     return null;
   }
-  return cached.parents;
+  return cached.chain;
 }
 
-function cacheParents(uri, parents) {
+function cacheChain(uri, chain) {
   threadCache.delete(uri);
-  threadCache.set(uri, { parents, timestamp: Date.now() });
+  threadCache.set(uri, { chain, timestamp: Date.now() });
   while (threadCache.size > MAX_THREAD_CACHE_SIZE) {
     threadCache.delete(threadCache.keys().next().value);
   }
@@ -212,20 +230,20 @@ export async function toggleThread(post, postElement) {
   link.textContent = 'Cancel loading';
 
   try {
-    let parents = getCachedParents(post.uri);
-    if (!parents) {
+    let chain = getCachedChain(post.uri);
+    if (!chain) {
       const threadData = await fetchPostThread(post.uri, controller.signal);
       if (toggleState.controller !== controller) return;
-      parents = extractParentChain(threadData);
-      if (parents.length > 0) cacheParents(post.uri, parents);
+      chain = extractParentChain(threadData);
+      if (chain.parents.length > 0) cacheChain(post.uri, chain);
     }
 
-    if (parents.length === 0) {
-      showTemporaryStatus(toggleState, 'No parent posts found');
+    if (chain.parents.length === 0) {
+      showTemporaryStatus(toggleState, chain.missing || 'No parent posts found');
       return;
     }
 
-    const contextElement = createThreadContextElement(parents, contextId);
+    const contextElement = createThreadContextElement(chain, contextId);
     postElement.insertBefore(contextElement, postElement.firstElementChild || null);
     link.setAttribute('aria-expanded', 'true');
     link.textContent = 'Hide Thread';

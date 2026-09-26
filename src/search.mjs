@@ -1,6 +1,7 @@
 import {
   INITIAL_MAX_PAGES,
   INITIAL_RENDER_LIMIT,
+  MAX_SEARCH_TERMS,
   MIN_LIKES_DEBOUNCE_MS,
   RENDER_STEP,
   SEARCH_API,
@@ -25,25 +26,27 @@ import {
   filterByDate,
   filterByLikes,
   formatRelativeTime,
+  getPostSortAt,
   getPostUrl,
   getProfileUrl,
   getSearchCacheKey,
   getSearchSince,
   isValidBskyUrl,
+  limitSearchTerms,
   normalizeSortValue,
   normalizeTerm,
   sortPosts,
 } from './utils.mjs';
-import { appendAuthorBadges } from './author-badges.mjs';
+import { appendAuthorBadges, clearBadgeTimers } from './author-badges.mjs';
 import { appendPostEmbeds } from './post-embeds.mjs';
 import { appendEngagementStats, SEARCH_STAT_CLASSES } from './post-stats.mjs';
 import { enforceSearchCacheLimit, getCachedSearch } from './cache.mjs';
-import { fetchJson } from './http.mjs';
+import { fetchJson, isRetryableError, throwIfAborted } from './http.mjs';
 import { getEmbedPreviews } from './post-data.mjs';
 import { createHighlightMatcher, getMatchedTermsForPost, getPostRenderFingerprint, ingestSearchPosts, nextSearchCursor, settleWithConcurrency, validateSearchPage } from './search-model.mjs';
 import { setQueryParam, updateURLWithParams } from './url.mjs';
 import { cancelThreadRequest, cancelThreadRequests, initializeThreadToggle, isReplyPost, moveThreadContext, toggleThread } from './thread.mjs';
-import { cancelTopicScoring, dropQueuedTopicScores, getTopicProgress, getTopicVerdict, requestTopicScores, resetTopicScoring } from './topic-filter.mjs';
+import { cancelTopicScoring, dropQueuedTopicScores, getTopicProgress, getTopicVerdict, requestTopicScores, resetTopicScoring, restartTopicScoring } from './topic-filter.mjs';
 
 const DERIVE_THROTTLE_MS = 120;
 const SORT_LABELS = {
@@ -54,6 +57,8 @@ const SORT_LABELS = {
 
 const ingestedPostsByUri = new Map();
 let activeSearchController = null;
+let searchApiSort = 'top';
+let skippedTermsNotice = '';
 const searchSeenCursors = new Map();
 let deriveTimerId = null;
 let minLikesTimerId = null;
@@ -76,6 +81,7 @@ const renderedPosts = new Map();
 let nextImagesId = 0;
 
 let topicSummary = null;
+let topicRenderLimit = 0;
 
 let highlightMatcherCache = { key: '', regex: null, termSet: null };
 
@@ -126,7 +132,7 @@ export function updateExpansionSummary() {
 }
 
 async function searchTerm(term, cursor, { sort, since, signal }) {
-  signal.throwIfAborted();
+  throwIfAborted(signal);
   const cacheKey = getSearchCacheKey(term, cursor, sort, since);
   const cached = getCachedSearch(cacheKey);
   if (cached) return cached;
@@ -139,9 +145,11 @@ async function searchTerm(term, cursor, { sort, since, signal }) {
     data = validateSearchPage(await fetchJson(`${SEARCH_API}?${params}`, { signal, timeoutMs: SEARCH_REQUEST_TIMEOUT_MS }));
   } catch (error) {
     if (error.name === 'AbortError') throw error;
-    throw new Error(`Search failed for "${term}": ${error.message}`, { cause: error });
+    const failure = new Error(`Search failed for "${term}": ${error.message}`, { cause: error });
+    failure.retryable = isRetryableError(error);
+    throw failure;
   }
-  signal.throwIfAborted();
+  throwIfAborted(signal);
   searchCache.set(cacheKey, { data, timestamp: Date.now() });
   enforceSearchCacheLimit();
   return data;
@@ -184,9 +192,19 @@ function createSearchContext() {
   return {
     generation: state.searchGeneration,
     signal: activeSearchController.signal,
-    sort: state.searchSort === 'latest' ? 'latest' : 'top',
+    sort: searchApiSort,
     since: state.searchSince,
   };
+}
+
+function getApiSort(sort) {
+  return sort === 'latest' ? 'latest' : 'top';
+}
+
+function describeFailures(failures, termCount) {
+  const message = failures[0].reason.message.replace(/[\s.!?…]+$/, '');
+  const retry = failures.some((failure) => failure.reason.retryable) ? ' Load more to retry.' : '';
+  return `${failures.length}/${termCount} terms could not finish. ${message}.${retry}`;
 }
 
 async function runSearchPages(terms, maxPages, context, { loadingMore = false } = {}) {
@@ -208,8 +226,9 @@ async function runSearchPages(terms, maxPages, context, { loadingMore = false } 
     }, context.signal);
     if (!isActiveSearch(context)) return;
     const failures = results.filter((result) => result.status === 'rejected');
-    if (failures.length) {
-      showStatus(`${failures.length}/${terms.length} terms could not finish. ${failures[0].reason.message}. Load more to retry.`, 'error');
+    const notices = [failures.length ? describeFailures(failures, terms.length) : '', skippedTermsNotice].filter(Boolean);
+    if (notices.length) {
+      showStatus(notices.join(' '), failures.length ? 'error' : 'loading');
     } else {
       hideStatus();
     }
@@ -231,7 +250,7 @@ async function runSearchPages(terms, maxPages, context, { loadingMore = false } 
 }
 
 function increaseRenderLimit() {
-  state.renderLimit = Math.min(state.allPosts.length, state.renderLimit + RENDER_STEP);
+  state.renderLimit = Math.max(state.renderLimit, Math.min(state.allPosts.length, state.renderLimit + RENDER_STEP));
 }
 
 function cancelScheduledRender() {
@@ -262,19 +281,25 @@ function applyTopicFilter(posts) {
     return posts;
   }
   const kept = [];
+  const windowSize = state.renderLimit + RENDER_STEP;
   let hidden = 0;
+  let unhidden = 0;
+  let windowEnd = 0;
   for (const post of posts) {
     const { verdict, score, keptFor } = getTopicVerdict(post);
-    if (verdict !== 'off') {
-      kept.push(score !== null ? { ...post, topicMatch: { offTopic: false, score, keptFor } } : post);
-      continue;
+    if (verdict === 'off') {
+      hidden += 1;
+      if (state.showOffTopic) kept.push({ ...post, topicMatch: { offTopic: true, score } });
+    } else {
+      unhidden += 1;
+      kept.push(verdict === 'on' ? { ...post, topicMatch: { offTopic: false, score, keptFor } } : post);
     }
-    hidden += 1;
-    if (state.showOffTopic) kept.push({ ...post, topicMatch: { offTopic: true, score } });
+    if (unhidden <= windowSize) windowEnd += 1;
   }
+  topicRenderLimit = state.renderLimit;
   const generation = state.searchGeneration;
   if (!minLikesTimerId) {
-    requestTopicScores(posts, () => {
+    requestTopicScores(posts.slice(0, windowEnd), () => {
       if (isCurrentSearchGeneration(generation)) scheduleDerivedPostsRebuild();
     });
   }
@@ -355,7 +380,7 @@ function syncTopicMatch(postElement, topicMatch) {
     termsDiv.appendChild(tag);
   }
   tag.className = offTopic ? 'term-tag off-topic-tag' : 'term-tag topic-score-tag';
-  const match = `${Math.round(topicMatch.score * 100)}% match`;
+  const match = `${Math.floor(topicMatch.score * 100 + 1e-9)}% match`;
   const label = offTopic ? 'Off-topic' : topicMatch.keptFor;
   tag.textContent = label ? `${label} \xB7 ${match}` : match;
 }
@@ -438,7 +463,7 @@ function createPostElement(post, { imagesShown = false } = {}) {
 
   const timeSpan = document.createElement('span');
   timeSpan.className = 'post-time';
-  timeSpan.textContent = formatRelativeTime(post.record?.createdAt || post.indexedAt);
+  timeSpan.textContent = formatRelativeTime(getPostSortAt(post));
   header.appendChild(timeSpan);
 
   postDiv.appendChild(header);
@@ -546,6 +571,7 @@ function resetResultsRenderCache() {
   showMoreBtnEl = null;
   loadMoreBtnEl = null;
   renderedPosts.clear();
+  clearBadgeTimers(resultsDiv);
   resultsDiv.textContent = '';
 }
 
@@ -579,6 +605,9 @@ function ensureResultsShell() {
   resultsTopicEl = document.createElement('div');
   resultsTopicEl.className = 'topic-summary';
   resultsTopicTextEl = document.createElement('span');
+  resultsTopicTextEl.setAttribute('role', 'status');
+  resultsTopicTextEl.setAttribute('aria-live', 'polite');
+  resultsTopicTextEl.setAttribute('aria-atomic', 'true');
   resultsTopicEl.appendChild(resultsTopicTextEl);
   resultsTopicBtnEl = document.createElement('button');
   resultsTopicBtnEl.className = 'topic-reveal';
@@ -642,6 +671,7 @@ function syncVisibleResultPosts(visiblePosts) {
         resultsListEl.replaceChild(nextElement, postElement);
         if (focusKey) findByFocusKey(nextElement, focusKey)?.focus();
       }
+      if (postElement) clearBadgeTimers(postElement);
 
       postElement = nextElement;
       renderedPosts.set(uri, { element: postElement, fingerprint: nextFingerprint });
@@ -663,6 +693,7 @@ function syncVisibleResultPosts(visiblePosts) {
       cancelThreadRequest(element);
       element.remove();
     }
+    clearBadgeTimers(element);
     renderedPosts.delete(uri);
   }
 
@@ -692,6 +723,7 @@ function syncLoadMoreButton() {
 }
 
 function syncTopicSummary() {
+  if (state.hideOffTopic && state.renderLimit > topicRenderLimit) scheduleDerivedPostsRebuild();
   const summary = topicSummary;
   if (!summary || (summary.checked === 0 && !summary.unavailableReason)) {
     resultsTopicEl.style.display = 'none';
@@ -710,11 +742,11 @@ function syncTopicSummary() {
     parts.push(`${count(summary.failed)} could not be checked and ${summary.failed === 1 ? 'stays' : 'stay'} visible.`);
   }
   if (parts.length === 0) parts.push('No off-topic posts found.');
+  const text = parts.join(' ');
   resultsTopicEl.style.display = '';
-  resultsTopicTextEl.textContent = parts.join(' ');
+  if (resultsTopicTextEl.textContent !== text) resultsTopicTextEl.textContent = text;
   resultsTopicBtnEl.style.display = summary.hidden > 0 ? '' : 'none';
   resultsTopicBtnEl.textContent = state.showOffTopic ? 'Hide them again' : 'Show them';
-  resultsTopicBtnEl.setAttribute('aria-pressed', String(state.showOffTopic));
 }
 
 function renderResults() {
@@ -769,11 +801,17 @@ export async function performSearch() {
   cancelDebouncedMinLikesFilter();
   cancelActiveSearch();
   const termsValue = termsInput.value.trim();
-  state.rawSearchTerms = termsValue.split(',').map(normalizeTerm).filter(Boolean);
-  state.searchTerms = expandSearchTerms(state.rawSearchTerms, expandTermsToggle.checked);
+  const typedTerms = termsValue.split(',').map(normalizeTerm).filter(Boolean);
+  const { rawTerms, terms, total } = limitSearchTerms(typedTerms, expandTermsToggle.checked, MAX_SEARCH_TERMS);
+  state.rawSearchTerms = rawTerms;
+  state.searchTerms = terms;
+  skippedTermsNotice = total > terms.length
+    ? `Only the first ${terms.length} of ${total} terms are searched (${total - terms.length} skipped).`
+    : '';
   state.minLikes = Math.max(0, parseInt(minLikesInput.value, 10) || 0);
   state.timeFilterHours = parseInt(timeFilterSelect.value, 10) || 24;
   state.searchSort = normalizeSortValue(sortSelect.value);
+  searchApiSort = getApiSort(state.searchSort);
   state.searchSince = state.searchTerms.length ? getSearchSince(state.timeFilterHours) : null;
   state.allPosts = [];
   state.currentCursors = Object.create(null);
@@ -791,14 +829,14 @@ export async function performSearch() {
     showStatus('Please enter at least one search term.', 'error');
     return;
   }
-  showStatus(`Searching for: ${state.rawSearchTerms.join(', ')}…`, 'loading');
+  showStatus([`Searching for: ${state.rawSearchTerms.join(', ')}…`, skippedTermsNotice].filter(Boolean).join(' '), 'loading');
   await runSearchPages([...state.searchTerms], INITIAL_MAX_PAGES, createSearchContext());
 }
 
 export async function loadMore() {
   if (state.isLoading || state.searchDebounceTimer !== null) return;
   const terms = state.searchTerms.filter((term) =>
-    Object.hasOwn(state.currentCursors, term) && state.currentCursors[term] !== null);
+    Object.prototype.hasOwnProperty.call(state.currentCursors, term) && state.currentCursors[term] !== null);
   if (!terms.length) return;
   showStatus('Loading more results…', 'loading');
   await runSearchPages(terms, 1, createSearchContext(), { loadingMore: true });
@@ -841,7 +879,7 @@ export function applyTopicFilterChange(enabled) {
   syncMinLikes();
   state.hideOffTopic = Boolean(enabled);
   state.showOffTopic = false;
-  resetTopicScoring();
+  restartTopicScoring();
   updateSearchURL();
   if (!state.searchTerms.length) return;
   flushDerivedPostsRebuild();
@@ -880,6 +918,7 @@ export function clearSearchResults() {
   state.rawSearchTerms = [];
   state.searchTerms = [];
   state.searchSince = null;
+  skippedTermsNotice = '';
   ingestedPostsByUri.clear();
   resetTopicScoring();
   state.showOffTopic = false;
@@ -901,6 +940,13 @@ export function focusSearchInput() {
 }
 
 export function applySearchSortChange() {
+  if (state.searchDebounceTimer === null && state.searchTerms.length && getApiSort(state.searchSort) === searchApiSort) {
+    if (state.hideOffTopic) dropQueuedTopicScores();
+    updateSearchURL();
+    flushDerivedPostsRebuild();
+    if (resultsHeaderEl || state.allPosts.length) renderResults();
+    return;
+  }
   cancelDebouncedSearch();
   if (termsInput.value.trim()) return performSearch();
   updateSearchURL();

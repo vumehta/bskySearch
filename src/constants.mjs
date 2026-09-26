@@ -7,6 +7,7 @@ export const RENDER_STEP = 100;
 export const SEARCH_DEBOUNCE_MS = 300;
 export const MIN_LIKES_DEBOUNCE_MS = 300;
 export const INITIAL_MAX_PAGES = 2;
+export const MAX_SEARCH_TERMS = 10;
 export const SEARCH_CONCURRENCY = 4;
 export const SEARCH_CACHE_TTL_MS = 30000;
 export const DID_CACHE_TTL_MS = 2 * 60 * 60 * 1000;

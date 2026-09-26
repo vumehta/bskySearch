@@ -1,6 +1,11 @@
 import { TOPIC_LIMITS, cleanText, getLinkCard, getQuotedPost } from './topic-context.mjs';
 import { getHttpUrl, getPostUrlFromAtUri } from './utils.mjs';
 
+const UNAVAILABLE_QUOTE_NOTICES = new Map([
+  ['app.bsky.embed.record#viewBlocked', 'Quoted post blocked'],
+  ['app.bsky.embed.record#viewNotFound', 'Quoted post not found'],
+  ['app.bsky.embed.record#viewDetached', 'Quoted post removed by its author'],
+]);
 
 const plainText = (text) => document.createTextNode(text);
 
@@ -64,11 +69,21 @@ function createQuotedPost(quoted, renderText) {
   return quote;
 }
 
+function createUnavailableQuote(embed) {
+  const view = embed?.$type === 'app.bsky.embed.recordWithMedia#view' ? embed.record?.record
+    : embed?.$type === 'app.bsky.embed.record#view' ? embed.record
+      : null;
+  const notice = UNAVAILABLE_QUOTE_NOTICES.get(view?.$type);
+  if (!notice) return null;
+  return createElement('div', 'embed-quote embed-quote-unavailable',
+    createElement('span', 'embed-quote-handle', plainText(notice)));
+}
+
 export function appendPostEmbeds(container, embed, renderText = plainText) {
   const linkCard = getLinkCard(embed);
   const quoted = getQuotedPost(embed);
   [
     linkCard && createLinkCard(linkCard, renderText),
-    quoted && createQuotedPost(quoted, renderText),
+    quoted ? createQuotedPost(quoted, renderText) : createUnavailableQuote(embed),
   ].filter(Boolean).forEach((element) => container.appendChild(element));
 }

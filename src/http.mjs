@@ -15,9 +15,26 @@ export class RequestTimeoutError extends Error {
   }
 }
 
+const abortError = () => new DOMException('Request aborted.', 'AbortError');
+
+export function throwIfAborted(signal) {
+  if (signal.aborted) throw abortError();
+}
+
+export function isRetryableError(error) {
+  if (error instanceof HttpError) return error.status === 408 || error.status === 429 || error.status >= 500;
+  return error instanceof RequestTimeoutError || error instanceof TypeError;
+}
+
 export async function fetchJson(url, { signal, timeoutMs = 10000, ...options } = {}) {
   const controller = new AbortController();
-  const abortFromCaller = () => controller.abort(signal.reason);
+  let abortReason = null;
+  const abort = (reason) => {
+    if (controller.signal.aborted) return;
+    abortReason = reason;
+    controller.abort(reason);
+  };
+  const abortFromCaller = () => abort(signal.reason || abortError());
   if (signal?.aborted) {
     abortFromCaller();
   } else {
@@ -26,11 +43,11 @@ export async function fetchJson(url, { signal, timeoutMs = 10000, ...options } =
 
   let onAbort;
   const aborted = new Promise((_, reject) => {
-    onAbort = () => reject(controller.signal.reason || new DOMException('Request aborted.', 'AbortError'));
+    onAbort = () => reject(abortReason);
     if (controller.signal.aborted) onAbort();
     else controller.signal.addEventListener('abort', onAbort, { once: true });
   });
-  const timer = setTimeout(() => controller.abort(new RequestTimeoutError()), timeoutMs);
+  const timer = setTimeout(() => abort(new RequestTimeoutError()), timeoutMs);
 
   try {
     if (controller.signal.aborted) return await aborted;
@@ -41,7 +58,7 @@ export async function fetchJson(url, { signal, timeoutMs = 10000, ...options } =
       try {
         payload = await response.json();
       } catch {
-        if (controller.signal.aborted) throw controller.signal.reason;
+        if (controller.signal.aborted) throw abortReason;
         if (!response.ok) throw new HttpError(response.status, null, retryAfter);
         throw new HttpError(502, { error: 'The server returned an invalid response.' });
       }

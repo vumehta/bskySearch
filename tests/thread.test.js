@@ -71,6 +71,46 @@ describe('thread disclosure', () => {
     expect(context(card).querySelector('.badge').textContent).toBe('Verified');
   });
 
+  it('clears the LIVE badge timers of thread parents when the thread is hidden', async () => {
+    const { card } = createCard();
+    const status = { status: 'app.bsky.actor.status#live', expiresAt: '2026-01-01T13:00:00Z' };
+    fetchMock.mockResolvedValue(response({ thread: { parent: { post: { ...parent(), author: { ...parent().author, status } } } } }));
+    await thread.toggleThread(post, card);
+    expect(context(card).querySelector('.badge').textContent).toBe('LIVE');
+    expect(vi.getTimerCount()).toBe(1);
+    await thread.toggleThread(post, card);
+    expect(context(card)).toBeUndefined();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('dates a parent with a future creation time by when it was indexed', async () => {
+    const { card } = createCard();
+    fetchMock.mockResolvedValueOnce(response({ thread: { parent: { post: {
+      ...parent(), record: { text: 'future', createdAt: '2099-01-01T00:00:00Z' }, indexedAt: '2026-01-01T10:00:00Z',
+    } } } }));
+    await thread.toggleThread(post, card);
+    expect(context(card).querySelector('.thread-parent-time').textContent).toBe('2h ago');
+  });
+
+  it.each([
+    ['a deleted parent', { $type: 'app.bsky.feed.defs#notFoundPost', uri: parent().uri, notFound: true }, 'Parent post not found'],
+    ['a blocked parent', { $type: 'app.bsky.feed.defs#blockedPost', uri: parent().uri, blocked: true, author: { did: 'did:plc:test' } }, 'Parent post blocked'],
+    ['an unknown parent', { $type: 'app.bsky.feed.defs#unknownPost' }, 'Parent post unavailable'],
+  ])('says so when the thread starts at %s, showing any parents below it', async (_kind, missing, notice) => {
+    const direct = createCard();
+    fetchMock.mockResolvedValueOnce(response({ thread: { parent: missing } }));
+    await thread.toggleThread(post, direct.card);
+    expect(direct.link.textContent).toBe(notice);
+    expect(context(direct.card)).toBeUndefined();
+
+    const { card, link } = createCard();
+    fetchMock.mockResolvedValueOnce(response({ thread: { parent: { post: parent('reachable'), parent: missing } } }));
+    await thread.toggleThread({ uri: `${post.uri}2` }, card);
+    expect(link.textContent).toBe('Hide Thread');
+    expect(context(card).children.slice(1).map((node) => [node.className, node.querySelector('.thread-parent-text').textContent]))
+      .toEqual([['thread-parent thread-parent-missing', notice], ['thread-parent', 'reachable']]);
+  });
+
   it('refreshes cached parents after the cache lifetime', async () => {
     const { card } = createCard();
     await thread.toggleThread(post, card);

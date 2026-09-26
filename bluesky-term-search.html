@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bluesky Term Search</title>
     <link rel="preconnect" href="https://public.api.bsky.app" crossorigin>
-    <link rel="preconnect" href="https://cdn.bsky.app" crossorigin>
+    <link rel="preconnect" href="https://cdn.bsky.app">
     <link rel="stylesheet" href="/styles.min.css">
 </head>
 
@@ -51,7 +51,7 @@
                     <label for="topicFilterToggle">Topic Filter</label>
                     <span class="info-trigger">
                         <button type="button" class="info-button" aria-label="About the topic filter" aria-describedby="topicFilterInfo">i</button>
-                        <span id="topicFilterInfo" class="info-tooltip" role="tooltip">An AI model looks for analysis and substantive news about the company or platform you searched for, including its products and services. Credits, hashtags, promotions, and casual mentions alone do not qualify. Posts with more than 50 likes need a lower match to stay, falling to 10% at 5,000 likes. Post text, link titles, image descriptions, and quoted posts are sent to TypeSafe for this check.</span>
+                        <span id="topicFilterInfo" class="info-tooltip" role="tooltip">An AI model looks for analysis and substantive news about the company or platform you searched for, including its products and services. Credits, hashtags, promotions, and casual mentions alone do not qualify. Posts with more than 50 likes need a lower match to stay, falling to 10% at 5,000 likes, unless the post, its author, or a quoted post is labelled adult or graphic. TypeSafe receives your original search terms and, for each post and any post it quotes, the text, the author's display name and handle, image descriptions, and a link's title, description, site and path.</span>
                     </span>
                 </div>
                 <div class="checkbox-inline">

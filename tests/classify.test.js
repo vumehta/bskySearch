@@ -7,12 +7,13 @@ import {
   testUtils,
 } from '../api/classify.mjs';
 import { TOPIC_JOB_TIMEOUT_MS } from '../src/constants.mjs';
-import { TOPIC_LIMITS } from '../src/topic-context.mjs';
+import { TOPIC_LIMITS, sanitizeTopicContext } from '../src/topic-context.mjs';
 
 const context = { env: { TYPESAFE_API_KEY: 'test-key' } };
 const {
   scoreCache,
   SCORE_CACHE_TTL_MS,
+  MAX_BODY_BYTES,
   UPSTREAM_TIMEOUT_MS,
   UPSTREAM_CONCURRENCY,
   UPSTREAM_RETRY_DELAY_MS,
@@ -25,6 +26,37 @@ const originalFetch = globalThis.fetch;
 
 function item(id, keywords = ['Meta'], text = `post ${id}`) {
   return { id, keywords, context: { post_text: text, author: 'Alice (@alice.example)' } };
+}
+
+const wide = (length, offset = 0) => String.fromCharCode(0x4E00 + offset).repeat(length);
+
+function maximalItem(index) {
+  const link = { title: wide(TOPIC_LIMITS.title), description: wide(TOPIC_LIMITS.description), site: wide(TOPIC_LIMITS.site), path: wide(TOPIC_LIMITS.path) };
+  const alts = Array.from({ length: TOPIC_LIMITS.maxImageDescriptions }, () => wide(TOPIC_LIMITS.imageDescription));
+  return {
+    id: wide(TOPIC_LIMITS.id, index),
+    keywords: Array.from({ length: TOPIC_LIMITS.maxKeywords }, (_, keyword) => wide(TOPIC_LIMITS.keyword, 100 + keyword)),
+    context: {
+      post_text: wide(TOPIC_LIMITS.postText, index),
+      author: wide(TOPIC_LIMITS.author),
+      link_card: link,
+      image_descriptions: alts,
+      quoted_post: {
+        text: wide(TOPIC_LIMITS.postText),
+        author: wide(TOPIC_LIMITS.author),
+        link_title: link.title,
+        link_description: link.description,
+        link_site: link.site,
+        link_path: link.path,
+        image_descriptions: alts,
+      },
+    },
+  };
+}
+
+async function scoreCacheKey(question, state) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify([question, state])));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 function request(body, { headers = {}, method = 'POST', signal, client } = {}) {
@@ -139,6 +171,7 @@ describe('request validation', () => {
     ['a non-string keyword', { items: [item('a', [7])] }],
     ['no context', { items: [{ id: 'a', keywords: ['Meta'] }] }],
     ['an author-only context', { items: [{ id: 'a', keywords: ['Meta'], context: { author: 'Alice' } }] }],
+    ['a context of author names only', { items: [{ id: 'a', keywords: ['Meta'], context: { author: 'Alice', quoted_post: { author: 'Bob' } } }] }],
   ])('rejects %s', async (_label, body) => {
     globalThis.fetch = vi.fn();
     const response = await POST(request(body), context);
@@ -146,11 +179,27 @@ describe('request validation', () => {
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
-  it('rejects oversized bodies', async () => {
+  it('rejects bodies over the byte limit, whether declared or counted', async () => {
     globalThis.fetch = vi.fn();
-    const response = await POST(request(JSON.stringify({ items: [item('a', ['Meta'], 'x'.repeat(300 * 1024))] })), context);
-    expect(response.status).toBe(413);
+    const oversized = JSON.stringify({ items: [item('a', ['Meta'], wide(Math.ceil(MAX_BODY_BYTES / 3)))] });
+    expect(oversized.length).toBeLessThan(MAX_BODY_BYTES);
+    expect((await POST(request(oversized), context)).status).toBe(413);
+    const declared = request({ items: [item('a')] }, { headers: { 'Content-Length': String(MAX_BODY_BYTES + 1) } });
+    expect((await POST(declared, context)).status).toBe(413);
     expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('accepts the largest batch the client can build, even in three-byte text', async () => {
+    const calls = upstream();
+    const items = Array.from({ length: TOPIC_LIMITS.maxItems }, (_, index) => maximalItem(index));
+    expect(sanitizeTopicContext(items[0].context)).toEqual(items[0].context);
+    const body = JSON.stringify({ items });
+    const bytes = new TextEncoder().encode(body).length;
+    const response = await POST(request(body, { headers: { 'Content-Length': String(bytes) } }), context);
+    expect(response.status).toBe(200);
+    const { results } = await response.json();
+    expect(results.map(({ scores }) => scores)).toEqual(items.map(() => Array(TOPIC_LIMITS.maxKeywords).fill(0.9)));
+    expect(calls).toHaveLength(TOPIC_LIMITS.maxItems);
   });
 });
 
@@ -251,6 +300,20 @@ describe('scoring', () => {
     const response = await POST(request({ items: [item('at://real', ['Meta'], 'Meta ships a new headset')] }), context);
     expect(calls).toHaveLength(2);
     await expect(response.json()).resolves.toEqual({ results: [{ id: 'at://real', scores: [0.99] }] });
+  });
+
+  it('never serves a score that was given to a differently worded question', async () => {
+    const calls = upstream();
+    const state = { post_text: 'post a', author: 'Alice (@alice.example)' };
+    const question = buildTopicQuestion('Meta');
+    const reworded = { ...question, criteria: { ...question.criteria, true: 'Any mention of `subject` counts.' } };
+    for (const staleQuestion of ['Meta', reworded]) {
+      scoreCache.set(await scoreCacheKey(staleQuestion, state), { score: 0.01, timestamp: Date.now() });
+    }
+    const response = await POST(request({ items: [item('a')] }), context);
+    await expect(response.json()).resolves.toEqual({ results: [{ id: 'a', scores: [0.9] }] });
+    expect(calls).toHaveLength(1);
+    expect(scoreCache.get(await scoreCacheKey(question, state))?.score).toBe(0.9);
   });
 
   it('expires cached scores', async () => {
@@ -523,44 +586,47 @@ describe('admission', () => {
     expect((await POST(request({ items: next }), context)).status).toBe(200);
   });
 
-  it('charges every retry against admission, including concurrent retries', async () => {
+  it('charges every admitted retry against admission, including concurrent retries', async () => {
     useFakeClock();
     vi.spyOn(Date, 'now').mockReturnValue(Date.now());
     upstream();
     const retryingPosts = 4;
-    await fillAdmission(CLASSIFY_ADMISSION_LIMITS.burst - retryingPosts);
+    const admittedRetries = 2;
+    await fillAdmission(CLASSIFY_ADMISSION_LIMITS.burst - retryingPosts - admittedRetries);
     globalThis.fetch.mockImplementation(async () => Response.json({ error: 'overloaded' }, { status: 529 }));
-    const response = await advanceUntilSettled(POST(request({
-      items: Array.from({ length: retryingPosts }, (_, index) => item('retry' + index)),
-    }), context));
-    expect(response.status).toBe(429);
-    expect(Number(response.headers.get('Retry-After'))).toBeGreaterThan(0);
+    const retrying = Array.from({ length: retryingPosts }, (_, index) => item('retry' + index));
+    const response = await advanceUntilSettled(POST(request({ items: retrying }), context));
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ results: retrying.map(({ id }) => ({ id, scores: [null] })) });
     expect(globalThis.fetch).toHaveBeenCalledTimes(CLASSIFY_ADMISSION_LIMITS.burst);
     expect(vi.getTimerCount()).toBe(0);
+    expect((await POST(request({ items: [item('fresh')] }), context)).status).toBe(429);
     expect((await POST(request({ items: [item('fill0')] }), context)).status).toBe(200);
     expect(globalThis.fetch).toHaveBeenCalledTimes(CLASSIFY_ADMISSION_LIMITS.burst);
   });
 
-  it('cancels in-flight calls when a retry exhausts admission', async () => {
+  it('leaves only the post whose retry is refused unscored and keeps the rest of the batch', async () => {
     useFakeClock();
     vi.spyOn(Date, 'now').mockReturnValue(Date.now());
     upstream();
-    const initialCalls = CLASSIFY_ADMISSION_LIMITS.burst - 2;
-    await fillAdmission(initialCalls);
-    let upstreamSignal;
-    globalThis.fetch.mockClear().mockImplementation((_url, options) => {
+    await fillAdmission(CLASSIFY_ADMISSION_LIMITS.burst - 2);
+    globalThis.fetch.mockClear().mockImplementation(async (_url, options) => {
       if (JSON.parse(options.body).state.post_text === 'post retry') {
-        return Promise.resolve(Response.json({ error: 'overloaded' }, { status: 529 }));
+        return Response.json({ error: 'overloaded' }, { status: 529 });
       }
-      upstreamSignal = options.signal;
-      return new Promise(() => {});
+      return Response.json({ answers: { k0: { type: 'noul', noul: 0.8 } } });
     });
-    const response = await advanceUntilSettled(POST(request({ items: [item('stalled'), item('retry')] }), context));
-    expect(response.status).toBe(429);
-    expect(upstreamSignal.aborted).toBe(true);
-    await realPause();
+    const response = await advanceUntilSettled(POST(request({ items: [item('good'), item('retry')] }), context));
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      results: [{ id: 'good', scores: [0.8] }, { id: 'retry', scores: [null] }],
+    });
+    expect(console.warn).toHaveBeenCalledTimes(1);
+    expect(console.warn).toHaveBeenCalledWith('Topic classifier retry was refused by admission.');
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
     expect(vi.getTimerCount()).toBe(0);
-    expect(globalThis.fetch).toHaveBeenCalledTimes(CLASSIFY_ADMISSION_LIMITS.burst - initialCalls);
+    expect((await POST(request({ items: [item('good')] }), context)).status).toBe(200);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
   });
 
   it('limits upstream calls, not cache hits, and refills over time', async () => {
@@ -613,17 +679,22 @@ describe('admission', () => {
     vi.spyOn(Date, 'now').mockReturnValue(Date.now());
     upstream();
     const retryingPosts = 4;
-    const fill = CLASSIFY_CLIENT_ADMISSION_LIMITS.burst - retryingPosts;
+    const admittedRetries = 2;
+    const fill = CLASSIFY_CLIENT_ADMISSION_LIMITS.burst - retryingPosts - admittedRetries;
     for (let start = 0; start < fill; start += TOPIC_LIMITS.maxItems) {
       const items = Array.from({ length: Math.min(TOPIC_LIMITS.maxItems, fill - start) }, (_, index) => item(`share${start + index}`));
       expect((await POST(request({ items }, { client: '203.0.113.20' }), context)).status).toBe(200);
     }
-    globalThis.fetch.mockImplementation(async () => Response.json({ error: 'overloaded' }, { status: 529 }));
+    globalThis.fetch.mockClear().mockImplementation(async () => Response.json({ error: 'overloaded' }, { status: 529 }));
     const response = await advanceUntilSettled(POST(request({
       items: Array.from({ length: retryingPosts }, (_, index) => item(`share-retry${index}`)),
     }, { client: '203.0.113.20' }), context));
-    expect(response.status).toBe(429);
+    expect(response.status).toBe(200);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(retryingPosts + admittedRetries);
     expect(vi.getTimerCount()).toBe(0);
+    upstream();
+    expect((await POST(request({ items: [item('share-next')] }, { client: '203.0.113.20' }), context)).status).toBe(429);
+    expect((await POST(request({ items: [item('share-next')] }, { client: '198.51.100.4' }), context)).status).toBe(200);
   });
 
   it('identifies a client by X-Real-IP, then by the first X-Forwarded-For address', async () => {

@@ -300,6 +300,64 @@ describe('app search controls', () => {
     expect(state.allPosts.map((post) => post.uri)).toEqual([makePost('saved').uri, makePost('liked').uri]);
     expect(window.location.searchParams.get('searchSort')).toBe('bookmarks');
   });
+
+  it('re-sorts loaded pages between Top and Most Saved without searching again, keeping cursors and card state', async () => {
+    const images = { $type: 'app.bsky.embed.images#view', images: [{ thumb: 'https://cdn.bsky.app/image.jpg', alt: 'An image' }] };
+    let page = 0;
+    fetch.mockImplementation(async () => {
+      page += 1;
+      return Response.json({ posts: [{ ...makePost(`p${page}`), likeCount: 10 * page, bookmarkCount: 10 - page, embed: images }], cursor: `cursor-${page}` });
+    });
+    await bootApp('?terms=apple');
+    await search.loadMore();
+    const ids = () => state.allPosts.map((post) => post.uri.split('/').pop());
+    const cards = () => elements.results.querySelectorAll('.post');
+    expect(ids()).toEqual(['p3', 'p2', 'p1']);
+    const [third, second, first] = cards();
+    first.querySelector('.image-toggle').listeners.get('click')();
+
+    elements.sortSelect.value = 'bookmarks';
+    dispatch('sortSelect', 'change');
+    expect(ids()).toEqual(['p1', 'p2', 'p3']);
+    expect(cards()).toEqual([first, second, third]);
+    expect(first.querySelector('.image-toggle').getAttribute('aria-expanded')).toBe('true');
+    expect(elements.results.querySelector('.results-header').textContent).toContain('Sorted by saves');
+    expect(state.currentCursors.apple).toBe('cursor-3');
+    expect(window.location.searchParams.get('searchSort')).toBe('bookmarks');
+
+    elements.sortSelect.value = 'top';
+    dispatch('sortSelect', 'change');
+    expect(cards()).toEqual([third, second, first]);
+    expect(window.location.searchParams.has('searchSort')).toBe(false);
+    expect(searchRequests()).toHaveLength(3);
+
+    elements.sortSelect.value = 'latest';
+    dispatch('sortSelect', 'change');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(searchRequests().slice(3).map((params) => [params.get('sort'), params.has('cursor')])).toEqual([['latest', false], ['latest', true]]);
+    expect(ids().sort()).toEqual(['p4', 'p5']);
+  });
+
+  it('reuses cached pages when the same search is repeated within the same minute', async () => {
+    await vi.advanceTimersByTimeAsync(5000);
+    await bootApp('?terms=apple');
+    await vi.advanceTimersByTimeAsync(29000);
+    await dispatch('searchBtn', 'click');
+    expect(searchRequests().map((params) => params.get('since'))).toEqual(['2026-09-05T12:00:00Z']);
+    expect(elements.results.querySelectorAll('.post')).toHaveLength(1);
+  });
+
+  it('boots and follows the system theme where media queries only offer addListener', async () => {
+    let dark = false;
+    let onChange = null;
+    window.matchMedia = () => ({ get matches() { return dark; }, addListener(listener) { onChange = listener; } });
+    await bootApp('?terms=apple');
+    expect(elements.results.querySelectorAll('.post')).toHaveLength(1);
+    expect(document.documentElement.dataset.theme).toBe('light');
+    dark = true;
+    onChange();
+    expect(document.documentElement.dataset.theme).toBe('dark');
+  });
 });
 
 describe('app URL initialization', () => {

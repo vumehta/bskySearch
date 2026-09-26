@@ -48,6 +48,25 @@ describe('untrusted embeds', () => {
   });
 });
 
+describe('unavailable quoted posts', () => {
+  const uri = 'at://did:plc:other/app.bsky.feed.post/gone';
+  it.each([
+    ['blocked', { $type: 'app.bsky.embed.record#viewBlocked', uri, blocked: true, author: { did: 'did:plc:other' } }, 'Quoted post blocked'],
+    ['not found', { $type: 'app.bsky.embed.record#viewNotFound', uri, notFound: true }, 'Quoted post not found'],
+    ['detached', { $type: 'app.bsky.embed.record#viewDetached', uri, detached: true }, 'Quoted post removed by its author'],
+  ])('shows a notice for a %s quote, alone or next to media', (_kind, record, notice) => {
+    const notices = (container) => container.querySelectorAll('.embed-quote').map((node) => [node.className, node.textContent]);
+    expect(notices(render(quote(record)))).toEqual([['embed-quote embed-quote-unavailable', notice]]);
+    const withMedia = render({ $type: 'app.bsky.embed.recordWithMedia#view', media: newsCard, record: quote(record) });
+    expect(withMedia.children.map((node) => node.className)).toEqual(['embed-link', 'embed-quote embed-quote-unavailable']);
+    expect(notices(withMedia)).toEqual([['embed-quote embed-quote-unavailable', notice]]);
+  });
+
+  it('shows nothing for quoted records that are not posts', () => {
+    expect(render(quote({ $type: 'app.bsky.feed.defs#generatorView', uri: 'at://did:plc:other/app.bsky.feed.generator/x' })).children).toEqual([]);
+  });
+});
+
 describe('embeds in search result cards', () => {
   let elements;
   let search;

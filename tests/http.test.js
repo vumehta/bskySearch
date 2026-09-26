@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fetchJson, HttpError, RequestTimeoutError } from '../src/http.mjs';
+import { fetchJson, HttpError, isRetryableError, RequestTimeoutError } from '../src/http.mjs';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -41,5 +41,30 @@ describe('browser JSON requests', () => {
   it('rejects malformed successful JSON', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(new Response('<html>broken</html>')));
     await expect(fetchJson('/broken')).rejects.toBeInstanceOf(HttpError);
+  });
+
+  it('reports timeouts and caller aborts in browsers without AbortSignal.reason', async () => {
+    vi.useFakeTimers();
+    const descriptor = Object.getOwnPropertyDescriptor(AbortSignal.prototype, 'reason');
+    delete AbortSignal.prototype.reason;
+    try {
+      vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: () => new Promise(() => {}) })));
+      const timedOut = expect(fetchJson('/slow-body', { timeoutMs: 50 })).rejects.toBeInstanceOf(RequestTimeoutError);
+      await vi.advanceTimersByTimeAsync(50);
+      await timedOut;
+      const controller = new AbortController();
+      const cancelled = fetchJson('/cancel', { signal: controller.signal });
+      controller.abort();
+      await expect(cancelled).rejects.toMatchObject({ name: 'AbortError' });
+    } finally {
+      Object.defineProperty(AbortSignal.prototype, 'reason', descriptor);
+    }
+  });
+
+  it('treats only timeouts, network failures, rate limits and server errors as retryable', () => {
+    const retryable = [new RequestTimeoutError(), new TypeError('Failed to fetch'), new HttpError(408), new HttpError(429), new HttpError(503)];
+    const final = [new HttpError(400), new HttpError(404), new Error('The server returned an invalid search response.')];
+    expect(retryable.map(isRetryableError)).toEqual(retryable.map(() => true));
+    expect(final.map(isRetryableError)).toEqual(final.map(() => false));
   });
 });

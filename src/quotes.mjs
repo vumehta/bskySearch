@@ -12,11 +12,12 @@ import {
 import {
   compareByBookmarks,
   formatDateTime,
+  getPostSortAt,
   getPostTimestamp,
   getPostUrl,
   parseBlueskyPostUrl,
 } from './utils.mjs';
-import { appendAuthorBadges } from './author-badges.mjs';
+import { appendAuthorBadges, clearBadgeTimers } from './author-badges.mjs';
 import { appendEngagementStats, QUOTE_STAT_CLASSES } from './post-stats.mjs';
 import { enforceDidCacheLimit, getCachedDid } from './cache.mjs';
 import { setQueryParam, updateURLWithParams } from './url.mjs';
@@ -60,6 +61,11 @@ function showQuoteStatus(message, type) {
 
 function hideQuoteStatus() {
   quoteStatusDiv.style.display = 'none';
+}
+
+function clearQuoteCards(container) {
+  clearBadgeTimers(container);
+  container.textContent = '';
 }
 
 function updateQuoteCount() {
@@ -120,7 +126,7 @@ function createQuoteCard(post, { className, label = '', includeQuoteCount = fals
   const meta = document.createElement('div');
   meta.className = 'quote-meta';
   const time = document.createElement('span');
-  time.textContent = formatDateTime(post.record?.createdAt || post.indexedAt);
+  time.textContent = formatDateTime(getPostSortAt(post));
   meta.appendChild(time);
   wrapper.appendChild(meta);
 
@@ -189,7 +195,7 @@ function renderQuoteLoadMore() {
 
 function renderQuoteResults({ allowAppend = false } = {}) {
   if (state.allQuotes.length === 0) {
-    quoteResultsDiv.textContent = '';
+    clearQuoteCards(quoteResultsDiv);
     const empty = document.createElement('div');
     empty.className = 'no-quotes';
     empty.textContent = 'No quotes found for this post.';
@@ -204,7 +210,7 @@ function renderQuoteResults({ allowAppend = false } = {}) {
   const startIndex = appendOnly ? lastRenderedQuotes.length : 0;
 
   if (!appendOnly) {
-    quoteResultsDiv.textContent = '';
+    clearQuoteCards(quoteResultsDiv);
   }
 
   const fragment = document.createDocumentFragment();
@@ -325,8 +331,8 @@ export async function performQuoteSearch() {
   state.isQuoteLoading = true;
   showQuoteStatus('Loading quotes…', 'loading');
   quoteTabs.style.display = 'none';
-  quoteResultsDiv.textContent = '';
-  quoteOriginalDiv.textContent = '';
+  clearQuoteCards(quoteResultsDiv);
+  clearQuoteCards(quoteOriginalDiv);
   quoteCountDiv.textContent = '';
   quoteLoadMoreDiv.textContent = '';
   state.allQuotes = [];
@@ -376,8 +382,8 @@ export async function performQuoteSearch() {
     state.quoteCursor = null;
     state.allQuotes = [];
     state.quoteTotalCount = null;
-    quoteOriginalDiv.textContent = '';
-    quoteResultsDiv.textContent = '';
+    clearQuoteCards(quoteOriginalDiv);
+    clearQuoteCards(quoteResultsDiv);
     quoteCountDiv.textContent = '';
     console.error('Quote search error:', error);
     showQuoteStatus(`Error: ${error.message}`, 'error');

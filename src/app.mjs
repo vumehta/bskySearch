@@ -115,7 +115,8 @@ themeSelect.addEventListener('change', (event) => {
   handleThemeChange(event.target.value);
 });
 
-prefersDarkScheme.addEventListener('change', handleSystemThemeChange);
+if (prefersDarkScheme.addEventListener) prefersDarkScheme.addEventListener('change', handleSystemThemeChange);
+else prefersDarkScheme.addListener(handleSystemThemeChange);
 
 sortSelect.addEventListener('change', () => {
   state.searchSort = normalizeSortValue(sortSelect.value);

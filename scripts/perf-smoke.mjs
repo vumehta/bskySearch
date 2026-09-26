@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
 import { createHighlightMatcher, ingestSearchPosts } from '../src/search-model.mjs';
+import { state } from '../src/state.mjs';
+import { getTopicProgress, getTopicVerdict, requestTopicScores } from '../src/topic-filter.mjs';
 import { filterByDate, filterByLikes, sortPosts } from '../src/utils.mjs';
 
 const now = Date.now();
@@ -62,6 +64,45 @@ function measure(label, operation, runs, budgetMs) {
   assert.ok(p95 < budgetMs, `${label} exceeded its smoke-check budget.`);
 }
 
+const topicPosts = [...new Map(flattened.map((post, index) => [post.uri, {
+  ...post,
+  embed: {
+    $type: 'app.bsky.embed.recordWithMedia#view',
+    media: {
+      $type: 'app.bsky.embed.external#view',
+      external: { uri: `https://news.example/story/${index}`, title: `Story ${index} about term0`, description: `Details for story ${index}.` },
+    },
+    record: {
+      record: {
+        uri: `at://did:plc:quoted/app.bsky.feed.post/${index}`,
+        author: { did: 'did:plc:quoted', handle: 'quoted.bsky.social', displayName: 'Quoted' },
+        value: { text: `Quoted post ${index} about term1` },
+      },
+    },
+  },
+}])).values()];
+state.rawSearchTerms = ['term0', 'term1', 'term2'];
+globalThis.fetch = async (_url, { body }) => ({
+  ok: true,
+  status: 200,
+  json: async () => ({
+    results: JSON.parse(body).items.map((item) => ({
+      id: item.id,
+      scores: item.keywords.map((_keyword, index) => ((item.id.length + index) % 10) / 10),
+    })),
+  }),
+});
+requestTopicScores(topicPosts, () => {});
+while (getTopicProgress(topicPosts).pending > 0) await new Promise((resolve) => setTimeout(resolve, 0));
+assert.ok(topicPosts.every((post) => getTopicVerdict(post).verdict !== 'unknown'), 'Every perf post must have a topic verdict.');
+
+function rebuildTopicVerdicts() {
+  for (const post of topicPosts) getTopicVerdict(post);
+  requestTopicScores(topicPosts, () => {});
+  return getTopicProgress(topicPosts);
+}
+
 measure('Production merge/filter/sort (1600 records)', runProductionMerge, 60, 50);
 measure('Production cached highlighting (120 matches)', () => highlightedParts(text, matcher), 200, 5);
+measure(`Topic verdicts on an unchanged rebuild (${topicPosts.length} posts, 3 terms)`, rebuildTopicVerdicts, 60, 15);
 console.log('Production performance and result-equivalence checks passed.');

@@ -12,9 +12,11 @@ import {
   sortPosts,
   normalizeTerm,
   expandSearchTerms,
+  getPostSortAt,
   getPostTimestamp,
   getPostUrl,
   getProfileUrl,
+  limitSearchTerms,
   normalizeSortValue,
 } from '../src/utils.mjs';
 import { enforceDidCacheLimit, enforceSearchCacheLimit, getCachedDid } from '../src/cache.mjs';
@@ -34,6 +36,13 @@ describe('profile and post links', () => {
     const unverified = { ...author, handle: 'handle.invalid' };
     expect(getProfileUrl(unverified)).toBe('https://bsky.app/profile/did:plc:abc123');
     expect(getPostUrl({ uri, author: unverified })).toBe('https://bsky.app/profile/did:plc:abc123/post/xyz');
+  });
+
+  it('uses the DID as is but encodes handles', () => {
+    expect(getProfileUrl({ did: 'did:web:example.com%3A8080', handle: 'handle.invalid' }))
+      .toBe('https://bsky.app/profile/did:web:example.com%3A8080');
+    expect(getProfileUrl({ did: 'did:plc:abc123', handle: 'alice/../settings?x' }))
+      .toBe('https://bsky.app/profile/alice%2F..%2Fsettings%3Fx');
   });
 });
 
@@ -222,6 +231,19 @@ describe('expandSearchTerms', () => {
   });
 });
 
+describe('limitSearchTerms', () => {
+  it('keeps the first expanded terms and the typed terms that produced them', () => {
+    const typed = ['a b c', 'd', 'A', 'e f', 'g', 'h'];
+    expect(limitSearchTerms(typed, true, 6)).toEqual({
+      rawTerms: ['a b c', 'd', 'A', 'e f'],
+      terms: ['a b c', 'a', 'b', 'c', 'd', 'e f'],
+      total: 10,
+    });
+    expect(limitSearchTerms(typed, false, 6)).toEqual({ rawTerms: typed, terms: ['a b c', 'd', 'A', 'e f', 'g', 'h'], total: 6 });
+    expect(limitSearchTerms(typed, true, 20).terms).toEqual(expandSearchTerms(typed, true));
+  });
+});
+
 describe('filterByLikes', () => {
   it('includes the threshold and treats missing counts as zero', () => {
     const posts = [
@@ -268,12 +290,22 @@ describe('filterByDate', () => {
     expect(nanHours.map((post) => post.uri)).toEqual(['at://fresh']);
   });
 
-  it('filters by creation time when it differs from indexing time', () => {
+  it('filters by the earlier of creation and indexing time', () => {
     const posts = [
       {
-        uri: 'at://fallback-recent',
-        indexedAt: '2025-12-31T08:00:00.000Z',
+        uri: 'at://recent',
+        indexedAt: '2026-01-01T11:00:05.000Z',
         record: { createdAt: '2026-01-01T11:00:00.000Z' },
+      },
+      {
+        uri: 'at://backdated',
+        indexedAt: '2026-01-01T11:00:00.000Z',
+        record: { createdAt: '2025-12-30T11:00:00.000Z' },
+      },
+      {
+        uri: 'at://future-dated',
+        indexedAt: '2025-12-31T08:00:00.000Z',
+        record: { createdAt: '2027-01-01T00:00:00.000Z' },
       },
       {
         uri: 'at://stale',
@@ -282,7 +314,7 @@ describe('filterByDate', () => {
     ];
 
     const result = filterByDate(posts, 24);
-    expect(result.map((post) => post.uri)).toEqual(['at://fallback-recent']);
+    expect(result.map((post) => post.uri)).toEqual(['at://recent']);
   });
 });
 
@@ -298,6 +330,17 @@ describe('getPostTimestamp', () => {
       record: { createdAt: 'also-not-a-date' },
     };
     expect(getPostTimestamp(post)).toBe(0);
+  });
+
+  it('uses indexedAt when createdAt is in the future, as Bluesky does for sortAt', () => {
+    const post = { indexedAt: '2026-01-02T00:00:00.000Z', record: { createdAt: '2099-01-01T00:00:00.000Z' } };
+    expect(getPostSortAt(post)).toBe('2026-01-02T00:00:00.000Z');
+    expect(getPostTimestamp(post)).toBe(Date.parse('2026-01-02T00:00:00.000Z'));
+    expect(getPostSortAt({ indexedAt: '2026-01-02T00:00:00.000Z', record: { createdAt: '2026-01-01T00:00:00.000Z' } }))
+      .toBe('2026-01-01T00:00:00.000Z');
+    expect(getPostSortAt({ indexedAt: '2026-01-02T00:00:00.000Z', record: { createdAt: 'not-a-date' } }))
+      .toBe('2026-01-02T00:00:00.000Z');
+    expect(getPostSortAt({ indexedAt: null, record: { createdAt: null } })).toBeUndefined();
   });
 });
 
@@ -317,6 +360,11 @@ describe('sortPosts', () => {
 
   it('sorts by newest time without changing the input', () => {
     expect(sortPosts(posts, 'latest')).toEqual([posts[1], posts[3], posts[2], posts[0]]);
+  });
+
+  it('does not pin a future-dated post to the top of the newest sort', () => {
+    const future = { uri: 'at://future', indexedAt: '2024-01-01T12:00:00Z', record: { createdAt: '2099-01-01T00:00:00Z' } };
+    expect(sortPosts([future, ...posts], 'latest').map((post) => post.uri)).toEqual(['at://1', 'at://3', 'at://future', 'at://2', 'at://4']);
   });
 
   it('sorts by saves, breaking ties by likes, without changing the input', () => {

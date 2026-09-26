@@ -61,6 +61,22 @@ export function expandSearchTerms(terms, shouldExpandWords) {
   return expanded;
 }
 
+export function limitSearchTerms(terms, shouldExpandWords, limit) {
+  const rawTerms = [];
+  const expanded = [];
+  const seen = new Set();
+  for (const term of terms) {
+    if (expanded.length < limit) rawTerms.push(term);
+    for (const value of expandSearchTerms([term], shouldExpandWords)) {
+      const key = value.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      expanded.push(value);
+    }
+  }
+  return { rawTerms, terms: expanded.slice(0, limit), total: expanded.length };
+}
+
 export function getSearchCacheKey(term, cursor, sort, since = '') {
   return JSON.stringify([term, cursor || '', sort, since || '']);
 }
@@ -141,10 +157,22 @@ export function formatDateTime(dateString) {
   return date.toLocaleString();
 }
 
+export function getPostSortAt(post) {
+  let sortAt;
+  let earliest = Infinity;
+  for (const value of [post.record?.createdAt, post.indexedAt]) {
+    const time = value ? new Date(value).getTime() : NaN;
+    if (time < earliest) {
+      sortAt = value;
+      earliest = time;
+    }
+  }
+  return sortAt;
+}
+
 export function getPostTimestamp(post) {
-  const candidate = post.record?.createdAt || post.indexedAt;
-  const time = new Date(candidate).getTime();
-  return Number.isNaN(time) ? 0 : time;
+  const sortAt = getPostSortAt(post);
+  return sortAt ? new Date(sortAt).getTime() : 0;
 }
 
 export function parseBlueskyPostUrl(urlString) {

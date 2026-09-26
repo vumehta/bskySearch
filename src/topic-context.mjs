@@ -80,7 +80,8 @@ export function sanitizeTopicContext(raw) {
 }
 
 export function hasTopicEvidence(context) {
-  return isObject(context) && Object.keys(context).some((key) => key !== 'author');
+  return isObject(context) && Object.entries(context)
+    .some(([key, value]) => key !== 'author' && (key !== 'quoted_post' || hasTopicEvidence(value)));
 }
 
 function formatAuthor(author) {
