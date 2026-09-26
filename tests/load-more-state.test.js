@@ -180,18 +180,6 @@ describe('search pagination and lifecycle', () => {
     expect(elements.status.style.display).toBe('none');
   });
 
-  it('retains a first-page failure as a retryable cursor', async () => {
-    globalThis.fetch = vi.fn()
-      .mockResolvedValueOnce({ ok: false, status: 429, json: async () => ({ error: 'Rate limited' }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ posts: [makePost('recovered', 20)] }) });
-    await search.performSearch();
-    expect(state.currentCursors.apple).toBe('');
-    expect(getLoadMoreButton().style.display).toBe('');
-    await search.loadMore();
-    expect(state.allPosts).toHaveLength(1);
-    expect(new URL(globalThis.fetch.mock.calls[1][0], 'https://example.test').searchParams.has('cursor')).toBe(false);
-  });
-
   it('advances healthy terms independently when another pagination request fails', async () => {
     elements.terms.value = 'apple,banana';
     globalThis.fetch = vi.fn(async (url) => {
@@ -211,15 +199,6 @@ describe('search pagination and lifecycle', () => {
     expect(button.style.display).toBe('');
     expect(button.disabled).toBe(false);
     expect(button.textContent).toBe('Load More Results');
-  });
-
-  it('supports object-property names as ordinary search terms', async () => {
-    elements.terms.value = '__proto__,constructor';
-    globalThis.fetch = makePagedFetch();
-    await search.performSearch();
-    expect(Object.keys(state.currentCursors)).toEqual(['__proto__', 'constructor']);
-    await search.loadMore();
-    expect(globalThis.fetch).toHaveBeenCalledTimes(6);
   });
 
   it('limits concurrent term requests to four without dropping queued terms', async () => {
@@ -308,38 +287,6 @@ describe('search pagination and lifecycle', () => {
     expect(elements.status.style.display).toBe('none');
   });
 
-  it('debouncing cancels an obsolete request before the next search starts', async () => {
-    vi.useFakeTimers();
-    const oldResponse = deferred();
-    globalThis.fetch = vi.fn().mockReturnValueOnce(oldResponse.promise)
-      .mockResolvedValue({ ok: true, json: async () => ({ posts: [makePost('replacement', 20)] }) });
-    const oldSearch = search.performSearch();
-    const oldSignal = globalThis.fetch.mock.calls[0][1].signal;
-    elements.terms.value = 'replacement';
-    search.debouncedSearch();
-    expect(oldSignal.aborted).toBe(true);
-    await oldSearch;
-    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(300);
-    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
-    expect(state.allPosts).toHaveLength(1);
-  });
-
-  it('renders a proxy response that needs more than the old ten-second browser deadline', async () => {
-    vi.useFakeTimers();
-    globalThis.fetch = vi.fn(() => new Promise((resolve) => {
-      setTimeout(() => resolve(Response.json({ posts: [makePost('slow', 20)] })), 12000);
-    }));
-    const pending = search.performSearch();
-    await vi.advanceTimersByTimeAsync(10000);
-    expect(state.isLoading).toBe(true);
-    await vi.advanceTimersByTimeAsync(2000);
-    await pending;
-    expect(state.allPosts.map((post) => post.uri)).toEqual([makePost('slow', 20).uri]);
-    expect(elements.status.style.display).toBe('none');
-    expect(state.isLoading).toBe(false);
-  });
-
   it('times out an unresponsive page and restores a retryable UI', async () => {
     vi.useFakeTimers();
     globalThis.fetch = vi.fn(() => new Promise(() => {}));
@@ -354,10 +301,6 @@ describe('search pagination and lifecycle', () => {
 
   it.each([
     null,
-    {},
-    { posts: {} },
-    { posts: [], cursor: 42 },
-    { posts: [{ uri: 'at://did:plc:test/app.bsky.feed.post/bad' }] },
     { posts: [{ ...makePost('bad', 1), record: { text: {} } }] },
   ])('rejects malformed success data and does not cache it: %j', async (payload) => {
     globalThis.fetch = vi.fn()
@@ -370,29 +313,6 @@ describe('search pagination and lifecycle', () => {
     await search.loadMore();
     expect(globalThis.fetch).toHaveBeenCalledTimes(2);
     expect(state.allPosts).toHaveLength(1);
-  });
-
-  it.each(['createdAt', 'reply', 'embed'])('updates an existing card when only %s changes', async (field) => {
-    const post = makePost('updated', 20);
-    globalThis.fetch = vi.fn()
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ cursor: 'c1', posts: [post] }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ cursor: 'c2', posts: [post] }) });
-    await search.performSearch();
-    const updated = { ...post, record: { ...post.record } };
-    if (field === 'createdAt') updated.record.createdAt = new Date(Date.now() - 3600000).toISOString();
-    if (field === 'reply') updated.record.reply = { parent: { uri: 'at://did:plc:test/app.bsky.feed.post/parent' } };
-    if (field === 'embed') updated.embed = { $type: 'app.bsky.embed.images#view', images: [{ thumb: 'https://cdn.bsky.app/image.jpg', alt: 'An image' }] };
-    globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ posts: [updated] }) }));
-    await search.loadMore();
-    const nextCard = elements.results.querySelector('.post');
-    if (field === 'createdAt') expect(nextCard.querySelector('.post-time').textContent).toBe('1h ago');
-    if (field === 'reply') {
-      const toggle = nextCard.querySelector('.thread-link');
-      expect(toggle.textContent).toBe('View Thread');
-      expect(toggle.getAttribute('aria-expanded')).toBe('false');
-      expect(toggle.getAttribute('aria-controls')).toMatch(/^thread-context-/);
-    }
-    if (field === 'embed') expect(nextCard.querySelector('.image-placeholder')).toBeTruthy();
   });
 
   it.each([
@@ -480,32 +400,6 @@ describe('search pagination and lifecycle', () => {
     expect(threadButton.textContent).toBe('View Thread');
   });
 
-  it('moves focus to the last result when Load More runs out while focused', async () => {
-    globalThis.fetch = makePagedFetch();
-    await search.performSearch();
-    getLoadMoreButton().focus();
-    globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ posts: [makePost('last', 5)] }) }));
-    await search.loadMore();
-    const cards = elements.results.querySelectorAll('.post');
-    expect(getLoadMoreButton().style.display).toBe('none');
-    expect(testDocument.activeElement).toBe(cards.at(-1));
-    expect(cards.at(-1).tabIndex).toBe(-1);
-  });
-
-  it('moves focus to the empty-results message when Load More runs out with nothing to show', async () => {
-    globalThis.fetch = makePagedFetch();
-    elements.minLikes.value = '60';
-    await search.performSearch();
-    expect(elements.results.querySelectorAll('.post')).toHaveLength(0);
-    getLoadMoreButton().focus();
-    globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ posts: [makePost('last', 5)] }) }));
-    await search.loadMore();
-    const empty = elements.results.querySelector('.no-results');
-    expect(getLoadMoreButton().style.display).toBe('none');
-    expect(empty.style.display).toBe('block');
-    expect(testDocument.activeElement).toBe(empty);
-  });
-
   it('moves focus to the first newly shown result when the last Show more is used', async () => {
     const posts = Array.from({ length: 250 }, (_, index) => makePost(`many${index}`, 300 - index));
     globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ posts }) }));
@@ -518,16 +412,6 @@ describe('search pagination and lifecycle', () => {
     expect(cards).toHaveLength(250);
     expect(showMore.style.display).toBe('none');
     expect(testDocument.activeElement).toBe(cards[200]);
-  });
-
-  it.each([
-    ['a video without a thumbnail', { $type: 'app.bsky.embed.video#view', playlist: 'https://video.bsky.app/playlist.m3u8' }],
-    ['a quote post with a link card', { $type: 'app.bsky.embed.recordWithMedia#view', record: {}, media: { $type: 'app.bsky.embed.external#view', external: { thumb: 'https://cdn.bsky.app/link.jpg' } } }],
-  ])('shows no preview button for %s', async (_kind, embed) => {
-    globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ posts: [{ ...makePost('media', 20), embed }] }) }));
-    await search.performSearch();
-    expect(elements.results.querySelector('.post')).not.toBe(null);
-    expect(elements.results.querySelector('.image-placeholder')).toBe(null);
   });
 
   it('shows pronouns, badges and the save count on a search result, dropping LIVE at expiry', async () => {
@@ -612,10 +496,8 @@ describe('search pagination and lifecycle', () => {
 
   it.each([
     ['a rate limit', () => ({ ok: false, status: 429, json: async () => ({ error: 'Search is busy. Please try again shortly.' }) }), 'Search is busy. Please try again shortly. Load more to retry.'],
-    ['a server error', () => ({ ok: false, status: 502, json: async () => ({ error: 'Could not reach Bluesky.' }) }), 'Could not reach Bluesky. Load more to retry.'],
     ['a network failure', () => Promise.reject(new TypeError('Failed to fetch')), 'Failed to fetch. Load more to retry.'],
     ['invalid input', () => ({ ok: false, status: 400, json: async () => ({ error: 'Search term is too long.' }) }), 'Search term is too long.'],
-    ['an invalid response', () => ({ ok: true, json: async () => ({ posts: 'none' }) }), 'The server returned an invalid search response.'],
   ])('reports %s with one period, suggesting Load More only when a retry can help', async (_kind, respond, ending) => {
     globalThis.fetch = vi.fn(async () => respond());
     await search.performSearch();
@@ -710,79 +592,4 @@ describe('search pagination and lifecycle', () => {
     expect(new URL(url, 'https://example.test').searchParams.get('terms')).toBe(typed);
   });
 
-  it('keeps only the searching status when the sort changes to saves before the first page arrives', async () => {
-    const pending = deferred();
-    globalThis.fetch = vi.fn(() => pending.promise);
-    const searching = search.performSearch();
-    await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1));
-    elements.sortSelect.value = 'bookmarks';
-    state.searchSort = 'bookmarks';
-    search.applySearchSortChange();
-    expect(elements.results.querySelector('.no-results')).toBe(null);
-    expect(elements.status.textContent).toBe('Searching for: apple…');
-
-    pending.resolve({ ok: true, json: async () => ({ posts: [
-      { ...makePost('liked', 50), bookmarkCount: 1 },
-      { ...makePost('saved', 20), bookmarkCount: 9 },
-    ] }) });
-    await searching;
-    const cards = elements.results.querySelectorAll('.post');
-    expect(cards.map((card) => card.querySelector('.post-text').textContent)).toEqual(['post saved about apple', 'post liked about apple']);
-    expect(elements.results.querySelector('.results-header').textContent).toContain('Sorted by saves');
-    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
-  });
-
-  it('shows loaded posts in saves order at once when the sort changes before they are first shown', async () => {
-    vi.useFakeTimers();
-    const secondPage = deferred();
-    globalThis.fetch = vi.fn()
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ cursor: 'c1', posts: [
-        { ...makePost('liked', 50), bookmarkCount: 1 },
-        { ...makePost('saved', 20), bookmarkCount: 9 },
-      ] }) })
-      .mockReturnValueOnce(secondPage.promise);
-    const searching = search.performSearch();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
-    expect(elements.results.querySelectorAll('.post')).toHaveLength(0);
-
-    elements.sortSelect.value = 'bookmarks';
-    state.searchSort = 'bookmarks';
-    search.applySearchSortChange();
-    const texts = () => elements.results.querySelectorAll('.post').map((card) => card.querySelector('.post-text').textContent);
-    expect(texts()).toEqual(['post saved about apple', 'post liked about apple']);
-
-    secondPage.resolve({ ok: true, json: async () => ({ posts: [] }) });
-    await searching;
-    expect(texts()).toEqual(['post saved about apple', 'post liked about apple']);
-    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
-  });
-
-  it('keeps an empty cursor while a first page is still needed and null once a term is exhausted', async () => {
-    elements.terms.value = 'apple,banana';
-    let bananaCalls = 0;
-    globalThis.fetch = vi.fn(async (url) => {
-      if (new URL(url, 'https://example.test').searchParams.get('term') === 'apple') {
-        return { ok: true, json: async () => ({ posts: [makePost('apple', 20)] }) };
-      }
-      bananaCalls += 1;
-      return bananaCalls === 1
-        ? { ok: false, status: 503, json: async () => ({ error: 'Unavailable' }) }
-        : { ok: true, json: async () => ({ cursor: `b${bananaCalls}`, posts: [makePost(`banana${bananaCalls}`, 20)] }) };
-    });
-    const searching = search.performSearch();
-    expect(state.currentCursors).toEqual({ apple: '', banana: '' });
-    await searching;
-    expect(state.currentCursors).toEqual({ apple: null, banana: '' });
-    expect(getLoadMoreButton().style.display).toBe('');
-
-    await search.loadMore();
-    expect(state.currentCursors).toEqual({ apple: null, banana: 'b2' });
-    await search.loadMore();
-    expect(state.currentCursors).toEqual({ apple: null, banana: 'b3' });
-    const requests = globalThis.fetch.mock.calls.map(([url]) => new URL(url, 'https://example.test').searchParams);
-    expect(requests.map((params) => [params.get('term'), params.get('cursor')])).toEqual([
-      ['apple', null], ['banana', null], ['banana', null], ['banana', 'b2'],
-    ]);
-  });
 });

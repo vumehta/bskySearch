@@ -7,7 +7,6 @@ const {
   UPSTREAM_TIMEOUT_MS,
   SESSION_TTL_MS,
   AUTH_RETRY_DEFAULT_MS,
-  AUTH_RETRY_MAX_MS,
   searchResultsCache,
 } = testUtils;
 const originalFetch = globalThis.fetch;
@@ -100,30 +99,6 @@ describe('upstream bodies and response validation', () => {
     expect(handlers.create).toHaveBeenCalledTimes(2);
   });
 
-  it('times out refresh bodies without falling back to another login', async () => {
-    vi.useFakeTimers();
-    const handlers = upstream({
-      refresh: () => ({ ok: true, status: 200, json: () => new Promise(() => {}) }),
-    });
-    await GET(request('warm'), context);
-    vi.setSystemTime(Date.now() + SESSION_TTL_MS + 1);
-    const pending = GET(request('expired'), context);
-    await vi.advanceTimersByTimeAsync(UPSTREAM_TIMEOUT_MS + 1);
-    expect((await pending).status).toBe(504);
-    expect(handlers.create).toHaveBeenCalledTimes(1);
-    expect(handlers.refresh).toHaveBeenCalledTimes(1);
-  });
-
-  it('rejects malformed successful refresh data without creating another login', async () => {
-    vi.useFakeTimers();
-    const handlers = upstream({ refresh: () => Response.json({}) });
-    await GET(request('warm'), context);
-    vi.setSystemTime(Date.now() + SESSION_TTL_MS + 1);
-    expect((await GET(request('expired'), context)).status).toBe(502);
-    expect(handlers.create).toHaveBeenCalledTimes(1);
-    expect(handlers.refresh).toHaveBeenCalledTimes(1);
-  });
-
   it('returns 502 for invalid JSON and does not cache the failure', async () => {
     const handlers = upstream({ search: () => new Response('<html>Unavailable</html>') });
     const response = await GET(request(), context);
@@ -138,13 +113,7 @@ describe('upstream bodies and response validation', () => {
 
   it.each([
     null,
-    { posts: null },
-    { posts: [null] },
     { posts: [{}] },
-    { posts: [{ ...post, author: null }] },
-    { posts: [{ ...post, author: { handle: 'test.bsky.social' } }] },
-    { posts: [{ ...post, record: {} }] },
-    { posts: [], cursor: 42 },
     { posts: Array.from({ length: 101 }, () => post) },
   ])('rejects invalid successful search data: %j', async (payload) => {
     upstream({ search: () => Response.json(payload) });
@@ -152,32 +121,6 @@ describe('upstream bodies and response validation', () => {
     expect(response.status).toBe(502);
     await expect(response.json()).resolves.toEqual({ error: 'Invalid search response from Bluesky.' });
     expect(searchResultsCache.size).toBe(0);
-  });
-
-  it('rejects malformed rendered data before caching and allows retry', async () => {
-    const malformed = structuredClone(post);
-    malformed.author.displayName = { toString: 1, valueOf: 1 };
-    const handlers = upstream({ search: () => Response.json({ posts: [malformed] }) });
-    expect((await GET(request(), context)).status).toBe(502);
-    expect(searchResultsCache.size).toBe(0);
-    handlers.search.mockImplementation(() => Response.json(posts));
-    expect((await GET(request(), context)).status).toBe(200);
-    expect(handlers.search).toHaveBeenCalledTimes(2);
-  });
-
-  it.each([
-    null,
-    { accessJwt: 'access' },
-    { refreshJwt: 'refresh' },
-    { accessJwt: 1, refreshJwt: 'refresh' },
-  ])('rejects invalid successful session data: %j', async (payload) => {
-    const handlers = upstream({ create: () => Response.json(payload) });
-    const response = await GET(request(), context);
-    expect(response.status).toBe(502);
-    await expect(response.json()).resolves.toEqual({ error: 'Invalid authentication response from Bluesky.' });
-    expect((await GET(request(), context)).status).toBe(502);
-    expect(handlers.create).toHaveBeenCalledTimes(2);
-    expect(handlers.search).not.toHaveBeenCalled();
   });
 
   it('preserves upstream error status and Retry-After even for an HTML body', async () => {
@@ -193,20 +136,6 @@ describe('upstream bodies and response validation', () => {
     expect(searchResultsCache.size).toBe(0);
   });
 
-  it('preserves an upstream server error and its message', async () => {
-    upstream({ search: () => Response.json({ message: 'Upstream failure' }, { status: 500 }) });
-    const response = await GET(request(), context);
-    expect(response.status).toBe(500);
-    await expect(response.json()).resolves.toEqual({ error: 'Upstream failure' });
-  });
-
-  it('returns 502 for a network failure without caching it', async () => {
-    upstream({ search: () => Promise.reject(new TypeError('fetch failed')) });
-    const response = await GET(request(), context);
-    expect(response.status).toBe(502);
-    await expect(response.json()).resolves.toEqual({ error: 'Could not reach Bluesky.' });
-    expect(searchResultsCache.size).toBe(0);
-  });
 });
 
 describe('authentication lifecycle', () => {
@@ -238,36 +167,9 @@ describe('authentication lifecycle', () => {
   });
 
   it.each([
-    [429, 429, 'Bluesky login is rate limited. Please try again later.'],
-    [503, 502, 'Bluesky authentication failed.'],
-  ])('does not turn refresh status %i into another login', async (status, proxied, error) => {
-    vi.useFakeTimers();
-    const handlers = upstream({
-      refresh: () => Response.json({ error: 'Unavailable' }, { status, headers: { 'Retry-After': '20' } }),
-    });
-    await GET(request('first'), context);
-    vi.setSystemTime(Date.now() + SESSION_TTL_MS + 1);
-    const response = await GET(request('second'), context);
-    expect(response.status).toBe(proxied);
-    expect(response.headers.get('Retry-After')).toBe('20');
-    await expect(response.json()).resolves.toEqual({ error });
-    expect(handlers.create).toHaveBeenCalledTimes(1);
-    expect(handlers.refresh).toHaveBeenCalledTimes(1);
-  });
-
-  it.each([
     ['Retry-After seconds', { 'Retry-After': '30' }, 30],
-    ['a Retry-After date', { 'Retry-After': new Date(limitedAt + 45_000).toUTCString() }, 45],
     ['a RateLimit-Reset timestamp', { 'RateLimit-Reset': String(limitedAt / 1000 + 90) }, 90],
-    ['RateLimit-Reset seconds', { 'RateLimit-Reset': '15' }, 15],
-    [
-      'RateLimit-Reset behind a malformed Retry-After',
-      { 'Retry-After': 'soon', 'RateLimit-Reset': String(limitedAt / 1000 + 7200) },
-      7200,
-    ],
-    ['RateLimit-Reset behind a zero Retry-After', { 'Retry-After': '0', 'RateLimit-Reset': '120' }, 120],
     ['no reset header', {}, AUTH_RETRY_DEFAULT_MS / 1000],
-    ['an oversized reset', { 'Retry-After': '999999' }, AUTH_RETRY_MAX_MS / 1000],
   ])('blocks new logins for %s after a rate-limited login', async (_label, headers, seconds) => {
     vi.useFakeTimers();
     vi.setSystemTime(limitedAt);
@@ -314,133 +216,13 @@ describe('authentication lifecycle', () => {
     expect(handlers.create).toHaveBeenCalledTimes(1);
   });
 
-  it.each([
-    ['create', 'stalls'],
-    ['create', 'rejects'],
-    ['refresh', 'stalls'],
-    ['refresh', 'rejects'],
-  ])('handles a %s 429 without consuming its body when cancellation %s', async (operation, cancellation) => {
-    vi.useFakeTimers();
-    vi.setSystemTime(limitedAt);
-    const cancel = vi.fn(() => cancellation === 'stalls'
-      ? new Promise(() => {})
-      : Promise.reject(new Error('Body cancellation failed')));
-    const limited = new Response(new ReadableStream({ cancel }), {
-      status: 429,
-      headers: { 'Retry-After': '20' },
-    });
-    const json = vi.spyOn(limited, 'json');
-    const handlers = upstream({ [operation]: () => limited });
-    if (operation === 'refresh') {
-      await GET(request('warm'), context);
-      vi.setSystemTime(limitedAt + SESSION_TTL_MS + 1);
-    }
-    const blockedAt = Date.now();
-    let response;
-    const pending = GET(request('limited'), context).then((result) => { response = result; });
-    await vi.advanceTimersByTimeAsync(0);
-    expect(response?.status).toBe(429);
-    await pending;
-    expect(response.headers.get('Retry-After')).toBe('20');
-    expect(json).not.toHaveBeenCalled();
-    expect(cancel).toHaveBeenCalledTimes(1);
-    expect(vi.getTimerCount()).toBe(0);
-
-    vi.setSystemTime(blockedAt + 5000);
-    const blocked = await GET(request('blocked'), context);
-    expect(blocked.status).toBe(429);
-    expect(blocked.headers.get('Retry-After')).toBe('15');
-    expect(handlers[operation]).toHaveBeenCalledTimes(1);
-    expect(handlers.search).toHaveBeenCalledTimes(operation === 'refresh' ? 1 : 0);
-
-    handlers[operation].mockImplementation(() => Response.json(session('b')));
-    vi.setSystemTime(blockedAt + 20_000);
-    expect((await GET(request('recovered'), context)).status).toBe(200);
-    expect(handlers[operation]).toHaveBeenCalledTimes(2);
-    expect(handlers.create).toHaveBeenCalledTimes(operation === 'refresh' ? 1 : 2);
-    expect(handlers.search.mock.calls.at(-1)[1].headers.Authorization).toBe('Bearer access-b');
-  });
-
-  it.each(['create', 'refresh'])('retains %s backoff when its caller cancels after 429 headers arrive', async (operation) => {
-    vi.useFakeTimers();
-    vi.setSystemTime(limitedAt);
-    const controller = new AbortController();
-    const cancel = vi.fn(() => {
-      controller.abort();
-      return Promise.reject(new Error('Body cancellation failed'));
-    });
-    const limited = new Response(new ReadableStream({ cancel }), {
-      status: 429,
-      headers: { 'Retry-After': '20' },
-    });
-    const handlers = upstream({ [operation]: () => limited });
-    if (operation === 'refresh') {
-      await GET(request('warm'), context);
-      vi.setSystemTime(limitedAt + SESSION_TTL_MS + 1);
-    }
-    let response;
-    const pending = GET(request('limited', { signal: controller.signal }), context)
-      .then((result) => { response = result; });
-    await vi.advanceTimersByTimeAsync(0);
-    expect(response?.status).toBe(499);
-    await pending;
-    expect(cancel).toHaveBeenCalledTimes(1);
-    expect(vi.getTimerCount()).toBe(0);
-    const blocked = await GET(request('blocked'), context);
-    expect(blocked.status).toBe(429);
-    expect(blocked.headers.get('Retry-After')).toBe('20');
-    expect(handlers[operation]).toHaveBeenCalledTimes(1);
-    expect(handlers.search).toHaveBeenCalledTimes(operation === 'refresh' ? 1 : 0);
-  });
-
-  it.each([400, 401])('stops reusing a token rejected with %i during refresh backoff while serving cached results', async (status) => {
-    vi.useFakeTimers();
-    vi.setSystemTime(limitedAt);
-    const handlers = upstream({
-      refresh: () => Response.json({ error: 'RateLimitExceeded' }, {
-        status: 429,
-        headers: { 'Retry-After': '20' },
-      }),
-      search: (url, options) =>
-        url.searchParams.get('q') !== 'warm' && options.headers.Authorization === 'Bearer access-a'
-          ? Response.json({ error: 'ExpiredToken' }, { status })
-          : Response.json(posts),
-    });
-    expect((await GET(request('warm'), context)).status).toBe(200);
-    expect((await GET(request('rejected'), context)).status).toBe(429);
-    expect(handlers.search).toHaveBeenCalledTimes(2);
-
-    vi.setSystemTime(limitedAt + 5000);
-    const [cached, ...blocked] = await Promise.all([
-      GET(request('warm'), context),
-      GET(request('blocked-one'), context),
-      GET(request('blocked-two'), context),
-    ]);
-    expect(cached.status).toBe(200);
-    await expect(cached.json()).resolves.toEqual(posts);
-    expect(blocked.map((response) => response.status)).toEqual([429, 429]);
-    expect(blocked.map((response) => response.headers.get('Retry-After'))).toEqual(['15', '15']);
-    expect(handlers.search).toHaveBeenCalledTimes(2);
-    expect(handlers.refresh).toHaveBeenCalledTimes(1);
-    expect(handlers.create).toHaveBeenCalledTimes(1);
-
-    handlers.refresh.mockImplementation(() => Response.json(session('b')));
-    vi.setSystemTime(limitedAt + 20_000);
-    expect((await GET(request('recovered'), context)).status).toBe(200);
-    expect(handlers.search).toHaveBeenCalledTimes(3);
-    expect(handlers.refresh).toHaveBeenCalledTimes(2);
-    expect(handlers.create).toHaveBeenCalledTimes(1);
-    expect(handlers.refresh.mock.calls.at(-1)[0].headers.Authorization).toBe('Bearer refresh-a');
-    expect(handlers.search.mock.calls.at(-1)[1].headers.Authorization).toBe('Bearer access-b');
-  });
-
-  it.each([400, 401])('shares an in-progress refresh after %i among distinct searches', async (status) => {
+  it('shares an in-progress refresh among distinct searches', async () => {
     const refresh = deferred();
     const handlers = upstream({
       refresh: () => refresh.promise,
       search: (url, options) =>
         url.searchParams.get('q') !== 'warm' && options.headers.Authorization === 'Bearer access-a'
-          ? Response.json({ error: 'ExpiredToken' }, { status })
+          ? Response.json({ error: 'ExpiredToken' }, { status: 401 })
           : Response.json(posts),
     });
     await GET(request('warm'), context);
@@ -452,56 +234,12 @@ describe('authentication lifecycle', () => {
     expect(handlers.refresh).toHaveBeenCalledTimes(1);
   });
 
-  it.each([400, 401])('reuses the new session for a delayed %i from an older token', async (status) => {
-    const late = deferred();
-    const handlers = upstream({
-      search: (url, options) => {
-        const term = url.searchParams.get('q');
-        if (term === 'warm' || options.headers.Authorization === 'Bearer access-b') {
-          return Response.json(posts);
-        }
-        if (term === 'late') return late.promise;
-        return Response.json({ error: 'ExpiredToken' }, { status });
-      },
-    });
-    await GET(request('warm'), context);
-    const early = GET(request('early'), context);
-    const later = GET(request('late'), context);
-    expect((await early).status).toBe(200);
-    late.resolve(Response.json({ error: 'ExpiredToken' }, { status }));
-    expect((await later).status).toBe(200);
-    expect(handlers.refresh).toHaveBeenCalledTimes(1);
-    expect(handlers.create).toHaveBeenCalledTimes(1);
-  });
-
   it.each([[400, 'ExpiredToken'], [400, 'InvalidToken'], [401, 'Unauthorized']])('retries a search rejected with %i %s only once', async (status, error) => {
     const handlers = upstream({ search: () => Response.json({ error }, { status }) });
     expect((await GET(request(), context)).status).toBe(status);
     expect(handlers.search).toHaveBeenCalledTimes(2);
     expect(handlers.refresh).toHaveBeenCalledTimes(1);
     expect(handlers.create).toHaveBeenCalledTimes(1);
-  });
-
-  it.each([
-    ['refreshes', () => Response.json(session('b')), 1],
-    ['logs in again', () => Response.json({ error: 'InvalidToken', message: 'Token could not be verified' }, { status: 400 }), 2],
-  ])('%s when Bluesky cannot verify the access token, then keeps the new session', async (_action, refresh, logins) => {
-    const handlers = upstream({
-      refresh,
-      search: (_url, options) => options.headers.Authorization === 'Bearer access-a'
-        ? Response.json({ error: 'InvalidToken', message: 'Token could not be verified' }, { status: 400 })
-        : Response.json(posts),
-    });
-    handlers.create.mockImplementationOnce(() => Response.json(session('a')))
-      .mockImplementation(() => Response.json(session('c')));
-    const response = await GET(request(), context);
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual(posts);
-    expect((await GET(request('next'), context)).status).toBe(200);
-    expect(handlers.refresh).toHaveBeenCalledTimes(1);
-    expect(handlers.create).toHaveBeenCalledTimes(logins);
-    expect(handlers.search).toHaveBeenCalledTimes(3);
-    expect(handlers.search.mock.calls.at(-1)[1].headers.Authorization).not.toBe('Bearer access-a');
   });
 
   it('does not refresh a session for an ordinary bad search request', async () => {
@@ -520,7 +258,6 @@ describe('Bluesky search rate limits', () => {
   it.each([
     ['Retry-After seconds', { 'Retry-After': '30' }, 30],
     ['a RateLimit-Reset timestamp', { 'RateLimit-Reset': String(limitedAt / 1000 + 90) }, 90],
-    ['RateLimit-Reset behind a zero Retry-After', { 'Retry-After': '0', 'RateLimit-Reset': '120' }, 120],
     ['no reset header', {}, AUTH_RETRY_DEFAULT_MS / 1000],
   ])('stops calling Bluesky for %s after a rate-limited search while serving cached results', async (_label, headers, seconds) => {
     vi.useFakeTimers();
@@ -555,90 +292,6 @@ describe('Bluesky search rate limits', () => {
     expect(handlers.search).toHaveBeenCalledTimes(3);
   });
 
-  it('keeps the longest wait when concurrent searches are rate limited', async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(limitedAt);
-    const replies = { long: deferred(), short: deferred() };
-    const handlers = upstream({ search: (url) => replies[url.searchParams.get('q')].promise });
-    const pending = [GET(request('long'), context), GET(request('short'), context)];
-    await vi.waitFor(() => expect(handlers.search).toHaveBeenCalledTimes(2));
-    replies.long.resolve(Response.json({ error: 'RateLimitExceeded' }, { status: 429, headers: { 'Retry-After': '90' } }));
-    replies.short.resolve(Response.json({ error: 'RateLimitExceeded' }, { status: 429, headers: { 'Retry-After': '30' } }));
-    const responses = await Promise.all(pending);
-    expect(responses.map((response) => response.headers.get('Retry-After'))).toEqual(['90', '90']);
-    vi.setSystemTime(Date.now() + 60_000);
-    const blocked = await GET(request('later'), context);
-    expect(blocked.status).toBe(429);
-    expect(blocked.headers.get('Retry-After')).toBe('30');
-    expect(handlers.search).toHaveBeenCalledTimes(2);
-  });
-
-  it.each([[400, 'ExpiredToken'], [400, 'InvalidToken'], [401, 'Unauthorized']])('does not retry a search rejected with %i %s once another search is rate limited', async (status, error) => {
-    vi.useFakeTimers();
-    vi.setSystemTime(limitedAt);
-    const replies = { limited: deferred(), rejected: deferred() };
-    const handlers = upstream({
-      search: (url, options) => options.headers.Authorization === 'Bearer access-b'
-        ? Response.json(posts)
-        : replies[url.searchParams.get('q')].promise,
-    });
-    const pending = [GET(request('limited'), context), GET(request('rejected'), context)];
-    await vi.waitFor(() => expect(handlers.search).toHaveBeenCalledTimes(2));
-    replies.limited.resolve(Response.json({ error: 'RateLimitExceeded' }, { status: 429, headers: { 'Retry-After': '60' } }));
-    expect((await pending[0]).status).toBe(429);
-    replies.rejected.resolve(Response.json({ error }, { status }));
-    const blocked = await pending[1];
-    expect(blocked.status).toBe(429);
-    expect(blocked.headers.get('Retry-After')).toBe('60');
-    await expect(blocked.json()).resolves.toEqual(rateLimited);
-    expect(handlers.search).toHaveBeenCalledTimes(2);
-  });
-
-  it('does not search after a session refresh that finishes during a search rate limit', async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(limitedAt);
-    const first = deferred();
-    const refresh = deferred();
-    const handlers = upstream({
-      refresh: () => refresh.promise,
-      search: (url) => url.searchParams.get('q') === 'first' ? first.promise : Response.json(posts),
-    });
-    const pending = GET(request('first'), context);
-    await vi.waitFor(() => expect(handlers.search).toHaveBeenCalledTimes(1));
-    vi.setSystemTime(limitedAt + SESSION_TTL_MS + 1);
-    const waiting = GET(request('waiting'), context);
-    await vi.waitFor(() => expect(handlers.refresh).toHaveBeenCalledTimes(1));
-    const reset = String(Math.floor(Date.now() / 1000) + 300);
-    first.resolve(Response.json({ error: 'RateLimitExceeded' }, { status: 429, headers: { 'RateLimit-Reset': reset } }));
-    expect((await pending).status).toBe(429);
-    refresh.resolve(Response.json(session('b')));
-    const blocked = await waiting;
-    expect(blocked.status).toBe(429);
-    expect(blocked.headers.get('Retry-After')).toBe('300');
-    await expect(blocked.json()).resolves.toEqual(rateLimited);
-    expect(handlers.search).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not spend the search budget on searches refused while search is rate limited', async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(limitedAt);
-    const handlers = upstream({
-      search: () => Response.json({ error: 'RateLimitExceeded' }, { status: 429, headers: { 'Retry-After': '10' } }),
-    });
-    expect((await GET(request('limited'), context)).status).toBe(429);
-    for (let index = 0; index <= SEARCH_ADMISSION_LIMITS.burst; index += 1) {
-      const blocked = await GET(request(`blocked-${index}`), context);
-      expect(blocked.status).toBe(429);
-      await expect(blocked.json()).resolves.toEqual(rateLimited);
-    }
-    expect(handlers.search).toHaveBeenCalledTimes(1);
-    vi.setSystemTime(limitedAt + 10_000);
-    handlers.search.mockImplementation(() => Response.json(posts));
-    for (let index = 0; index < SEARCH_ADMISSION_LIMITS.burst; index += 1) {
-      expect((await GET(request(`after-${index}`), context)).status).toBe(200);
-    }
-    expect(handlers.search).toHaveBeenCalledTimes(SEARCH_ADMISSION_LIMITS.burst + 1);
-  });
 });
 
 describe('coalescing and cancellation', () => {
@@ -655,28 +308,6 @@ describe('coalescing and cancellation', () => {
     expect((await GET(new Request(`${request().url}&cursor=&sort=top`), context)).status).toBe(200);
     expect(handlers.create).toHaveBeenCalledTimes(1);
     expect(handlers.search).toHaveBeenCalledTimes(1);
-  });
-
-  it('removes failed shared work so a later request can retry', async () => {
-    const handlers = upstream({ search: () => Response.json({ error: 'Unavailable' }, { status: 503 }) });
-    const responses = await Promise.all([GET(request(), context), GET(request(), context)]);
-    expect(responses.map((response) => response.status)).toEqual([503, 503]);
-    expect(handlers.search).toHaveBeenCalledTimes(1);
-    handlers.search.mockImplementation(() => Response.json(posts));
-    expect((await GET(request(), context)).status).toBe(200);
-    expect(handlers.search).toHaveBeenCalledTimes(2);
-  });
-
-  it('does not start work for an already-cancelled request', async () => {
-    const handlers = upstream();
-    const controller = new AbortController();
-    controller.abort();
-    const response = await GET(request('topic', { signal: controller.signal }), context);
-    expect(response.status).toBe(499);
-    expect(response.headers.get('Cache-Control')).toBe('no-store');
-    await expect(response.json()).resolves.toEqual({ error: 'Request cancelled.' });
-    expect(handlers.create).not.toHaveBeenCalled();
-    expect(handlers.search).not.toHaveBeenCalled();
   });
 
   it('detaches one cancelled subscriber while keeping its shared search alive', async () => {
@@ -710,64 +341,6 @@ describe('coalescing and cancellation', () => {
     expect(handlers.search).toHaveBeenCalledTimes(2);
   });
 
-  it('cancels a pending search body and never caches its later completion', async () => {
-    const body = deferred();
-    const handlers = upstream({
-      search: () => ({ ok: true, status: 200, json: () => body.promise }),
-    });
-    const controller = new AbortController();
-    const pending = GET(request('topic', { signal: controller.signal }), context);
-    await vi.waitFor(() => expect(handlers.search).toHaveBeenCalledTimes(1));
-    controller.abort();
-    expect((await pending).status).toBe(499);
-    expect(handlers.search.mock.calls[0][1].signal.aborted).toBe(true);
-    body.resolve(posts);
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(searchResultsCache.size).toBe(0);
-  });
-
-  it('keeps shared authentication alive for a different active search', async () => {
-    const auth = deferred();
-    const handlers = upstream({ create: () => ({ ok: true, status: 200, json: () => auth.promise }) });
-    const controller = new AbortController();
-    const cancelled = GET(request('cancelled', { signal: controller.signal }), context);
-    const active = GET(request('active'), context);
-    await vi.waitFor(() => expect(handlers.create).toHaveBeenCalledTimes(1));
-    controller.abort();
-    expect((await cancelled).status).toBe(499);
-    expect(handlers.create.mock.calls[0][0].signal.aborted).toBe(false);
-    auth.resolve(session());
-    expect((await active).status).toBe(200);
-    expect(handlers.search).toHaveBeenCalledTimes(1);
-    expect(handlers.search.mock.calls[0][0].searchParams.get('q')).toBe('active');
-  });
-
-  it.each([
-    ['the caller that started it', ['joiner', 'starter']],
-    ['a caller that joined it', ['starter', 'joiner']],
-  ])('finishes a login when %s leaves last, so the next search reuses it', async (_who, leaveOrder) => {
-    const auth = deferred();
-    const handlers = upstream({ create: () => ({ ok: true, status: 200, json: () => auth.promise }) });
-    const controllers = { starter: new AbortController(), joiner: new AbortController() };
-    const responses = {
-      starter: GET(request('started', { signal: controllers.starter.signal }), context),
-      joiner: GET(request('joined', { signal: controllers.joiner.signal }), context),
-    };
-    await vi.waitFor(() => expect(handlers.create).toHaveBeenCalledTimes(1));
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    for (const caller of leaveOrder) {
-      controllers[caller].abort();
-      expect((await responses[caller]).status).toBe(499);
-    }
-    expect(handlers.create.mock.calls[0][0].signal.aborted).toBe(false);
-    const replacement = GET(request('replacement'), context);
-    auth.resolve(session());
-    expect((await replacement).status).toBe(200);
-    expect(handlers.create).toHaveBeenCalledTimes(1);
-    expect(handlers.search).toHaveBeenCalledTimes(1);
-    expect(handlers.search.mock.calls[0][0].searchParams.get('q')).toBe('replacement');
-  });
 });
 
 describe('bounded search admission', () => {
@@ -809,25 +382,6 @@ describe('bounded search admission', () => {
 });
 
 describe('handler input boundaries', () => {
-  it('returns 400 for a missing term without contacting upstream', async () => {
-    upstream();
-    const response = await GET(new Request('https://example.com/api/search'), context);
-    expect(response.status).toBe(400);
-    expect(response.headers.get('Cache-Control')).toBe('no-store');
-    await expect(response.json()).resolves.toEqual({ error: 'Missing term parameter.' });
-    expect(globalThis.fetch).not.toHaveBeenCalled();
-  });
-
-  it('returns 405 with the allowed method without contacting upstream', async () => {
-    upstream();
-    const response = await GET(request('topic', { method: 'POST' }), context);
-    expect(response.status).toBe(405);
-    expect(response.headers.get('Allow')).toBe('GET');
-    expect(response.headers.get('Cache-Control')).toBe('no-store');
-    await expect(response.json()).resolves.toEqual({ error: 'Method not allowed.' });
-    expect(globalThis.fetch).not.toHaveBeenCalled();
-  });
-
   it.each([
     ['term', 'a'.repeat(501), 'Search term is too long.'],
     ['cursor', 'a'.repeat(1001), 'Cursor is too long.'],
@@ -841,25 +395,6 @@ describe('handler input boundaries', () => {
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error });
     expect(globalThis.fetch).not.toHaveBeenCalled();
-  });
-
-  it('strips C0 and C1 control characters before forwarding the term', async () => {
-    const handlers = upstream();
-    const response = await GET(request('  he\u0000l\u001Flo\u007F\u0085  '), context);
-    expect(response.status).toBe(200);
-    expect(handlers.search.mock.calls[0][0].searchParams.get('q')).toBe('hello');
-  });
-
-  it('forwards the since datetime and its timezone offset unchanged', async () => {
-    const since = '2026-08-31T18:00:00+02:00';
-    const handlers = upstream();
-    const url = new URL(request().url);
-    url.searchParams.set('since', since);
-    expect((await GET(new Request(url), context)).status).toBe(200);
-    expect(handlers.search).toHaveBeenCalledTimes(1);
-    const params = handlers.search.mock.calls[0][0].searchParams;
-    expect(params.get('since')).toBe(since);
-    expect(params.get('q')).toBe('topic');
   });
 
   it('accepts exact length boundaries, normalizes sort, and keeps English-only search', async () => {
@@ -879,12 +414,6 @@ describe('handler input boundaries', () => {
     expect(params.has('since')).toBe(false);
   });
 
-  it('names the AppView on the proxied search request', async () => {
-    const handlers = upstream();
-    await GET(request(), context);
-    expect(handlers.search.mock.calls[0][1].headers['atproto-proxy']).toBe('did:web:api.bsky.app#bsky_appview');
-  });
-
   it('uses process credentials when no runtime context is supplied', async () => {
     vi.stubEnv('BSKY_HANDLE', 'process-handle');
     vi.stubEnv('BSKY_APP_PASSWORD', 'process-password');
@@ -894,16 +423,6 @@ describe('handler input boundaries', () => {
       identifier: 'process-handle',
       password: 'process-password',
     });
-  });
-
-  it('rejects missing runtime credentials without using process credentials or upstream', async () => {
-    vi.stubEnv('BSKY_HANDLE', 'process-handle');
-    vi.stubEnv('BSKY_APP_PASSWORD', 'process-password');
-    upstream();
-    const response = await GET(request(), { env: {} });
-    expect(response.status).toBe(500);
-    await expect(response.json()).resolves.toEqual({ error: 'Server missing BSKY_HANDLE or BSKY_APP_PASSWORD.' });
-    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 });
 

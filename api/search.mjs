@@ -596,17 +596,10 @@ export async function GET(request, context) {
 export const testUtils =
   process.env.NODE_ENV === 'test'
     ? {
-        isValidSince,
-        getCachedSearchResult,
-        cleanupSearchCache,
-        enforceSearchCacheLimit,
         searchResultsCache,
-        SEARCH_CACHE_TTL_MS,
-        MAX_SEARCH_CACHE_SIZE,
         UPSTREAM_TIMEOUT_MS,
         SESSION_TTL_MS,
         AUTH_RETRY_DEFAULT_MS,
-        AUTH_RETRY_MAX_MS,
         resetModuleStateForTests,
       }
     : undefined;

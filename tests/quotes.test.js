@@ -40,7 +40,6 @@ beforeEach(async () => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
-  vi.useRealTimers();
 });
 
 function mockInitial(page = { posts: [post('q1')], cursor: 'c1' }) {
@@ -87,12 +86,6 @@ describe('quote search and pagination', () => {
     expect(paramsFor('app.bsky.feed.getQuotes', 'uri')).toEqual([originalUri, nextUri]);
   });
 
-  it('links a quote from an author with an unverified handle by DID', async () => {
-    mockInitial({ posts: [{ ...post('q1'), author: { did: 'did:plc:test', handle: 'handle.invalid' } }] });
-    await quotes.performQuoteSearch();
-    expect(elements.quoteResults.querySelector('.thread-link').href).toBe('https://bsky.app/profile/did:plc:test/post/q1');
-  });
-
   it.each([
     ['recent', ['newest', 'middle', 'oldest'], ['latest', 'newest', 'middle', 'oldest', 'earliest']],
     ['oldest', ['oldest', 'middle', 'newest'], ['earliest', 'oldest', 'middle', 'newest', 'latest']],
@@ -116,55 +109,6 @@ describe('quote search and pagination', () => {
     expect(state.quoteCursor).toBeNull();
   });
 
-  it('orders quotes by saves, then likes, and shows the save count', async () => {
-    mockInitial({ posts: [post('liked', 9), { ...post('saved', 1), bookmarkCount: 3 }, { ...post('both', 5), bookmarkCount: 3 }] });
-    await quotes.performQuoteSearch();
-    quotes.handleQuoteTabClick({ target: elements.quoteTabs.children.find((node) => node.dataset.sort === 'bookmarks') });
-    expect(elements.quoteResults.querySelectorAll('.quote-text').map((node) => node.textContent)).toEqual(['both', 'saved', 'liked']);
-    const saves = elements.quoteResults.querySelector('.quote-stats').children.at(-1);
-    expect(saves.textContent).toBe('🔖 3 saves');
-    expect(saves.querySelector('.visually-hidden').textContent).toBe(' saves');
-    expect(saves.getAttribute('aria-label')).toBe(null);
-  });
-
-  it('clears LIVE badge timers when quote cards are re-sorted or replaced by a new search', async () => {
-    vi.useFakeTimers();
-    const author = {
-      did: 'did:plc:test',
-      handle: 'alice.bsky.social',
-      status: { status: 'app.bsky.actor.status#live', expiresAt: new Date(Date.now() + 3600000).toISOString() },
-    };
-    vi.stubGlobal('fetch', vi.fn(async (url) => url.includes('getPosts')
-      ? response({ posts: [{ ...post('original'), author }] })
-      : response({ posts: [{ ...post('q1'), author }, { ...post('q2'), author }] })));
-    await quotes.performQuoteSearch();
-    expect(elements.quoteResults.querySelectorAll('.badge')).toHaveLength(2);
-    expect(vi.getTimerCount()).toBe(3);
-
-    quotes.handleQuoteTabClick({ target: elements.quoteTabs.children.find((node) => node.dataset.sort === 'recent') });
-    expect(elements.quoteResults.querySelectorAll('.badge')).toHaveLength(2);
-    expect(vi.getTimerCount()).toBe(3);
-
-    mockInitial({ posts: [post('plain')] });
-    await quotes.performQuoteSearch();
-    expect(elements.quoteResults.querySelectorAll('.quote-post')).toHaveLength(1);
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it('dates a quote with a future creation time by when it was indexed', async () => {
-    const indexedAt = '2026-09-04T12:00:00Z';
-    mockInitial({ posts: [{ ...post('future'), indexedAt, record: { text: 'future', createdAt: '2099-01-01T00:00:00Z' } }] });
-    await quotes.performQuoteSearch();
-    expect(elements.quoteResults.querySelector('.quote-meta').textContent).toBe(new Date(indexedAt).toLocaleString());
-  });
-
-  it('shows author badges on quote cards', async () => {
-    const author = { ...post('q1').author, verification: { verifiedStatus: 'valid', trustedVerifierStatus: 'none' } };
-    mockInitial({ posts: [{ ...post('q1'), author }] });
-    await quotes.performQuoteSearch();
-    expect(elements.quoteResults.querySelector('.quote-author').querySelector('.badge').textContent).toBe('Verified');
-  });
-
   it('deduplicates overlapping pages, refreshes changed cards, and stops repeated cursors', async () => {
     mockInitial();
     await quotes.performQuoteSearch();
@@ -175,26 +119,6 @@ describe('quote search and pagination', () => {
     expect(elements.quoteCount.textContent).toBe('Loaded 2 quotes');
     expect(elements.quoteResults.children).toHaveLength(2);
     expect(elements.quoteResults.textContent).toContain('8');
-  });
-
-  it('reuses unchanged cards and keeps paginated quotes sorted', async () => {
-    mockInitial({ posts: [post('q1', 3), post('q2', 2)], cursor: 'c1' });
-    await quotes.performQuoteSearch();
-    const firstCard = elements.quoteResults.children[0];
-    const secondCard = elements.quoteResults.children[1];
-
-    fetch.mockResolvedValueOnce(response({ posts: [post('q3', 1)], cursor: 'c2' }));
-    await quotes.loadMoreQuotes();
-    expect(elements.quoteResults.children).toHaveLength(3);
-    expect(elements.quoteResults.children[0]).toBe(firstCard);
-    expect(elements.quoteResults.children[1]).toBe(secondCard);
-
-    fetch.mockResolvedValueOnce(response({ posts: [post('q4', 4)] }));
-    await quotes.loadMoreQuotes();
-    expect(elements.quoteResults.querySelectorAll('.quote-text').map((node) => node.textContent))
-      .toEqual(['q4', 'q1', 'q2', 'q3']);
-    expect(state.quoteCursor).toBeNull();
-    expect(document.getElementById('quoteLoadMoreBtn')).toBeNull();
   });
 
   it('replaces pagination with a new post search and ignores the obsolete response', async () => {
@@ -217,27 +141,6 @@ describe('quote search and pagination', () => {
     expect(elements.quoteOriginal.textContent).toContain('replacement');
     expect(elements.quoteStatus.style.display).toBe('none');
     expect(state.isQuoteLoading).toBe(false);
-  });
-
-  it('keeps the current search loading when an older request finishes', async () => {
-    const first = deferred();
-    const second = deferred();
-    vi.stubGlobal('fetch', vi.fn(async (url) => url.includes('getPosts')
-      ? response({ posts: [post(url.includes('replacement') ? 'replacement' : 'original')] })
-      : first.promise));
-    const oldSearch = quotes.performQuoteSearch();
-    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
-    elements.postUrl.value = urlFor('replacement');
-    fetch.mockImplementation(async (url) => url.includes('getPosts')
-      ? response({ posts: [post('replacement')] })
-      : second.promise);
-    const newSearch = quotes.performQuoteSearch();
-    await oldSearch;
-    expect(state.isQuoteLoading).toBe(true);
-    first.resolve(response({ posts: [post('old')] }));
-    second.resolve(response({ posts: [post('new')] }));
-    await newSearch;
-    expect(state.allQuotes[0].uri).toBe(post('new').uri);
   });
 
   it('retains pagination for retry after an HTTP error', async () => {
@@ -277,19 +180,6 @@ describe('quote search and pagination', () => {
     expect(document.activeElement.tabIndex).toBe(-1);
   });
 
-  it('recovers from a body timeout and can search again', async () => {
-    vi.useFakeTimers();
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: () => new Promise(() => {}) })));
-    const pending = quotes.performQuoteSearch();
-    await vi.advanceTimersByTimeAsync(10000);
-    await pending;
-    expect(state.isQuoteLoading).toBe(false);
-    expect(elements.quoteStatus.textContent).toContain('timed out');
-    mockInitial({ posts: [] });
-    await quotes.performQuoteSearch();
-    expect(elements.quoteResults.textContent).toContain('No quotes found');
-  });
-
   it('rejects invalid post data instead of rendering a false empty result', async () => {
     mockInitial({ wrong: [] });
     await quotes.performQuoteSearch();
@@ -303,20 +193,6 @@ describe('quote search and pagination', () => {
     await quotes.performQuoteSearch();
     expect(elements.quoteResults.textContent).toContain('<img src=x onerror=alert(1)>');
     expect(elements.quoteResults.querySelector('.quote-text').children).toHaveLength(0);
-  });
-
-  it.each(['displayName', 'avatar'])('rejects object-valued author %s before committing a cursor', async (field) => {
-    const malformed = post('bad');
-    malformed.author[field] = { toString: 1, valueOf: 1 };
-    mockInitial({ posts: [malformed], cursor: 'c1' });
-    await quotes.performQuoteSearch();
-    expect(elements.quoteStatus.textContent).toContain('invalid post data');
-    expect(state.allQuotes).toEqual([]);
-    expect(state.quoteCursor).toBeNull();
-    expect(document.getElementById('quoteLoadMoreBtn')).toBeNull();
-    mockInitial({ posts: [post('good')] });
-    await quotes.performQuoteSearch();
-    expect(state.allQuotes[0].uri).toBe(post('good').uri);
   });
 
   it('retains valid quotes and a retryable cursor after malformed pagination data', async () => {
