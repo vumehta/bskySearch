@@ -12,6 +12,7 @@ import { TOPIC_LIMITS, sanitizeTopicContext } from '../src/topic-context.mjs';
 const context = { env: { TYPESAFE_API_KEY: 'test-key' } };
 const {
   scoreCache,
+  MAX_BODY_BYTES,
   UPSTREAM_TIMEOUT_MS,
   UPSTREAM_CONCURRENCY,
   UPSTREAM_RETRY_DELAY_MS,
@@ -150,6 +151,16 @@ describe('request validation', () => {
     globalThis.fetch = vi.fn();
     const response = await POST(request(body), context);
     expect(response.status).toBe(400);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects bodies over the byte limit, whether declared or counted', async () => {
+    globalThis.fetch = vi.fn();
+    const oversized = JSON.stringify({ items: [item('a', ['Meta'], wide(Math.ceil(MAX_BODY_BYTES / 3)))] });
+    expect(oversized.length).toBeLessThan(MAX_BODY_BYTES);
+    expect((await POST(request(oversized), context)).status).toBe(413);
+    const declared = request({ items: [item('a')] }, { headers: { 'Content-Length': String(MAX_BODY_BYTES + 1) } });
+    expect((await POST(declared, context)).status).toBe(413);
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 

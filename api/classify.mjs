@@ -508,6 +508,7 @@ export const testUtils =
   process.env.NODE_ENV === 'test'
     ? {
         scoreCache,
+        MAX_BODY_BYTES,
         UPSTREAM_TIMEOUT_MS,
         UPSTREAM_CONCURRENCY,
         UPSTREAM_RETRY_DELAY_MS,
