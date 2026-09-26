@@ -911,24 +911,24 @@ describe('topic filter', () => {
 
   it('keeps a large search\'s scores when the filter is turned off and on again', async () => {
     const { MAX_TOPIC_SCORE_CACHE_SIZE } = await import('../src/constants.mjs');
-    const keywords = Array.from({ length: 26 }, (_, index) => `brand${index}`);
-    const posts = Array.from({ length: 200 }, (_, index) => makePost(`p${index}`, 'Company news', 500 - index));
+    const keywords = Array.from({ length: 10 }, (_, index) => `brand${index}`);
+    const posts = Array.from({ length: 600 }, (_, index) => makePost(`p${index}`, 'Company news', 1000 - index));
     expect(keywords.length * posts.length).toBeGreaterThan(MAX_TOPIC_SCORE_CACHE_SIZE);
     const calls = installFetch({
       posts: (term) => (term === 'brand0' ? posts : []),
-      classify: scoredBy((item) => (Number(item.id.split('/p').pop()) % 2 ? 0.9 : 0.05)),
+      classify: scoredBy((item) => (Number(item.id.split('/p').pop()) % 10 ? 0.05 : 0.9)),
     });
     elements.terms.value = keywords.join(', ');
     state.hideOffTopic = true;
     await search.performSearch();
-    await vi.waitFor(() => expect(summaryText()).toBe('100 off-topic posts hidden.'));
+    await vi.waitFor(() => expect(summaryText()).toBe('540 off-topic posts hidden.'));
     const checked = calls.classify.length;
 
     search.applyTopicFilterChange(false);
-    expect(visibleUris()).toHaveLength(200);
+    expect(visibleUris()).toHaveLength(600);
     search.applyTopicFilterChange(true);
-    expect(visibleUris()).toHaveLength(100);
-    expect(summaryText()).toBe('100 off-topic posts hidden.');
+    expect(visibleUris()).toHaveLength(60);
+    expect(summaryText()).toBe('540 off-topic posts hidden.');
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(calls.classify).toHaveLength(checked);
   });
