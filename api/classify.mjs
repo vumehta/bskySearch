@@ -24,16 +24,9 @@ export const CLASSIFY_ADMISSION_LIMITS = Object.freeze({
   refillPerSecond: 5,
 });
 
-export const CLASSIFY_CLIENT_ADMISSION_LIMITS = Object.freeze({
-  burst: 300,
-  refillPerSecond: 2.5,
-});
-
-const MAX_ADMISSION_CLIENTS = 1000;
-
 const scoreCache = new Map();
-const instanceAdmission = { tokens: CLASSIFY_ADMISSION_LIMITS.burst, updatedAt: null };
-const clientAdmissions = new Map();
+let admissionTokens = CLASSIFY_ADMISSION_LIMITS.burst;
+let admissionUpdatedAt = null;
 
 function httpError(message, status, headers = {}) {
   const error = new Error(message);
@@ -184,48 +177,21 @@ function cacheScore(cacheKey, score) {
   }
 }
 
-function refillAdmission(bucket, limits, now) {
-  if (bucket.updatedAt !== null) {
-    bucket.tokens = Math.min(
-      limits.burst,
-      bucket.tokens + (Math.max(0, now - bucket.updatedAt) / 1000) * limits.refillPerSecond,
+function admitUpstreamCalls(calls) {
+  const now = Date.now();
+  if (admissionUpdatedAt !== null) {
+    admissionTokens = Math.min(
+      CLASSIFY_ADMISSION_LIMITS.burst,
+      admissionTokens +
+        (Math.max(0, now - admissionUpdatedAt) / 1000) * CLASSIFY_ADMISSION_LIMITS.refillPerSecond,
     );
   }
-  bucket.updatedAt = Math.max(bucket.updatedAt ?? now, now);
-}
-
-function getClientAdmission(client) {
-  const bucket = clientAdmissions.get(client) || { tokens: CLASSIFY_CLIENT_ADMISSION_LIMITS.burst, updatedAt: null };
-  clientAdmissions.delete(client);
-  clientAdmissions.set(client, bucket);
-  while (clientAdmissions.size > MAX_ADMISSION_CLIENTS) {
-    clientAdmissions.delete(clientAdmissions.keys().next().value);
+  admissionUpdatedAt = Math.max(admissionUpdatedAt ?? now, now);
+  if (admissionTokens < calls) {
+    return Math.ceil((calls - admissionTokens) / CLASSIFY_ADMISSION_LIMITS.refillPerSecond);
   }
-  return bucket;
-}
-
-function admitUpstreamCalls(calls, client) {
-  const now = Date.now();
-  const limited = [
-    [instanceAdmission, CLASSIFY_ADMISSION_LIMITS],
-    [getClientAdmission(client), CLASSIFY_CLIENT_ADMISSION_LIMITS],
-  ];
-  let retryAfter = 0;
-  for (const [bucket, limits] of limited) {
-    refillAdmission(bucket, limits, now);
-    if (bucket.tokens < calls) {
-      retryAfter = Math.max(retryAfter, Math.ceil((calls - bucket.tokens) / limits.refillPerSecond));
-    }
-  }
-  if (retryAfter > 0) return retryAfter;
-  for (const [bucket] of limited) bucket.tokens -= calls;
+  admissionTokens -= calls;
   return 0;
-}
-
-function getClientKey(request) {
-  const realIp = request.headers.get('x-real-ip')?.trim();
-  const forwardedIp = request.headers.get('x-forwarded-for')?.split(',')[0].trim();
-  return realIp || forwardedIp || 'unknown';
 }
 
 function isSameOriginRequest(request) {
@@ -327,7 +293,7 @@ function describeUpstreamFailure(payload) {
   return (text || 'no error body').slice(0, 300);
 }
 
-async function scoreItem(keywords, context, { apiKey, model, signal, deadlineAt, client }) {
+async function scoreItem(keywords, context, { apiKey, model, signal, deadlineAt }) {
   const questions = Object.fromEntries(keywords.map((keyword, index) => [`k${index}`, buildTopicQuestion(keyword)]));
   const body = { model, state: context, questions };
   const unscored = keywords.map(() => null);
@@ -339,7 +305,7 @@ async function scoreItem(keywords, context, { apiKey, model, signal, deadlineAt,
       await abortableDelay(retryDelayMs, signal);
     }
     throwIfAborted(signal);
-    if (attempt > 0 && admitUpstreamCalls(1, client) > 0) {
+    if (attempt > 0 && admitUpstreamCalls(1) > 0) {
       console.warn('Topic classifier retry was refused by admission.');
       return unscored;
     }
@@ -414,7 +380,7 @@ async function classifyItems(items, results, options) {
   }
   if (tasks.length > 0) {
     throwIfAborted(options.signal);
-    const retryAfter = admitUpstreamCalls(tasks.length, options.client);
+    const retryAfter = admitUpstreamCalls(tasks.length);
     if (retryAfter > 0) {
       throw httpError('Too many topic checks. Please try again shortly.', 429, {
         'Retry-After': String(retryAfter),
@@ -474,7 +440,6 @@ export async function POST(request, context) {
         model: configuredModel || DEFAULT_MODEL,
         signal,
         deadlineAt,
-        client: getClientKey(request),
       }),
       request.signal,
       TOPIC_JOB_TIMEOUT_MS,
@@ -499,9 +464,8 @@ export async function POST(request, context) {
 
 function resetModuleStateForTests() {
   scoreCache.clear();
-  instanceAdmission.tokens = CLASSIFY_ADMISSION_LIMITS.burst;
-  instanceAdmission.updatedAt = null;
-  clientAdmissions.clear();
+  admissionTokens = CLASSIFY_ADMISSION_LIMITS.burst;
+  admissionUpdatedAt = null;
 }
 
 export const testUtils =

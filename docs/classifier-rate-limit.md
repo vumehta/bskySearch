@@ -33,10 +33,9 @@ not match this rule.
 This is abuse throttling, not a global call or spending cap: Vercel counters are
 per region, and different IPs have separate allowances. The handler also limits
 TypeSafe calls itself, per instance: a 600-call burst refilling at five calls per
-second, of which each client IP may use at most half (a 300-call burst refilling
-at 2.5 per second). One visitor therefore cannot use up an instance's allowance;
-a very large search from one visitor slows down instead. Both limits charge
-retries; a retry they refuse leaves only that post unchecked, and the rest of
+second, shared by every caller. The app has two or three users, so there is no
+per-visitor share; one visitor can use the whole allowance. The limit charges
+retries; a retry it refuses leaves only that post unchecked, and the rest of
 its batch still returns its scores. The handler accepts only same-origin
 browser requests: `Sec-Fetch-Site: same-origin`, or a matching `Origin` from
 browsers that do not send `Sec-Fetch-Site`. That stops cross-site pages and
