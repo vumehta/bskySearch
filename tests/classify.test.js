@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CLASSIFY_ADMISSION_LIMITS,
-  CLASSIFY_CLIENT_ADMISSION_LIMITS,
   POST,
   buildTopicQuestion,
   testUtils,
@@ -51,13 +50,12 @@ function maximalItem(index) {
   };
 }
 
-function request(body, { headers = {}, method = 'POST', signal, client } = {}) {
+function request(body, { headers = {}, method = 'POST', signal } = {}) {
   return new Request('https://example.com/api/classify', {
     method,
     headers: {
       'Content-Type': 'application/json',
       'Sec-Fetch-Site': 'same-origin',
-      ...(client ? { 'X-Real-IP': client } : {}),
       ...headers,
     },
     body: method === 'POST' ? (typeof body === 'string' ? body : JSON.stringify(body)) : undefined,
@@ -355,9 +353,8 @@ describe('upstream failures', () => {
 
 async function fillAdmission(calls, prefix = 'fill') {
   for (let start = 0; start < calls; start += TOPIC_LIMITS.maxItems) {
-    const client = `filler-${Math.floor(start / CLASSIFY_CLIENT_ADMISSION_LIMITS.burst)}`;
     const items = Array.from({ length: Math.min(TOPIC_LIMITS.maxItems, calls - start) }, (_, index) => item(prefix + (start + index)));
-    expect((await POST(request({ items }, { client }), context)).status).toBe(200);
+    expect((await POST(request({ items }), context)).status).toBe(200);
   }
 }
 
@@ -402,28 +399,9 @@ describe('admission', () => {
     expect(batchLimited.status).toBe(429);
     expect(globalThis.fetch).toHaveBeenCalledTimes(callsBefore);
     const retryAfter = Number(batchLimited.headers.get('Retry-After'));
-    expect(retryAfter).toBeGreaterThan(1);
+    expect(retryAfter).toBe(5);
     vi.setSystemTime(Date.now() + retryAfter * 1000);
     expect((await POST(request({ items: freshBatch }), context)).status).toBe(200);
-  });
-
-  it('gives each client its own share, so one client cannot lock out the rest', async () => {
-    useFakeClock();
-    vi.spyOn(Date, 'now').mockReturnValue(Date.now());
-    upstream();
-    const batches = CLASSIFY_CLIENT_ADMISSION_LIMITS.burst / TOPIC_LIMITS.maxItems;
-    for (let batch = 0; batch < batches; batch += 1) {
-      const items = Array.from({ length: TOPIC_LIMITS.maxItems }, (_, index) => item(`greedy${batch}-${index}`));
-      expect((await POST(request({ items }, { client: '203.0.113.7' }), context)).status).toBe(200);
-    }
-    const greedy = Array.from({ length: TOPIC_LIMITS.maxItems }, (_, index) => item(`greedy-more${index}`));
-    const limited = await POST(request({ items: greedy }, { client: '203.0.113.7' }), context);
-    expect(limited.status).toBe(429);
-    expect(Number(limited.headers.get('Retry-After'))).toBe(
-      Math.ceil(TOPIC_LIMITS.maxItems / CLASSIFY_CLIENT_ADMISSION_LIMITS.refillPerSecond),
-    );
-    const other = Array.from({ length: TOPIC_LIMITS.maxItems }, (_, index) => item(`other${index}`));
-    expect((await POST(request({ items: other }, { client: '198.51.100.4' }), context)).status).toBe(200);
   });
 
 });
