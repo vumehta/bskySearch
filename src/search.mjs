@@ -941,6 +941,7 @@ export function focusSearchInput() {
 
 export function applySearchSortChange() {
   if (state.searchDebounceTimer === null && state.searchTerms.length && getApiSort(state.searchSort) === searchApiSort) {
+    if (state.hideOffTopic) dropQueuedTopicScores();
     updateSearchURL();
     flushDerivedPostsRebuild();
     if (resultsHeaderEl || state.allPosts.length) renderResults();

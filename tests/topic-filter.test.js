@@ -392,6 +392,46 @@ describe('topic filter', () => {
     expect(visibleUris()).toHaveLength(51);
   });
 
+  it.each([
+    ['top', 'bookmarks'],
+    ['bookmarks', 'top'],
+  ])('prioritizes the new topic window when sorting from %s to %s and preserves completed scores', async (initialSort, nextSort) => {
+    const posts = Array.from({ length: 600 }, (_, index) => makePost(`p${index}`, 'Apple news', 1000 - index, { bookmarkCount: index }));
+    const orderedUris = (sort) => (sort === 'top' ? posts : [...posts].reverse()).map((post) => post.uri);
+    const pending = [deferred(), deferred()];
+    let attempt = 0;
+    const calls = installFetch({
+      posts,
+      classify: (body) => pending[attempt++]?.promise || scoredBy(() => 0.9)(body),
+    });
+    const checked = () => calls.classify.flatMap(({ body }) => body.items.map((item) => item.id));
+    elements.sortSelect.value = initialSort;
+    state.hideOffTopic = true;
+    await search.performSearch();
+    expect(calls.classify).toHaveLength(2);
+    expect(summaryText()).toBe('Checking 300 posts for topic…');
+
+    state.searchSort = nextSort;
+    elements.sortSelect.value = nextSort;
+    search.applySearchSortChange();
+    expect(visibleUris()).toEqual(orderedUris(nextSort));
+    expect(summaryText()).toBe('Checking 350 posts for topic…');
+    expect(calls.classify.every(({ options }) => !options.signal.aborted)).toBe(true);
+
+    pending.forEach((response, index) => response.resolve(scoredBy(() => 0.9)(calls.classify[index].body)));
+    await vi.waitFor(() => expect(summaryText()).toBe('No off-topic posts found.'));
+    expect(checked()).toEqual([...orderedUris(initialSort).slice(0, 50), ...orderedUris(nextSort).slice(0, 300)]);
+
+    state.searchSort = initialSort;
+    elements.sortSelect.value = initialSort;
+    search.applySearchSortChange();
+    await vi.waitFor(() => expect(summaryText()).toBe('No off-topic posts found.'));
+    expect(visibleUris()).toEqual(orderedUris(initialSort));
+    expect(checked().slice(350)).toEqual(orderedUris(initialSort).slice(50, 300));
+    expect(new Set(checked()).size).toBe(600);
+    expect(calls.search).toEqual(['apple']);
+  });
+
   it('asks again for every keyword of a dropped post once it qualifies again', async () => {
     const posts = Array.from({ length: 100 }, (_, index) => makePost(`p${index}`, 'Apple and Meta news', 100 - index));
     const pending = [deferred(), deferred()];
