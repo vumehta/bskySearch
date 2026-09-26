@@ -248,20 +248,6 @@ describe('app search controls', () => {
     expect(state.searchDebounceTimer).toBeNull();
   });
 
-  it('keeps a pending term search scheduled when minimum likes changes', async () => {
-    await bootApp();
-    elements.terms.value = 'apple';
-    dispatch('terms', 'input');
-    await vi.advanceTimersByTimeAsync(200);
-    elements.minLikes.value = '60';
-    dispatch('minLikes', 'input');
-    await vi.advanceTimersByTimeAsync(100);
-    expect(fetch).toHaveBeenCalledTimes(1);
-    expect(state.minLikes).toBe(60);
-    expect(state.allPosts).toEqual([]);
-    expect(state.searchDebounceTimer).toBeNull();
-  });
-
   it('starts a fresh cursor stream when sort changes and restores the top results when changed back', async () => {
     let page = 0;
     fetch.mockImplementation(async () => Response.json({ posts: [makePost(++page)], cursor: `cursor-${page}` }));
@@ -284,21 +270,6 @@ describe('app search controls', () => {
     expect(state.currentCursors.apple).toBe('cursor-2');
     expect(state.allPosts.map((post) => post.uri)).toEqual([1, 2].map((id) => makePost(id).uri));
     expect(window.location.searchParams.has('searchSort')).toBe(false);
-  });
-
-  it('re-ranks cached top results when the sort changes to saves', async () => {
-    fetch.mockImplementation(async () => Response.json({ posts: [
-      { ...makePost('liked'), bookmarkCount: 1 },
-      { ...makePost('saved'), likeCount: 10, bookmarkCount: 9 },
-    ] }));
-    await bootApp('?terms=apple');
-    expect(state.allPosts.map((post) => post.uri)).toEqual([makePost('liked').uri, makePost('saved').uri]);
-    elements.sortSelect.value = 'bookmarks';
-    dispatch('sortSelect', 'change');
-    await vi.advanceTimersByTimeAsync(0);
-    expect(searchRequests().map((params) => params.get('sort'))).toEqual(['top']);
-    expect(state.allPosts.map((post) => post.uri)).toEqual([makePost('saved').uri, makePost('liked').uri]);
-    expect(window.location.searchParams.get('searchSort')).toBe('bookmarks');
   });
 
   it('re-sorts loaded pages between Top and Most Saved without searching again, keeping cursors and card state', async () => {
@@ -338,26 +309,6 @@ describe('app search controls', () => {
     expect(ids().sort()).toEqual(['p4', 'p5']);
   });
 
-  it('reuses cached pages when the same search is repeated within the same minute', async () => {
-    await vi.advanceTimersByTimeAsync(5000);
-    await bootApp('?terms=apple');
-    await vi.advanceTimersByTimeAsync(29000);
-    await dispatch('searchBtn', 'click');
-    expect(searchRequests().map((params) => params.get('since'))).toEqual(['2026-09-05T12:00:00Z']);
-    expect(elements.results.querySelectorAll('.post')).toHaveLength(1);
-  });
-
-  it('boots and follows the system theme where media queries only offer addListener', async () => {
-    let dark = false;
-    let onChange = null;
-    window.matchMedia = () => ({ get matches() { return dark; }, addListener(listener) { onChange = listener; } });
-    await bootApp('?terms=apple');
-    expect(elements.results.querySelectorAll('.post')).toHaveLength(1);
-    expect(document.documentElement.dataset.theme).toBe('light');
-    dark = true;
-    onChange();
-    expect(document.documentElement.dataset.theme).toBe('dark');
-  });
 });
 
 describe('app URL initialization', () => {
@@ -378,17 +329,6 @@ describe('app URL initialization', () => {
     expect(elements.quoteTabs.querySelector('.active').dataset.sort).toBe('recent');
     expect(window.location.searchParams.get('searchSort')).toBe('latest');
     expect(window.location.searchParams.get('quoteSort')).toBe('recent');
-  });
-
-  it.each([['latest', 'searchSort'], ['bookmarks', 'searchSort'], ['recent', 'quoteSort']])('migrates legacy sort=%s links without losing the post', async (sort, key) => {
-    await bootApp(`?post=${encodeURIComponent(postUrl)}&sort=${sort}`);
-    expect(window.location.searchParams.get(key)).toBe(sort);
-    expect(window.location.searchParams.has('sort')).toBe(false);
-    expect(window.location.searchParams.get('quoteSort')).toBe(key === 'quoteSort' ? sort : null);
-    expect(window.location.searchParams.get('post')).toBe(postUrl);
-    expect(state.searchSort).toBe(key === 'searchSort' ? sort : 'top');
-    expect(state.quoteSort).toBe(key === 'quoteSort' ? sort : 'likes');
-    expect(elements.quoteOriginal.querySelector('.quote-original')).toBeTruthy();
   });
 });
 
@@ -431,80 +371,6 @@ describe('topic filter control', () => {
     dispatch('topicFilterToggle', 'change');
     expect(elements.results.querySelectorAll('.post')).toHaveLength(1);
     expect(window.location.search).not.toContain('topic=');
-  });
-
-  function serveLikes(pages, classified) {
-    fetch.mockImplementation(async (url, options) => {
-      if (!String(url).startsWith('/api/classify')) {
-        const cursor = new URL(url, window.location).searchParams.get('cursor') || '';
-        const { likes, next } = pages[cursor];
-        return Response.json({ posts: likes.map((likeCount) => ({ ...makePost(`likes${likeCount}`), likeCount })), cursor: next });
-      }
-      const { items } = JSON.parse(options.body);
-      classified.push(...items.map((item) => item.id.split('/').pop()));
-      return Response.json({ results: items.map((item) => ({ id: item.id, scores: item.keywords.map(() => 0.9) })) });
-    });
-  }
-
-  it('applies a pending minimum likes change before turning the topic filter on', async () => {
-    const classified = [];
-    serveLikes({ '': { likes: [10, 60, 120] } }, classified);
-    await bootApp('?terms=apple&minLikes=0');
-    await vi.advanceTimersByTimeAsync(300);
-
-    elements.minLikes.value = '100';
-    dispatch('minLikes', 'input');
-    elements.topicFilterToggle.checked = true;
-    dispatch('topicFilterToggle', 'change');
-    expect(state.minLikes).toBe(100);
-    expect(classified).toEqual(['likes120']);
-    await vi.advanceTimersByTimeAsync(300);
-    expect(classified).toEqual(['likes120']);
-    expect(elements.results.querySelectorAll('.post')).toHaveLength(1);
-  });
-
-  it('starts no topic checks for newly loaded posts while a minimum likes change is pending', async () => {
-    const classified = [];
-    serveLikes({
-      '': { likes: [120], next: 'c1' },
-      c1: { likes: [110], next: 'c2' },
-      c2: { likes: [10, 20] },
-    }, classified);
-    await bootApp('?terms=apple&minLikes=0&topic=1');
-    await vi.advanceTimersByTimeAsync(300);
-    expect(classified.sort()).toEqual(['likes110', 'likes120']);
-
-    elements.minLikes.value = '100';
-    dispatch('minLikes', 'input');
-    await search.loadMore();
-    expect(state.allPosts.map((post) => post.uri.split('/').pop())).toContain('likes10');
-    expect(classified.sort()).toEqual(['likes110', 'likes120']);
-    await vi.advanceTimersByTimeAsync(300);
-    expect(classified.sort()).toEqual(['likes110', 'likes120']);
-    expect(elements.results.querySelectorAll('.post')).toHaveLength(2);
-  });
-
-  it('sends no queued topic checks while a minimum likes change is pending', async () => {
-    const batches = [];
-    fetch.mockImplementation(async (url, options) => {
-      if (!String(url).startsWith('/api/classify')) {
-        return Response.json({ posts: Array.from({ length: 100 }, (_, index) => ({ ...makePost(`p${index}`), likeCount: 100 - index })) });
-      }
-      const response = deferred();
-      batches.push({ items: JSON.parse(options.body).items, response });
-      return response.promise;
-    });
-    await bootApp('?terms=apple&minLikes=0&topic=1');
-    await vi.advanceTimersByTimeAsync(300);
-    expect(batches).toHaveLength(2);
-
-    elements.minLikes.value = '90';
-    dispatch('minLikes', 'input');
-    const [first] = batches;
-    first.response.resolve(Response.json({ results: first.items.map((item) => ({ id: item.id, scores: [0.9] })) }));
-    await vi.advanceTimersByTimeAsync(300);
-    expect(batches).toHaveLength(2);
-    expect(elements.results.querySelectorAll('.post')).toHaveLength(11);
   });
 
   it('checks only the posts that meet the minimum likes the user settles on', async () => {

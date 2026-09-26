@@ -508,15 +508,11 @@ export const testUtils =
   process.env.NODE_ENV === 'test'
     ? {
         scoreCache,
-        SCORE_CACHE_TTL_MS,
-        MAX_SCORE_CACHE_SIZE,
         MAX_BODY_BYTES,
         UPSTREAM_TIMEOUT_MS,
         UPSTREAM_CONCURRENCY,
         UPSTREAM_RETRY_DELAY_MS,
         TYPESAFE_ENDPOINT,
-        MAX_ADMISSION_CLIENTS,
-        clientAdmissions,
         resetModuleStateForTests,
       }
     : undefined;

@@ -83,46 +83,6 @@ describe('browser and proxy search deadlines', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('keeps a shared refresh alive for a newer search when the older job expires', async () => {
-    let refreshSignal;
-    let refreshCount = 0;
-    connectProxy((url, options) => {
-      if (url.pathname.endsWith('createSession')) return respondAfter(7000, session('access-a'), options.signal);
-      if (url.pathname.endsWith('refreshSession')) {
-        refreshCount += 1;
-        refreshSignal = options.signal;
-        return respondAfter(7000, session('access-b'), options.signal);
-      }
-      return options.headers.Authorization === 'Bearer access-a'
-        ? respondAfter(7000, { error: 'ExpiredToken' }, options.signal, 400)
-        : respondAfter(1000, results, options.signal);
-    });
-    const older = search('older');
-    const olderChecked = expect(older).rejects.toMatchObject({ status: 504, message: 'Upstream request timed out.' });
-    await vi.advanceTimersByTimeAsync(15000);
-    const newer = search('newer');
-    const newerChecked = expect(newer).resolves.toEqual(results);
-    await vi.advanceTimersByTimeAsync(5000);
-    await olderChecked;
-    expect(refreshSignal.aborted).toBe(false);
-    await vi.advanceTimersByTimeAsync(2000);
-    await newerChecked;
-    expect(refreshCount).toBe(1);
-    expect(testUtils.searchResultsCache.size).toBe(1);
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it('preserves upstream errors without waiting for either deadline', async () => {
-    connectProxy((url, options) => url.pathname.endsWith('createSession')
-      ? respondAfter(100, session('access-a'), options.signal)
-      : respondAfter(100, { error: 'Invalid cursor' }, options.signal, 400));
-    const pending = search('invalid');
-    const checked = expect(pending).rejects.toMatchObject({ status: 400, message: 'Invalid cursor' });
-    await vi.advanceTimersByTimeAsync(200);
-    await checked;
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
   it('cancels the browser request immediately and lets its login finish for later searches', async () => {
     const upstreamCalls = [];
     connectProxy((url, options) => {

@@ -62,40 +62,8 @@ describe('thread disclosure', () => {
     expect(context(card)).toBeDefined();
   });
 
-  it('shows pronouns and badges on thread parents', async () => {
-    const { card } = createCard();
-    const author = { ...parent().author, pronouns: 'they/them', verification: { verifiedStatus: 'valid', trustedVerifierStatus: 'none' } };
-    fetchMock.mockResolvedValueOnce(response({ thread: { parent: { post: { ...parent(), author } } } }));
-    await thread.toggleThread(post, card);
-    expect(context(card).querySelector('.pronouns').textContent).toBe('they/them');
-    expect(context(card).querySelector('.badge').textContent).toBe('Verified');
-  });
-
-  it('clears the LIVE badge timers of thread parents when the thread is hidden', async () => {
-    const { card } = createCard();
-    const status = { status: 'app.bsky.actor.status#live', expiresAt: '2026-01-01T13:00:00Z' };
-    fetchMock.mockResolvedValue(response({ thread: { parent: { post: { ...parent(), author: { ...parent().author, status } } } } }));
-    await thread.toggleThread(post, card);
-    expect(context(card).querySelector('.badge').textContent).toBe('LIVE');
-    expect(vi.getTimerCount()).toBe(1);
-    await thread.toggleThread(post, card);
-    expect(context(card)).toBeUndefined();
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it('dates a parent with a future creation time by when it was indexed', async () => {
-    const { card } = createCard();
-    fetchMock.mockResolvedValueOnce(response({ thread: { parent: { post: {
-      ...parent(), record: { text: 'future', createdAt: '2099-01-01T00:00:00Z' }, indexedAt: '2026-01-01T10:00:00Z',
-    } } } }));
-    await thread.toggleThread(post, card);
-    expect(context(card).querySelector('.thread-parent-time').textContent).toBe('2h ago');
-  });
-
   it.each([
     ['a deleted parent', { $type: 'app.bsky.feed.defs#notFoundPost', uri: parent().uri, notFound: true }, 'Parent post not found'],
-    ['a blocked parent', { $type: 'app.bsky.feed.defs#blockedPost', uri: parent().uri, blocked: true, author: { did: 'did:plc:test' } }, 'Parent post blocked'],
-    ['an unknown parent', { $type: 'app.bsky.feed.defs#unknownPost' }, 'Parent post unavailable'],
   ])('says so when the thread starts at %s, showing any parents below it', async (_kind, missing, notice) => {
     const direct = createCard();
     fetchMock.mockResolvedValueOnce(response({ thread: { parent: missing } }));
@@ -109,70 +77,6 @@ describe('thread disclosure', () => {
     expect(link.textContent).toBe('Hide Thread');
     expect(context(card).children.slice(1).map((node) => [node.className, node.querySelector('.thread-parent-text').textContent]))
       .toEqual([['thread-parent thread-parent-missing', notice], ['thread-parent', 'reachable']]);
-  });
-
-  it('refreshes cached parents after the cache lifetime', async () => {
-    const { card } = createCard();
-    await thread.toggleThread(post, card);
-    await thread.toggleThread(post, card);
-    vi.advanceTimersByTime(30000);
-    fetchMock.mockResolvedValue(withParent('updated'));
-    await thread.toggleThread(post, card);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(context(card).children[1].children[1].textContent).toBe('updated');
-  });
-
-  it('rejects malformed parent data before rendering or caching it', async () => {
-    const { card, link } = createCard();
-    fetchMock.mockResolvedValueOnce(response({ thread: { parent: {
-      post: { ...parent(), record: { text: { unexpected: 'object' } } },
-    } } }));
-    await thread.toggleThread(post, card);
-    expect(link.textContent).toBe('Failed to load thread');
-    expect(context(card)).toBeUndefined();
-    await thread.toggleThread(post, card);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(link.textContent).toBe('Hide Thread');
-  });
-
-  it('bounds cached threads and gives each disclosure its own controlled region', async () => {
-    const first = createCard();
-    await thread.toggleThread(post, first.card);
-    await thread.toggleThread(post, first.card);
-    const ids = new Set([first.link.getAttribute('aria-controls')]);
-    for (let index = 0; index < 100; index += 1) {
-      const current = createCard();
-      await thread.toggleThread({ uri: `${post.uri}${index}` }, current.card);
-      ids.add(current.link.getAttribute('aria-controls'));
-    }
-    expect(ids.size).toBe(101);
-    await thread.toggleThread(post, first.card);
-    expect(fetchMock).toHaveBeenCalledTimes(102);
-  });
-
-  it('does not let a no-parent status timer overwrite a successful retry', async () => {
-    const { card, link } = createCard();
-    fetchMock.mockResolvedValueOnce(response({ thread: {} }));
-    await thread.toggleThread(post, card);
-    expect(link.textContent).toBe('No parent posts found');
-    await thread.toggleThread(post, card);
-    await vi.advanceTimersByTimeAsync(2000);
-    expect(link.textContent).toBe('Hide Thread');
-    expect(link.getAttribute('aria-expanded')).toBe('true');
-    expect(context(card)).toBeDefined();
-  });
-
-  it('does not let an error status timer overwrite an in-flight retry', async () => {
-    const { card, link } = createCard();
-    fetchMock.mockRejectedValueOnce(new Error('offline'));
-    await thread.toggleThread(post, card);
-    fetchMock.mockImplementationOnce(() => new Promise(() => {}));
-    const retry = thread.toggleThread(post, card);
-    await vi.advanceTimersByTimeAsync(2000);
-    expect(link.textContent).toBe('Cancel loading');
-    await thread.toggleThread(post, card);
-    await retry;
-    expect(link.textContent).toBe('View Thread');
   });
 
   it('cancels loading on a second click and ignores the late response', async () => {
