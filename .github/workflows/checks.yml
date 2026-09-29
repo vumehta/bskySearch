@@ -18,6 +18,8 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 24
+          # The runner's cached 24.x can lag behind; devEngines needs the npm 11.19+ in recent releases.
+          check-latest: true
           cache: npm
       - run: npm ci
       - run: npm audit signatures
