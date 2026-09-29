@@ -35,5 +35,9 @@
   },
   "dependencies": {
     "@atproto/syntax": "^0.7.5"
+  },
+  "allowScripts": {
+    "esbuild": false,
+    "fsevents": false
   }
 }
