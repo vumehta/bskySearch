@@ -28,6 +28,13 @@
   "engines": {
     "node": ">=24.11.0 <25"
   },
+  "devEngines": {
+    "packageManager": {
+      "name": "npm",
+      "version": ">=11.19.0",
+      "onFail": "error"
+    }
+  },
   "devDependencies": {
     "@playwright/test": "1.63.0",
     "esbuild": "^0.28.2",
@@ -35,5 +42,9 @@
   },
   "dependencies": {
     "@atproto/syntax": "^0.7.5"
+  },
+  "allowScripts": {
+    "esbuild": false,
+    "fsevents": false
   }
 }
