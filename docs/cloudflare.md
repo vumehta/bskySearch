@@ -56,8 +56,13 @@ Cloudflare dashboard under the Worker's **Settings → Builds**, not in this rep
 The build image's Node 24 ships an npm older than the 11.19 that `devEngines`
 requires, so the variable turns off Cloudflare's own install and the build
 command upgrades npm before `npm ci`. Bump the pinned npm there by hand.
-Previews appear to take their secrets from the Previews Base settings rather
-than production, so search may not work on a Preview without them.
+Previews inherit nothing from production. The `previews` block in
+`wrangler.jsonc` gives them their own rate limiter (namespace `1002`) and logs,
+and `preview_urls` keeps their `*-bskysearch.personal-vum.workers.dev` URLs on
+while the production `workers.dev` URL stays off. Their secrets live in the
+dashboard's **Previews Base** and apply to Previews created after they are set;
+set them there or with `npx wrangler preview base-config secret put <NAME>`.
+Anyone with a Preview URL can open it unless Cloudflare Access protects it.
 
 `npm run deploy` builds and deploys from a local checkout; run
 `npx wrangler login` first on a new machine. `npx wrangler rollback` returns to
@@ -66,7 +71,9 @@ every push, without deploying.
 
 The old `bskysearch.vercel.app` URL sends a 307 for every path, keeping the query
 string, to the same path here. That is a project routing rule in the Vercel
-project, which is no longer connected to this repository.
+project, which is no longer connected to this repository. Vercel also served the
+page as `/bluesky-term-search.html`; the Worker sends that path to `/` with its
+query string, so old links keep working.
 
 Keep Rocket Loader and Email Obfuscation off for the zone. The app doesn't need
 them, and both rewrite the page's scripts.
