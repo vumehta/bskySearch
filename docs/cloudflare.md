@@ -42,11 +42,31 @@ built bundle.
 
 ## Deploy
 
-`npm run deploy` builds and deploys; run `npx wrangler login` first on a new
-machine. The first deploy creates the custom domain's DNS record and
-certificate, and fails if the hostname already has a DNS record.
-`npx wrangler rollback` returns to the previous version. CI bundles the Worker
-with `wrangler deploy --dry-run` on every push, without deploying.
+Workers Builds deploys every push to `main`, and builds a Preview for pushes to
+other branches. It does not wait for GitHub CI. Its settings live in the
+Cloudflare dashboard under the Worker's **Settings → Builds**, not in this repo:
+
+| Setting | Value |
+| --- | --- |
+| Build command | `npm install -g npm@11.19.0 && npm ci && npm run build` |
+| Deploy command | `npx wrangler deploy` |
+| Preview command | `npx wrangler preview` |
+| Build variable | `SKIP_DEPENDENCY_INSTALL` = `1` |
+
+The build image's Node 24 ships an npm older than the 11.19 that `devEngines`
+requires, so the variable turns off Cloudflare's own install and the build
+command upgrades npm before `npm ci`. Bump the pinned npm there by hand.
+Previews appear to take their secrets from the Previews Base settings rather
+than production, so search may not work on a Preview without them.
+
+`npm run deploy` builds and deploys from a local checkout; run
+`npx wrangler login` first on a new machine. `npx wrangler rollback` returns to
+the previous version. CI bundles the Worker with `wrangler deploy --dry-run` on
+every push, without deploying.
+
+The old `bskysearch.vercel.app` URL sends a 307 for every path, keeping the query
+string, to the same path here. That is a project routing rule in the Vercel
+project, which is no longer connected to this repository.
 
 Keep Rocket Loader and Email Obfuscation off for the zone. The app doesn't need
 them, and both rewrite the page's scripts.
