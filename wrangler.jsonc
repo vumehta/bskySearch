@@ -1,0 +1,26 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "bskysearch",
+  "main": "worker/index.mjs",
+  // The newest date the pinned workerd supports; bump it together with wrangler.
+  "compatibility_date": "2026-09-21",
+  // Lets request.signal abort when the browser abandons a search or topic check.
+  "compatibility_flags": ["enable_request_signal"],
+  "assets": {
+    "directory": "dist"
+  },
+  "workers_dev": false,
+  "routes": [
+    { "pattern": "HOSTNAME_PLACEHOLDER", "custom_domain": true }
+  ],
+  "ratelimits": [
+    {
+      "name": "CLASSIFY_LIMITER",
+      "namespace_id": "1001",
+      "simple": { "limit": 30, "period": 60 }
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

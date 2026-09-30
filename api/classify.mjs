@@ -47,7 +47,7 @@ function getRuntimeEnv(context) {
   if (context && typeof context === 'object' && 'env' in context) {
     return context.env || {};
   }
-  return process.env;
+  return globalThis.process?.env ?? {};
 }
 
 function jsonNoStore(payload, status = 200, extraHeaders = {}) {
@@ -469,7 +469,7 @@ function resetModuleStateForTests() {
 }
 
 export const testUtils =
-  process.env.NODE_ENV === 'test'
+  globalThis.process?.env.NODE_ENV === 'test'
     ? {
         scoreCache,
         MAX_BODY_BYTES,

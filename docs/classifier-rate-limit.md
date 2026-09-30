@@ -1,51 +1,48 @@
-# Classifier rate limiting on Vercel
+# Classifier rate limiting
 
-Configure this project firewall rule before enabling `TYPESAFE_API_KEY` on a
-public deployment. It uses Vercel's managed counters and requires no database
-or application dependency. Firewall settings live in Vercel, not `vercel.json`.
+The Worker limits topic classification per client IP with a Workers Rate
+Limiting binding. The limit lives in `wrangler.jsonc` and deploys with the code;
+there is no dashboard rule to configure.
 
 | Setting | Value |
 | --- | --- |
-| Name | Limit topic classification |
-| Conditions (AND) | Request Path starts with `/api/classify`; Method equals `POST` |
-| Algorithm | Fixed Window |
+| Binding | `CLASSIFY_LIMITER` (namespace `1001`) |
+| Requests counted | `POST` to `/api/classify` |
 | Window / limit | 60 seconds / 30 requests |
-| Counting key | IP Address only |
-| Exceeded action | Too Many Requests (429) |
-| Persistent action duration | None |
+| Counting key | `CF-Connecting-IP` |
+| Exceeded response | 429 with `Retry-After: 60` |
 
-Leave hostname and environment unrestricted so the rule covers production,
-previews, and deployment aliases. The path prefix also covers trailing slashes
-and extension variants. Avoid an earlier bypass rule that skips this limit.
-In **Firewall → Rules**, add the rule, review the pending changes, and publish
-only the intended change. It fits the Hobby plan's single rate-limit rule slot.
+`worker/index.mjs` checks the limit before the classifier handler runs, so a
+limited request never reaches TypeSafe. Other methods and ordinary keyword
+search are not counted. The namespace ID only has to be unique among the rate
+limiters in the Cloudflare account.
 
 The limit counts HTTP batches, including cache hits. A full batch contains 25
 posts and can make up to 50 TypeSafe calls when every post needs a retry. Three
 queries returning 200 distinct posts each normally need at least 24 batches;
 expansion, incremental results, and more than six original terms can need more.
 Users sharing a public IP share the allowance. When limited, the app pauses its
-queued checks, waits out the `Retry-After` (a minute when there is none), and
-resumes. Unchecked posts stay visible meanwhile. After five limits in a row on
-the same batch it stops checking for that search. Ordinary keyword search does
-not match this rule.
+queued checks, waits out the `Retry-After`, and resumes. Unchecked posts stay
+visible meanwhile. After five limits in a row on the same batch it stops
+checking for that search.
 
-This is abuse throttling, not a global call or spending cap: Vercel counters are
-per region, and different IPs have separate allowances. The handler also limits
-TypeSafe calls itself, per instance: a 600-call burst refilling at five calls per
-second, shared by every caller. The app has two or three users, so there is no
-per-visitor share; one visitor can use the whole allowance. The limit charges
-retries; a retry it refuses leaves only that post unchecked, and the rest of
-its batch still returns its scores. The handler accepts only same-origin
-browser requests: `Sec-Fetch-Site: same-origin`, or a matching `Origin` from
-browsers that do not send `Sec-Fetch-Site`. That stops cross-site pages and
-casual scripts, not a caller who forges the headers. Keep TypeSafe automatic
-recharge off when using a prepaid credit budget; throttling cannot guarantee
-that existing credits will last.
+This is abuse throttling, not a global call or spending cap: Workers rate limit
+counters are kept per Cloudflare location and are eventually consistent, so a
+burst can slightly exceed the limit, and different IPs have separate
+allowances. The handler also limits TypeSafe calls itself, per Worker isolate: a
+600-call burst refilling at five calls per second, shared by every caller that
+isolate serves. The app has two or three users, so there is no per-visitor
+share; one visitor can use the whole allowance. The limit charges retries; a
+retry it refuses leaves only that post unchecked, and the rest of its batch
+still returns its scores. The handler accepts only same-origin browser
+requests: `Sec-Fetch-Site: same-origin`, or a matching `Origin` from browsers
+that do not send `Sec-Fetch-Site`. That stops cross-site pages and casual
+scripts, not a caller who forges the headers. Keep TypeSafe automatic recharge
+off when using a prepaid credit budget; throttling cannot guarantee that
+existing credits will last.
 
 Validate enforcement with a bounded burst of invalid `POST` bodies (`{}`),
 which cannot invoke TypeSafe, then confirm excess requests get 429 while the
 homepage and ordinary search remain reachable. Recheck after the window resets.
 
-References: [Vercel rate limiting](https://vercel.com/docs/vercel-firewall/vercel-waf/rate-limiting),
-[rule configuration](https://vercel.com/docs/vercel-firewall/vercel-waf/rule-configuration).
+Reference: [Workers Rate Limiting](https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/).

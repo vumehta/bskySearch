@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const securityHeaders = require('../worker/security-headers.json');
 
 const distDir = path.join(__dirname, '..', 'dist');
 const files = [
@@ -18,3 +19,9 @@ for (const file of files) {
   }
   fs.copyFileSync(src, dest);
 }
+
+// Workers serves index.html at `/`. The original name stays while Vercel's rewrite still points at it.
+fs.copyFileSync(path.join(distDir, 'bluesky-term-search.html'), path.join(distDir, 'index.html'));
+
+const headerLines = Object.entries(securityHeaders).map(([name, value]) => `  ${name}: ${value}`);
+fs.writeFileSync(path.join(distDir, '_headers'), `/*\n${headerLines.join('\n')}\n`);
