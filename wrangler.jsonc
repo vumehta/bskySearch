@@ -11,7 +11,7 @@
   },
   "workers_dev": false,
   "routes": [
-    { "pattern": "HOSTNAME_PLACEHOLDER", "custom_domain": true }
+    { "pattern": "bskysearch.vum.sh", "custom_domain": true }
   ],
   "ratelimits": [
     {
