@@ -4,6 +4,8 @@ import securityHeaders from './security-headers.json' with { type: 'json' };
 
 const CLASSIFY_LIMIT_RETRY_AFTER_SECONDS = 60;
 const SCRIPT_SRC = "script-src 'self'";
+// Vercel served the page under its file name, and bskysearch.vercel.app forwards old links here.
+const LEGACY_PAGE_PATH = '/bluesky-term-search.html';
 
 const routes = new Map([
   ['/api/search', search],
@@ -41,8 +43,11 @@ async function isClassifyLimited(request, env) {
   return !success;
 }
 
-async function route(request, env, ctx, pathname) {
-  const handler = routes.get(pathname);
+async function route(request, env, ctx, url) {
+  if (url.pathname === LEGACY_PAGE_PATH) {
+    return new Response(null, { status: 301, headers: { Location: `/${url.search}` } });
+  }
+  const handler = routes.get(url.pathname);
   if (!handler) {
     return new Response('Not found', { status: 404, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
   }
@@ -60,8 +65,8 @@ async function route(request, env, ctx, pathname) {
 
 export default {
   async fetch(request, env, ctx) {
-    const { pathname } = new URL(request.url);
-    if (pathname === '/') return servePage(request, env);
-    return withSecurityHeaders(await route(request, env, ctx, pathname));
+    const url = new URL(request.url);
+    if (url.pathname === '/') return servePage(request, env);
+    return withSecurityHeaders(await route(request, env, ctx, url));
   },
 };
