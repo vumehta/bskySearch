@@ -2,17 +2,14 @@ import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 
 const assets = new Map([
-  ['/', ['bluesky-term-search.html', 'text/html']],
-  ['/bluesky-term-search.html', ['bluesky-term-search.html', 'text/html']],
+  ['/', ['index.html', 'text/html']],
   ['/app.min.js', ['app.min.js', 'text/javascript']],
   ['/styles.min.css', ['styles.min.css', 'text/css']],
 ].map(([url, [name, contentType]]) => [url, {
   contentType,
   body: readFileSync(new URL(`../../dist/${name}`, import.meta.url)),
 }]));
-const config = JSON.parse(readFileSync(new URL('../../vercel.json', import.meta.url), 'utf8'));
-const headers = Object.fromEntries(config.headers.flatMap((rule) => rule.headers)
-  .map(({ key, value }) => [key, value]));
+const headers = JSON.parse(readFileSync(new URL('../../worker/security-headers.json', import.meta.url), 'utf8'));
 
 const server = createServer((request, response) => {
   const pathname = new URL(request.url, 'http://127.0.0.1').pathname;

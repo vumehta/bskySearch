@@ -21,4 +21,4 @@ Optional settings:
 - `BROWSER_TEST_CHANNEL`: installed browser channel, such as `chrome`.
 - `BROWSER_TEST_EXECUTABLE`: explicit compatible Chromium executable path.
 
-The local server binds only to `127.0.0.1`, serves the three built assets, and applies the response headers from `vercel.json`. Tests intercept API requests and reject unexpected external requests.
+The local server binds only to `127.0.0.1`, serves the three built assets, and applies the response headers from `worker/security-headers.json`. Tests intercept API requests and reject unexpected external requests.

@@ -58,8 +58,9 @@ server returns the scores that finished and the remaining posts stay visible as
 unchecked. Changes to **Min. Likes** apply once typing pauses (or on Enter, or
 when the topic filter is toggled). While a change is pending, queued checks are
 dropped and no new ones start; checks already in flight finish. Once the change
-applies, only posts that meet it are queued again. `vercel.json` enables request
-cancellation, so a batch the browser abandons stops calling TypeSafe.
+applies, only posts that meet it are queued again. `wrangler.jsonc` enables
+request cancellation (the `enable_request_signal` compatibility flag), so a
+batch the browser abandons stops calling TypeSafe.
 
 ## Evaluate a rubric change
 

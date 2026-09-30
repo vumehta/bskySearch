@@ -89,7 +89,7 @@ async function fetchWithTimeout(url, { onResponse, ...options } = {}, timeoutMs 
   }
 }
 
-function createSharedOperation(start, onSettled, timeoutMs) {
+function createSharedOperation(start, onSettled, { timeoutMs, keepAlive } = {}) {
   const operation = {
     controller: new AbortController(),
     subscribers: 0,
@@ -114,6 +114,9 @@ function createSharedOperation(start, onSettled, timeoutMs) {
       operation.settled = true;
       onSettled(operation);
     });
+  // Workers cancel a request's pending I/O when its client disconnects, even if other
+  // requests still wait on this work, so keep the starting request alive until it settles.
+  keepAlive?.(operation.promise.catch(() => {}));
   return operation;
 }
 
@@ -164,7 +167,7 @@ function getRuntimeEnv(context) {
   if (context && typeof context === 'object' && 'env' in context) {
     return context.env || {};
   }
-  return process.env;
+  return globalThis.process?.env ?? {};
 }
 
 function stripControlChars(value) {
@@ -311,7 +314,7 @@ function isSessionExpired() {
   return Date.now() - sessionCreatedAt > SESSION_TTL_MS;
 }
 
-async function ensureSession(handle, appPassword, signal, rejectedAccessJwt = null) {
+async function ensureSession({ handle, appPassword, keepAlive }, signal, rejectedAccessJwt = null) {
   throwIfAborted(signal);
   if (rejectedAccessJwt && cachedSession?.accessJwt === rejectedAccessJwt) {
     sessionCreatedAt = null;
@@ -351,6 +354,7 @@ async function ensureSession(handle, appPassword, signal, rejectedAccessJwt = nu
     (operation) => {
       if (sessionOperation === operation) sessionOperation = null;
     },
+    { keepAlive },
   );
   return subscribe(sessionOperation, signal, { abortWhenIdle: false });
 }
@@ -470,14 +474,14 @@ function admitSearch() {
   admissionTokens -= 1;
 }
 
-async function runSearch(input, handle, appPassword, signal) {
-  let session = await ensureSession(handle, appPassword, signal);
+async function runSearch(input, auth, signal) {
+  let session = await ensureSession(auth, signal);
   let result = await searchPosts(input, session.accessJwt, signal);
   if (
     result.response.status === 401 ||
     (result.response.status === 400 && ['ExpiredToken', 'InvalidToken'].includes(result.payload?.error))
   ) {
-    session = await ensureSession(handle, appPassword, signal, session.accessJwt);
+    session = await ensureSession(auth, signal, session.accessJwt);
     result = await searchPosts(input, session.accessJwt, signal);
   }
   const { response, payload } = result;
@@ -558,9 +562,10 @@ export async function GET(request, context) {
     if (!operation) {
       throwIfSearchBlocked();
       admitSearch();
+      const keepAlive = context?.waitUntil;
       operation = createSharedOperation(
         async (signal) => {
-          const payload = await runSearch(input, handle, appPassword, signal);
+          const payload = await runSearch(input, { handle, appPassword, keepAlive }, signal);
           throwIfAborted(signal);
           searchResultsCache.set(cacheKey, { data: payload, timestamp: Date.now() });
           enforceSearchCacheLimit();
@@ -569,7 +574,7 @@ export async function GET(request, context) {
         (completed) => {
           if (pendingSearches.get(cacheKey) === completed) pendingSearches.delete(cacheKey);
         },
-        SEARCH_JOB_TIMEOUT_MS,
+        { timeoutMs: SEARCH_JOB_TIMEOUT_MS, keepAlive },
       );
       pendingSearches.set(cacheKey, operation);
     }
@@ -594,7 +599,7 @@ export async function GET(request, context) {
 }
 
 export const testUtils =
-  process.env.NODE_ENV === 'test'
+  globalThis.process?.env.NODE_ENV === 'test'
     ? {
         searchResultsCache,
         UPSTREAM_TIMEOUT_MS,

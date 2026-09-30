@@ -5,6 +5,8 @@
 !.claude/hooks/session-start.sh
 .DS_Store
 .vercel
+.wrangler/
+.dev.vars*
 .env
 .env.local
 .env*.local

@@ -341,6 +341,30 @@ describe('coalescing and cancellation', () => {
     expect(handlers.search).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps shared login and search work alive after the starting request cancels', async () => {
+    const body = deferred();
+    const handlers = upstream({ search: () => body.promise });
+    const waitUntil = vi.fn();
+    const controller = new AbortController();
+    const cancelled = GET(request('topic', { signal: controller.signal }), { ...context, waitUntil });
+    const active = GET(request(), context);
+    await vi.waitFor(() => expect(handlers.search).toHaveBeenCalledTimes(1));
+    expect(waitUntil).toHaveBeenCalledTimes(2);
+    controller.abort();
+    expect((await cancelled).status).toBe(499);
+    body.resolve(Response.json(posts));
+    expect((await active).status).toBe(200);
+    await expect(Promise.all(waitUntil.mock.calls.map(([promise]) => promise))).resolves.toHaveLength(2);
+  });
+
+  it('never hands waitUntil a rejecting promise', async () => {
+    upstream({ create: () => Response.json({ error: 'AuthenticationRequired' }, { status: 401 }) });
+    const waitUntil = vi.fn();
+    expect((await GET(request(), { ...context, waitUntil })).status).toBe(502);
+    expect(waitUntil).toHaveBeenCalledTimes(2);
+    await expect(Promise.all(waitUntil.mock.calls.map(([promise]) => promise))).resolves.toHaveLength(2);
+  });
+
 });
 
 describe('bounded search admission', () => {
