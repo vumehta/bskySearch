@@ -13,6 +13,8 @@
     "run_worker_first": ["/"]
   },
   "workers_dev": false,
+  // Worker Previews are served on workers.dev, so their URLs stay on although production isn't.
+  "preview_urls": true,
   "routes": [
     { "pattern": "bskysearch.vum.sh", "custom_domain": true }
   ],
@@ -25,5 +27,19 @@
   ],
   "observability": {
     "enabled": true
+  },
+  // Previews inherit no bindings or settings from production. Their secrets are in the
+  // dashboard's Previews Base; a separate namespace keeps their topic-check counts apart.
+  "previews": {
+    "ratelimits": [
+      {
+        "name": "CLASSIFY_LIMITER",
+        "namespace_id": "1002",
+        "simple": { "limit": 30, "period": 60 }
+      }
+    ],
+    "observability": {
+      "enabled": true
+    }
   }
 }

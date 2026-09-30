@@ -51,6 +51,17 @@ describe('worker routing', () => {
     expectSecurityHeaders(response);
   });
 
+  it('sends the old page path to / with its query string', async () => {
+    const response = await worker.fetch(
+      new Request('https://search.example/bluesky-term-search.html?terms=Apple&minLikes=10'),
+      createEnv(),
+      createContext(),
+    );
+    expect(response.status).toBe(301);
+    expect(response.headers.get('Location')).toBe('/?terms=Apple&minLikes=10');
+    expectSecurityHeaders(response);
+  });
+
   it('answers unknown paths with 404 and the security headers', async () => {
     const response = await worker.fetch(new Request('https://search.example/api/other'), createEnv(), createContext());
     expect(response.status).toBe(404);
