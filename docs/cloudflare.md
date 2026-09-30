@@ -13,6 +13,12 @@ that lets abandoned requests cancel their upstream calls.
 `dist/_headers` for static files, the Worker adds it to its own responses, and
 the browser tests serve it too. Edit the JSON, not `dist/_headers`.
 
+The Worker serves the page itself (`run_worker_first` for `/`) so each response
+gets a fresh `script-src` nonce. Bot Fight Mode injects an inline JavaScript
+Detections script into HTML and copies that nonce from the CSP header onto it;
+without one, the CSP blocks the script. Nonce-bearing pages are sent with
+`Cache-Control: no-store`.
+
 ## Secrets
 
 Set each secret once; Wrangler prompts for the value:
@@ -42,9 +48,8 @@ certificate, and fails if the hostname already has a DNS record.
 `npx wrangler rollback` returns to the previous version. CI bundles the Worker
 with `wrangler deploy --dry-run` on every push, without deploying.
 
-Keep Rocket Loader, Email Obfuscation, and automatic Web Analytics injection off
-for the zone. The Content Security Policy allows only the site's own scripts, so
-anything Cloudflare injects would be blocked.
+Keep Rocket Loader and Email Obfuscation off for the zone. The app doesn't need
+them, and both rewrite the page's scripts.
 
 ## Runtime notes
 

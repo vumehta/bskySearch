@@ -71,6 +71,49 @@ describe('worker routing', () => {
   });
 });
 
+describe('page', () => {
+  const page = '<!DOCTYPE html><title>Bluesky Term Search</title>';
+
+  function createPageEnv() {
+    const assets = {
+      fetch: vi.fn(async () => new Response(page, {
+        headers: {
+          'Content-Type': 'text/html',
+          'Cache-Control': 'public, max-age=0, must-revalidate',
+          ETag: '"page"',
+        },
+      })),
+    };
+    return { ...createEnv(), ASSETS: assets };
+  }
+
+  function scriptNonce(response) {
+    return /script-src 'self' 'nonce-([A-Za-z0-9+/=]+)'/.exec(response.headers.get('Content-Security-Policy'))?.[1];
+  }
+
+  it('serves the page with a fresh script nonce and otherwise unchanged headers', async () => {
+    const env = createPageEnv();
+    const first = await worker.fetch(new Request('https://search.example/'), env, createContext());
+    const second = await worker.fetch(new Request('https://search.example/'), env, createContext());
+    expect(await first.text()).toBe(page);
+    expect(first.headers.get('Content-Type')).toBe('text/html');
+    const nonce = scriptNonce(first);
+    expect(nonce).toHaveLength(24);
+    expect(scriptNonce(second)).not.toBe(nonce);
+    expect(first.headers.get('Content-Security-Policy').replace(` 'nonce-${nonce}'`, ''))
+      .toBe(securityHeaders['Content-Security-Policy']);
+    for (const [name, value] of Object.entries(securityHeaders)) {
+      if (name !== 'Content-Security-Policy') expect(first.headers.get(name)).toBe(value);
+    }
+  });
+
+  it('keeps nonce-bearing pages out of caches', async () => {
+    const response = await worker.fetch(new Request('https://search.example/'), createPageEnv(), createContext());
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    expect(response.headers.get('ETag')).toBeNull();
+  });
+});
+
 describe('topic check rate limit', () => {
   it('refuses limited clients before the classifier runs', async () => {
     globalThis.fetch = vi.fn();

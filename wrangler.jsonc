@@ -7,7 +7,10 @@
   // Lets request.signal abort when the browser abandons a search or topic check.
   "compatibility_flags": ["enable_request_signal"],
   "assets": {
-    "directory": "dist"
+    "directory": "dist",
+    "binding": "ASSETS",
+    // The Worker serves the page so each response gets its own CSP nonce.
+    "run_worker_first": ["/"]
   },
   "workers_dev": false,
   "routes": [
