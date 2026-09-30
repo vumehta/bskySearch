@@ -17,6 +17,12 @@ limited request never reaches TypeSafe. Other methods and ordinary keyword
 search are not counted. The namespace ID only has to be unique among the rate
 limiters in the Cloudflare account.
 
+Treat this as best-effort. Cloudflare documents the binding as permissive and
+eventually consistent: counters are cached on each machine and synced in the
+background. On the deployed Worker, 95 `POST`s from one IP in two minutes all
+passed it, while `wrangler dev` refused everything after the 30th. The
+same-origin check and the handler's own TypeSafe budget (below) still apply.
+
 The limit counts HTTP batches, including cache hits. A full batch contains 25
 posts and can make up to 50 TypeSafe calls when every post needs a retry. Three
 queries returning 200 distinct posts each normally need at least 24 batches;
@@ -41,8 +47,9 @@ scripts, not a caller who forges the headers. Keep TypeSafe automatic recharge
 off when using a prepaid credit budget; throttling cannot guarantee that
 existing credits will last.
 
-Validate enforcement with a bounded burst of invalid `POST` bodies (`{}`),
-which cannot invoke TypeSafe, then confirm excess requests get 429 while the
-homepage and ordinary search remain reachable. Recheck after the window resets.
+Check the wiring under `npm run dev` with a bounded burst of invalid `POST`
+bodies (`{}`), which cannot invoke TypeSafe: requests after the 30th in a
+minute get 429 while the homepage and ordinary search remain reachable. The
+deployed limiter may engage late or not at all at this volume.
 
 Reference: [Workers Rate Limiting](https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/).
